@@ -1,0 +1,32 @@
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:55433:5432"
+    networks:
+      - pulse_db
+      - default
+
+  monitor_fixture:
+    image: postgres:18.2-alpine@sha256:035b9ab53cfa147d7202b61f5f7782b939ae815b7d6bc81c96b7b42ff1fca950
+    environment:
+      POSTGRES_DB: bip300_monitor
+      POSTGRES_USER: monitor_owner
+      POSTGRES_PASSWORD: monitor_owner_dev
+    ports:
+      - "127.0.0.1:55434:5432"
+    volumes:
+      - ../fixtures/0000_source_schema_version.sql:/docker-entrypoint-initdb.d/00-schema-version.sql:ro
+      - ../fixtures/upstream/bip300-monitor/shared/schema/0001_event.sql:/docker-entrypoint-initdb.d/01-event.sql:ro
+      - ../fixtures/upstream/bip300-monitor/shared/schema/0002_event_identity_nulls.sql:/docker-entrypoint-initdb.d/02-event-identity.sql:ro
+      - ../fixtures/upstream/bip300-monitor/shared/schema/0003_history_coverage.sql:/docker-entrypoint-initdb.d/03-coverage.sql:ro
+      - ../fixtures/upstream/bip300-monitor/shared/schema/0004_observation_provenance.sql:/docker-entrypoint-initdb.d/04-provenance.sql:ro
+      - ../fixtures/upstream/bip300-monitor/shared/schema/0005_event_fact_identity.sql:/docker-entrypoint-initdb.d/05-identity.sql:ro
+      - ../fixtures/upstream/bip300-monitor/shared/schema/0006_worker_health_and_observation_order.sql:/docker-entrypoint-initdb.d/06-workers.sql:ro
+      - ../fixtures/upstream/bip300-monitor/shared/schema/0007_single_active_run.sql:/docker-entrypoint-initdb.d/07-single-run.sql:ro
+      - ../fixtures/0009_v6_fixture.sql:/docker-entrypoint-initdb.d/08-fixture.sql:ro
+      - ../fixtures/0008_reader.sql:/docker-entrypoint-initdb.d/09-reader.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitor_owner -d bip300_monitor"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

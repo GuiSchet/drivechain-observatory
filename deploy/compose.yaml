@@ -1,0 +1,122 @@
+name: drivechain-observatory
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: drivechain_pulse
+      POSTGRES_USER: pulse_admin
+      POSTGRES_PASSWORD: ${PULSE_POSTGRES_ADMIN_PASSWORD}
+      PULSE_SYNC_DB_PASSWORD: ${PULSE_SYNC_DB_PASSWORD}
+      PULSE_API_DB_PASSWORD: ${PULSE_API_DB_PASSWORD}
+    volumes:
+      - pulse_postgres:/var/lib/postgresql/data
+      - ./postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-pulse-roles.sh:ro
+    networks:
+      - pulse_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse_admin -d drivechain_pulse"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+
+  migrate:
+    image: ${PULSE_IMAGE}
+    build:
+      context: ..
+    entrypoint: ["/usr/local/bin/pulse-api"]
+    command: ["migrate-only"]
+    environment:
+      PULSE_DATABASE_URL: postgres://pulse_admin:${PULSE_POSTGRES_ADMIN_PASSWORD}@postgres:5432/drivechain_pulse
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pulse_db
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  sync:
+    image: ${PULSE_IMAGE}
+    entrypoint: ["/usr/local/bin/pulse-sync"]
+    restart: unless-stopped
+    environment:
+      MONITOR_DATABASE_URL: ${MONITOR_DATABASE_URL}
+      PULSE_DATASET_ID: ${PULSE_DATASET_ID}
+      PULSE_NETWORK_ID: ${PULSE_NETWORK_ID:-betanet}
+      PULSE_ACTIVATION_HEIGHT: ${PULSE_ACTIVATION_HEIGHT:-967680}
+      PULSE_ACTIVATION_HASH: ${PULSE_ACTIVATION_HASH:-00000000000000030101ba5cfea54b22becc79f95dc6040beb76e01dd9d04042}
+      PULSE_DATABASE_URL: postgres://pulse_sync:${PULSE_SYNC_DB_PASSWORD}@postgres:5432/drivechain_pulse
+      PULSE_SYNC_BATCH_SIZE: "500"
+      PULSE_SYNC_MAX_PAGES_PER_CYCLE: "20"
+      PULSE_SYNC_INTERVAL_MS: "1000"
+      RUST_LOG: pulse_sync=info
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - pulse_db
+      - monitor_egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    image: ${PULSE_IMAGE}
+    restart: unless-stopped
+    environment:
+      PULSE_DATABASE_URL: postgres://pulse_api:${PULSE_API_DB_PASSWORD}@postgres:5432/drivechain_pulse
+      PULSE_API_BIND: 0.0.0.0:8080
+      PULSE_CORS_ORIGIN: ${PULSE_CORS_ORIGIN}
+      PULSE_NATIVE_SYMBOL: ${PULSE_NATIVE_SYMBOL}
+      PULSE_NATIVE_DECIMALS: ${PULSE_NATIVE_DECIMALS}
+      PULSE_STALE_AFTER_SECONDS: ${PULSE_STALE_AFTER_SECONDS:-30}
+      RUST_LOG: pulse_api=info,tower_http=info
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - pulse_db
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: ${CADDY_IMAGE}
+    restart: unless-stopped
+    environment:
+      PULSE_API_DOMAIN: ${PULSE_API_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    networks:
+      - edge
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  pulse_db:
+    internal: true
+  edge:
+  monitor_egress:
+
+volumes:
+  pulse_postgres:
+  caddy_data:
+  caddy_config:

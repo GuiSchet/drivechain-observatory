@@ -1,0 +1,56 @@
+services:
+  ssh-tunnel:
+    image: drivechain-observatory-ssh-tunnel:local
+    build:
+      context: ./tunnel
+    entrypoint: ["ssh"]
+    command:
+      - -NT
+      - -i
+      - /run/ssh/id
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - UserKnownHostsFile=/run/ssh/known_hosts
+      - -o
+      - ExitOnForwardFailure=yes
+      - -o
+      - ServerAliveInterval=30
+      - -o
+      - ServerAliveCountMax=3
+      - -L
+      - 0.0.0.0:5432:${PULSE_MONITOR_DB_IP}:5432
+      - ${PULSE_MONITOR_SSH_USER}@${PULSE_MONITOR_SSH_HOST}
+    volumes:
+      - ${PULSE_MONITOR_SSH_KEY}:/run/ssh/id:ro
+      - ${PULSE_MONITOR_KNOWN_HOSTS}:/run/ssh/known_hosts:ro
+    networks:
+      - monitor_egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "5432"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  sync:
+    environment:
+      MONITOR_DATABASE_URL: ${MONITOR_DATABASE_URL}
+    depends_on:
+      ssh-tunnel:
+        condition: service_healthy
+
+  api:
+    ports:
+      - "127.0.0.1:18080:8080"
