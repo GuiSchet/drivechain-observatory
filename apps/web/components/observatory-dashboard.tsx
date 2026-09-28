@@ -92,7 +92,7 @@ export function ObservatoryDashboard({ initialOverview }: Props) {
         </>
       )}
 
-      <footer>
+      <footer className="data-footer">
         <span>Dataset {overview.data?.meta.dataset_id ?? "not available"}</span>
         <span>Projection v{overview.data?.meta.projection_version ?? "—"}</span>
         <span>Evidence-backed observations, not a consensus oracle.</span>

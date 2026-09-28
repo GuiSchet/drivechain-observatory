@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 220" width="2720" height="880">
+  <rect x="0" y="0" width="680" height="220" fill="#FFFFFF"/>
+  <g transform="translate(265, 20)">
+    <path d="M64 6 C64 6, 34 2, 4 16 C2 17, 0 19, 0 22 L0 92 C0 95, 2 97, 4 96 C34 84, 64 86, 64 86Z" fill="#1C1917" opacity="0.85"/>
+    <path d="M72 6 C72 6, 102 2, 132 16 C134 17, 136 19, 136 22 L136 92 C136 95, 134 97, 132 96 C102 84, 72 86, 72 86Z" fill="#1C1917" opacity="0.85"/>
+    <line x1="68" y1="4" x2="68" y2="88" stroke="#F7931A" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+  <text x="340" y="145" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="500" font-size="26" letter-spacing="1" fill="#1C1917">Librería de Satoshi</text>
+  <text x="340" y="168" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="400" font-size="10" letter-spacing="4" fill="#F7931A">BITCOIN TECHNICAL EDUCATION</text>
+</svg>
