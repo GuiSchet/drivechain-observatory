@@ -1,0 +1,37 @@
+/target
+/apps/web/.next
+/apps/web/node_modules
+*.tsbuildinfo
+# Local configuration and credentials; examples are safe to publish.
+.env
+.env.*
+!.env.example
+.npmrc
+.netrc
+.ssh/
+secrets/
+credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+known_hosts*
+# Local data and operational artifacts.
+backups/
+.backups/
+hostkey-backups/
+*.dump
+*.backup
+*.sql.gz
+*.sqlite
+*.sqlite3
+*.db
+*.pid
+*.log
+.DS_Store
+/.sqlx
+
+__pycache__/
+*.pyc

@@ -1,0 +1,26 @@
+[package]
+name = "pulse-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+hex = { workspace = true }
+pulse-domain = { path = "../../crates/domain" }
+pulse-storage = { path = "../../crates/storage" }
+pulse-source = { path = "../../crates/source" }
+serde_json = { workspace = true }
+serde = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

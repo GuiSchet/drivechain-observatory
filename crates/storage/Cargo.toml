@@ -1,0 +1,22 @@
+[package]
+name = "pulse-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hex = { workspace = true }
+serde = { workspace = true }
+utoipa = { workspace = true }
+chrono = { workspace = true }
+pulse-domain = { path = "../domain" }
+pulse-source = { path = "../source" }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true
