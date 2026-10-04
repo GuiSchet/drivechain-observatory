@@ -23,6 +23,7 @@ struct Header {
     parent: String,
     height: i32,
     work: String,
+    block_work: String,
     time: DateTime<Utc>,
     event: i64,
     observed: DateTime<Utc>,
@@ -66,11 +67,12 @@ fn validate_slot(event: &SourceEvent, body: &Value) -> Result<()> {
 }
 fn header(event: &SourceEvent) -> Result<Header> {
     ensure!(
-        matches!(event.event_contract_version, 4..=6),
+        event.event_contract_version == 7,
         "unsupported header contract"
     );
     let name = match event.kind.as_str() {
         "chain_tip" => "ChainTip",
+        "mainchain_transition" => "MainchainTransition",
         "block_connected" => "BlockConnected",
         "bip300_block_delta" => "Bip300BlockDelta",
         _ => bail!("not a header fact"),
@@ -99,7 +101,8 @@ fn header(event: &SourceEvent) -> Result<Header> {
         hash,
         parent,
         height,
-        work: work(&h["chain_work"])?,
+        work: work(&h["cumulative_work"])?,
+        block_work: work(&h["block_work"])?,
         time: DateTime::from_timestamp(
             i64::try_from(h["timestamp"].as_u64().context("invalid block timestamp")?)?,
             0,
@@ -146,9 +149,16 @@ pub async fn normalize(
     for event in events {
         if !matches!(
             event.kind.as_str(),
-            "chain_tip" | "block_connected" | "bip300_block_delta" | "block_disconnected"
+            "chain_tip"
+                | "block_connected"
+                | "bip300_block_delta"
+                | "block_disconnected"
+                | "mainchain_transition"
         ) {
             continue;
+        }
+        if event.kind == "mainchain_transition" && event.block_hash.is_none() {
+            continue; // Unanchored subscription boundary, retained in protocol evidence.
         }
         let result = if event.kind == "block_disconnected" {
             let h = hash(
@@ -156,7 +166,7 @@ pub async fn normalize(
             );
             h.and_then(|h| {
                 ensure!(
-                    matches!(event.event_contract_version, 4..=6),
+                    event.event_contract_version == 7,
                     "unsupported disconnect contract"
                 );
                 validate_slot(
@@ -186,19 +196,27 @@ pub async fn normalize(
         facts.push(json!({"event":event.id,"hash":event.block_hash.as_ref().map(hex::encode).unwrap_or_default(),"kind":event.kind,"slot":event.sidechain,"instance":event.sidechain_instance_id,"contract":event.event_contract_version,"error":error}));
     }
     let mut tx = conn.begin().await?;
-    sqlx::query("WITH input AS (SELECT * FROM jsonb_to_recordset($3) AS x(hash text,parent text,height integer,work numeric,time timestamptz,event bigint,observed timestamptz)),
+    sqlx::query("WITH input AS (SELECT * FROM jsonb_to_recordset($3) AS x(hash text,parent text,height integer,work numeric,block_work numeric,time timestamptz,event bigint,observed timestamptz)),
         first AS (SELECT DISTINCT ON(hash) * FROM input ORDER BY hash,event),
-        conflicts AS (SELECT hash,count(DISTINCT (parent,height,work,time))>1 AS bad,max(observed) AS latest FROM input GROUP BY hash)
-        INSERT INTO projection.chain_headers AS h(dataset_id,generation,hash,parent,height,chain_work,block_time,first_event_id,first_observed_at,last_observed_at,conflicted)
-        SELECT $1,$2,f.hash,f.parent,f.height,f.work,f.time,f.event,f.observed,c.latest,c.bad FROM first f JOIN conflicts c USING(hash)
+        conflicts AS (SELECT hash,count(DISTINCT (parent,height,work,block_work,time))>1 AS bad,max(observed) AS latest FROM input GROUP BY hash)
+        INSERT INTO projection.chain_headers AS h(dataset_id,generation,hash,parent,height,chain_work,block_work,block_time,first_event_id,first_observed_at,last_observed_at,conflicted)
+        SELECT $1,$2,f.hash,f.parent,f.height,f.work,f.block_work,f.time,f.event,f.observed,c.latest,c.bad FROM first f JOIN conflicts c USING(hash)
         ON CONFLICT(dataset_id,generation,hash) DO UPDATE SET last_observed_at=greatest(h.last_observed_at,excluded.last_observed_at),
-        conflicted=h.conflicted OR excluded.conflicted OR (h.parent,h.height,h.chain_work,h.block_time) IS DISTINCT FROM (excluded.parent,excluded.height,excluded.chain_work,excluded.block_time)")
+        conflicted=h.conflicted OR excluded.conflicted OR (h.parent,h.height,h.chain_work,h.block_work,h.block_time) IS DISTINCT FROM (excluded.parent,excluded.height,excluded.chain_work,excluded.block_work,excluded.block_time)")
         .bind(dataset).bind(generation).bind(json!(headers)).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO projection.chain_facts(dataset_id,generation,event_id,hash,kind,slot,instance_id,contract,error)
         SELECT $1,$2,f.event,f.hash,f.kind,f.slot,f.instance,f.contract,coalesce(f.error,CASE WHEN h.conflicted THEN 'conflicting headers for this hash' END)
         FROM jsonb_to_recordset($3) AS f(event bigint,hash text,kind text,slot smallint,instance text,contract integer,error text)
         LEFT JOIN projection.chain_headers h ON h.dataset_id=$1 AND h.generation=$2 AND h.hash=f.hash ON CONFLICT DO NOTHING")
         .bind(dataset).bind(generation).bind(json!(facts)).execute(&mut *tx).await?;
+    // Equal headers do not excuse contradictory block contents. Preserve both
+    // facts and stop certifying any branch containing that identity.
+    sqlx::query("UPDATE projection.chain_headers h SET conflicted=true WHERE h.dataset_id=$1 AND h.generation=$2
+        AND h.hash IN (SELECT encode(block_hash,'hex') FROM ingest.source_events WHERE dataset_id=$1 AND source_event_id>$3 AND source_event_id<=$4)
+        AND EXISTS(SELECT 1 FROM ingest.source_events e WHERE e.dataset_id=$1 AND e.block_hash=decode(h.hash,'hex')
+            AND e.source_event_id<=$4 AND e.kind IN ('block_connected','bip300_block_delta')
+            GROUP BY e.event_contract_version,e.source,e.kind,e.sidechain,e.sidechain_instance_id,e.block_hash HAVING count(DISTINCT e.fact_sha256)>1)")
+        .bind(dataset).bind(generation).bind(after).bind(next).execute(&mut *tx).await?;
     sqlx::query("UPDATE ops.chain_jobs SET event_cursor=$3 WHERE dataset_id=$1 AND generation=$2")
         .bind(dataset)
         .bind(generation)
@@ -217,7 +235,7 @@ async fn select_path(conn: &mut PgConnection, d: Uuid, g: i64, tip: &str) -> Res
         FROM projection.chain_headers h WHERE h.dataset_id=$1 AND h.generation=$2 AND h.hash=$3
         UNION ALL SELECT p.*,EXISTS(SELECT 1 FROM projection.chain_members m WHERE m.dataset_id=$1 AND m.generation=$2 AND m.hash=p.hash)
         FROM walk c JOIN projection.chain_headers p ON p.dataset_id=$1 AND p.generation=$2 AND p.hash=c.parent
-        WHERE NOT c.shared AND NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND p.chain_work<c.chain_work)
+        WHERE NOT c.shared AND NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND c.block_work>0 AND p.chain_work+c.block_work=c.chain_work)
         SELECT * FROM walk")
         .bind(d).bind(g).bind(tip).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND height>coalesce((SELECT min(height) FROM pulse_path WHERE shared),-1)")
@@ -230,7 +248,7 @@ async fn select_path(conn: &mut PgConnection, d: Uuid, g: i64, tip: &str) -> Res
     sqlx::query("WITH RECURSIVE lower AS (
         SELECT h.* FROM projection.chain_headers h JOIN (SELECT hash FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 ORDER BY height LIMIT 1) m USING(hash) WHERE h.dataset_id=$1 AND h.generation=$2
         UNION ALL SELECT p.* FROM lower c JOIN projection.chain_headers p ON p.dataset_id=$1 AND p.generation=$2 AND p.hash=c.parent
-        WHERE NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND p.chain_work<c.chain_work)
+        WHERE NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND c.block_work>0 AND p.chain_work+c.block_work=c.chain_work)
         INSERT INTO projection.chain_members SELECT $1,$2,height,hash FROM lower ON CONFLICT DO NOTHING")
         .bind(d).bind(g).execute(&mut *conn).await?;
     Ok(())
@@ -778,8 +796,8 @@ mod scale_tests {
         let parent = format!("{:064x}", 10000);
         let mut work = [0u8; 32];
         work[..8].copy_from_slice(&10001u64.to_le_bytes());
-        let payload = json!({"monitor_event":{"Enforcer":{"event":{"Bip300BlockDelta":{"header":{"hash":hash,"previous_hash":parent,"height":10001,"chain_work":hex::encode(work),"timestamp":1790200000},"coinbase_txid":"aa".repeat(32),"coinbase_messages":[],"treasury_transitions":[],"confirmed_bmm_requests":[]}}}}});
-        sqlx::query("INSERT INTO ingest.source_events(dataset_id,source_event_id,event_contract_version,observed_at,source_ingested_at,source,kind,block_hash,height,envelope,payload) VALUES($1,1000001,6,now(),now(),'enforcer','bip300_block_delta',decode($2,'hex'),10001,decode('00','hex'),$3)").bind(d).bind(&hash).bind(payload).execute(&mut *conn).await?;
+        let payload = json!({"monitor_event":{"Enforcer":{"event":{"Bip300BlockDelta":{"header":{"hash":hash,"previous_hash":parent,"height":10001,"cumulative_work":hex::encode(work),"block_work":"01".to_owned()+&"00".repeat(31),"timestamp":1790200000},"coinbase_txid":"aa".repeat(32),"coinbase_messages":[],"treasury_transitions":[],"confirmed_bmm_requests":[]}}}}});
+        sqlx::query("INSERT INTO ingest.source_events(dataset_id,source_event_id,event_contract_version,observed_at,source_ingested_at,source,kind,block_hash,height,envelope,payload) VALUES($1,1000001,7,now(),now(),'enforcer','bip300_block_delta',decode($2,'hex'),10001,decode('00','hex'),$3)").bind(d).bind(&hash).bind(payload).execute(&mut *conn).await?;
         sqlx::query("INSERT INTO ingest.tip_observations(dataset_id,tip_observation_id,run_id,capture_seq,capture_method,tip_hash,tip_height,observed_at,source_ingested_at) VALUES($1,2,$2,10004,'poll',decode($3,'hex'),10001,now(),now())").bind(d).bind(before.run_id).bind(&hash).execute(&mut *conn).await?;
         sqlx::query("INSERT INTO ingest.event_observations(dataset_id,observation_id,run_id,capture_seq,capture_method,source_event_id,observed_at,source_ingested_at) VALUES($1,10002,$2,10003,'live',1000001,now(),now())").bind(d).bind(before.run_id).execute(&mut *conn).await?;
         let cut = Cut {

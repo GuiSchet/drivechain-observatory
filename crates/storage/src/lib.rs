@@ -463,12 +463,21 @@ pub async fn coverage(pool: &PgPool, stale: i64) -> Result<CoverageResponse, Sto
             "imported_branch_unverified"
         }
     };
+    let observation_quality: Value = sqlx::query_scalar("SELECT jsonb_build_object(
+        'window_hours',24,
+        'snapshot_groups',(SELECT count(*)::text FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours'),
+        'changed_groups',(SELECT count(*)::text FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours' AND consistency='changed'),
+        'failures',(SELECT count(*)::text FROM ingest.observation_failures WHERE dataset_id=$1 AND observed_at>now()-interval '24 hours'),
+        'failure_import_cursor',(SELECT cursor_value::text FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='observation_failures'),
+        'conflicted_blocks',(SELECT count(*)::text FROM projection.chain_headers WHERE dataset_id=$1 AND generation=$2 AND conflicted))")
+        .bind(status.meta.dataset_id).bind(status.meta.projection_generation).fetch_one(&mut *tx).await?;
     let response = CoverageResponse {
         branch: status.branch,
         meta: status.meta,
         streams,
         local_status: local.to_owned(),
         snapshot_history: "observations_only".to_owned(),
+        observation_quality,
     };
     tx.commit().await?;
     Ok(response)
@@ -486,11 +495,11 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
     });
     let row=sqlx::query("SELECT o.observation_id,o.observed_at,o.run_id,e.source_event_id,e.interpretation_error,
         b.parent_hash,b.requests,
-        (e.event_contract_version=$4 AND (e.event_contract_version=5 OR COALESCE(
-            g.run_id=o.run_id AND g.consistency='stable'
+        (e.event_contract_version=$4 AND COALESCE(
+            g.run_id=o.run_id AND g.consistency='stable' AND g.revision_before IS NOT NULL AND g.revision_before=g.revision_after
             AND g.tip_before_hash=e.block_hash AND g.tip_after_hash=e.block_hash
             AND g.tip_before_height=e.height AND g.tip_after_height=e.height,
-            false))) AS consistent
+            false)) AS consistent
         FROM ingest.event_observations o JOIN ingest.source_events e
         ON e.dataset_id=o.dataset_id AND e.source_event_id=o.source_event_id
         LEFT JOIN projection.bmm_snapshots b ON b.dataset_id=e.dataset_id AND b.source_event_id=e.source_event_id

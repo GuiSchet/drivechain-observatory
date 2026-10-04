@@ -8,6 +8,7 @@ export function DataProvenance({ meta, coverage, status }: { meta: Meta | null; 
   const metadata = useQuery({ queryKey: ["meta"], queryFn: getMeta, initialData: meta ?? undefined });
   const ranges = useQuery({ queryKey: ["coverage"], queryFn: getCoverage, initialData: coverage ?? undefined, refetchInterval: 5_000 });
   const health = useQuery({ queryKey: ["status"], queryFn: getStatus, initialData: status ?? undefined, refetchInterval: 5_000 });
+  const quality = ranges.data?.observation_quality as Record<string, unknown> | undefined;
   return <main className="detail-shell"><div className="eyebrow">ENFORCER-DERIVED OBSERVATIONS</div><h1>About the data</h1>
     <p className="lede">Observatory keeps a local copy of the monitor’s evidence. Public browsing reads this copy. Every view has a dataset, observation time and coverage limit.</p>
     {(metadata.isError || ranges.isError || health.isError) && <p className="inline-notice" role="status">Some data is unavailable. Retrying; previously loaded values may be stale.</p>}
@@ -37,6 +38,13 @@ export function DataProvenance({ meta, coverage, status }: { meta: Meta | null; 
       {health.data?.progress.map((progress) => <div className="fact-row" key={progress.name}><dt>{progress.name} projection</dt><dd>Through {progress.processed_event_id ?? "not yet available"}{progress.error_event_id && ` · blocked at event ${progress.error_event_id}`}</dd></div>)}
     </dl><p>IDs are checkpoints, not row counts. Gaps between IDs do not measure missing activity.</p></section>
     <section className="panel compact-panel"><h2>What this observatory can establish</h2><p>Data comes from the enforcer’s observations. The branch verdict is limited to the evidence and contiguous range shown above. A deposit observed on L1 does not demonstrate credit on L2, and a successful stream connection does not establish source freshness.</p></section>
+    <section className="panel compact-panel"><h2>Observation quality</h2><dl className="facts">
+      <dt>Snapshot groups in the last 24 hours</dt><dd>{String(quality?.snapshot_groups ?? "Unknown")}</dd>
+      <dt>Groups read while state changed</dt><dd>{String(quality?.changed_groups ?? "Unknown")}</dd>
+      <dt>Recorded failures in the last 24 hours</dt><dd>{String(quality?.failures ?? "Unknown")}</dd>
+      <dt>Blocks with conflicting evidence</dt><dd>{String(quality?.conflicted_blocks ?? "Unknown")}</dd>
+    </dl><p>Only stable capture groups can establish state at a block. Historical backfill repairs coverage; it cannot recreate live transitions missed during an interruption.</p></section>
+    <ProtocolList resource="observation-failures" heading="Recorded observation interruptions"/>
     <ProtocolList resource="chain-info" heading="Observed protocol parameters"/>
     <ProtocolList resource="runs" heading="Source runs"/>
     <ProtocolList resource="snapshot-groups" heading="Snapshot capture groups"/>

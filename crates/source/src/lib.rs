@@ -1,14 +1,16 @@
-//! Reviewed monitor-v6 JSON adapter. Unknown fields remain in the immutable
+//! Reviewed monitor-v7 JSON adapter. Unknown fields remain in the immutable
 //! source envelope; typed values are an interpretation, never its replacement.
 pub mod model;
 pub mod normalize;
 pub mod replay;
 pub use model::*;
 
-pub const MONITOR_COMMIT: &str = "88da099049bb469aeee3dec3cc5d86a056970382";
-pub const ENFORCER_COMMIT: &str = "0740a39380b39885fe8655f79f78150001d8a15b";
-pub const SEMANTICS_VERSION: &str = "enforcer-0740a393-v2";
+pub const MONITOR_COMMIT: &str = "ecf5b8290e6b5501508a4a3913bd93c83728cca1";
+pub const ENFORCER_COMMIT: &str = "9b2a15621469a88ea5d3b8f1dcd5ee1bb21e0ac4";
+pub const SEMANTICS_VERSION: &str = "observer-v7-work-readiness-revision";
 pub const KINDS: &[(&str, &str)] = &[
+    ("mainchain_transition", "MainchainTransition"),
+    ("confirmed_bmm_fees", "ConfirmedBmmFees"),
     ("chain_info", "ChainInfo"),
     ("chain_tip", "ChainTip"),
     ("sidechain_proposals", "SidechainProposals"),

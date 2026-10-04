@@ -513,7 +513,7 @@ async fn facts_page(
     let kinds: &[&str] = match resource {
         "protocol-messages" => &["m1", "m2", "m3", "m4", "m7", "interpretation_error"],
         "bmm/commitments" => &["slot_block", "m7"],
-        "bmm/confirmed" => &["confirmed_bmm"],
+        "bmm/confirmed" => &["confirmed_bmm", "confirmed_bmm_fee"],
         "chain-info" => &["parameters"],
         "observations" => &["active_set", "proposal_set", "ctip_snapshot", "bundle_set"],
         "search" => &[],
@@ -668,7 +668,7 @@ async fn auction_history(
     limit: u32,
 ) -> Result<Vec<ProtocolItem>, StorageError> {
     let mut qb = sqlx::QueryBuilder::new(
-        "SELECT o.observation_id::text AS id,NULL::text AS entity_id,'auction_sample' AS kind,NULL::smallint AS slot,f.hash,f.height,o.observed_at,h.block_time,CASE WHEN s.consistency='stable' AND s.run_id=o.run_id AND s.dataset_id=o.dataset_id AND encode(s.tip_before_hash,'hex')=f.hash AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=f.height AND s.tip_after_height=f.height THEN 'observed' ELSE 'unknown' END AS quality,jsonb_build_array(jsonb_build_object('event_id',f.event_id::text,'ordinal',f.ordinal,'observation_id',o.observation_id::text)) AS evidence,f.data || jsonb_build_object('snapshot_group_id',s.snapshot_group_id,'run_id',o.run_id,'consistency',s.consistency) AS data,f.error AS issue FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id LEFT JOIN ingest.snapshot_groups s USING(snapshot_group_id) LEFT JOIN projection.chain_headers h ON h.dataset_id=f.dataset_id AND h.generation=f.generation AND h.hash=f.hash WHERE f.dataset_id=",
+        "SELECT o.observation_id::text AS id,NULL::text AS entity_id,'auction_sample' AS kind,NULL::smallint AS slot,f.hash,f.height,o.observed_at,h.block_time,CASE WHEN s.consistency='stable' AND s.revision_before IS NOT NULL AND s.revision_before=s.revision_after AND s.run_id=o.run_id AND s.dataset_id=o.dataset_id AND encode(s.tip_before_hash,'hex')=f.hash AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=f.height AND s.tip_after_height=f.height THEN 'observed' ELSE 'unknown' END AS quality,jsonb_build_array(jsonb_build_object('event_id',f.event_id::text,'ordinal',f.ordinal,'observation_id',o.observation_id::text)) AS evidence,f.data || jsonb_build_object('snapshot_group_id',s.snapshot_group_id,'run_id',o.run_id,'consistency',s.consistency) AS data,f.error AS issue FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id LEFT JOIN ingest.snapshot_groups s USING(snapshot_group_id) LEFT JOIN projection.chain_headers h ON h.dataset_id=f.dataset_id AND h.generation=f.generation AND h.hash=f.hash WHERE f.dataset_id=",
     );
     qb.push_bind(c.meta.dataset_id).push(" AND f.generation=").push_bind(c.meta.projection_generation).push(" AND f.kind='auction' AND f.event_id<=").push_bind(c.source_event_cut.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).push(" AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok())).push("),0)");
     let mut no_slot = q.clone();

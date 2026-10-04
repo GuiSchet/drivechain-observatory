@@ -16,7 +16,7 @@ export function BlockDetail({dataset,hash,initial}:{dataset:string;hash:string;i
     {data&&<><section className="panel compact-panel"><h2>Header and membership</h2><dl className="facts">
       <dt>Membership</dt><dd>{data.block.membership}{data.block.conflicted&&" · conflicting evidence"}</dd>
       <dt>Parent</dt><dd className="hash"><Link className="text-link" href={`/datasets/${dataset}/blocks/${data.block.parent_hash}`}>{data.block.parent_hash}</Link></dd>
-      <dt>Accumulated work</dt><dd className="hash">{data.block.chain_work}</dd><dt>Block time</dt><dd>{data.block.block_time}</dd>
+      <dt>Block work</dt><dd className="hash">{data.block.block_work ?? "unknown"}</dd><dt>Accumulated work</dt><dd className="hash">{data.block.chain_work}</dd><dt>Block time</dt><dd>{data.block.block_time}</dd>
       <dt>First fact observed</dt><dd>{data.block.first_observed_at}</dd><dt>Last fact observed</dt><dd>{data.block.last_observed_at}</dd>
     </dl></section><BranchSummary branch={data.branch} dataset={dataset}/>
     {[...groups].map(([name,facts])=><section className="panel compact-panel" key={name}><h2>{name}</h2><ul className="evidence-list">{facts.map(f=><li key={f.event_id}><Link className="text-link" href={`/datasets/${dataset}/events/${f.event_id}`}>{f.kind.replaceAll("_"," ")} · event {f.event_id}</Link><span>Contract v{f.contract} · observed {f.observed_at} · ingested {f.ingested_at}</span>{f.interpretation_error&&<span className="error-text">{f.interpretation_error}</span>}</li>)}</ul></section>)}

@@ -45,6 +45,7 @@ pub fn extend_openapi(mut doc: Value) -> Value {
         "runs",
         "runs/{id}",
         "snapshot-groups",
+        "observation-failures",
         "snapshot-groups/{id}",
         "datasets/{dataset}/events/{id}/occurrences",
         "sidechains/{slot}",
@@ -106,6 +107,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/search", get(list))
         .route("/api/v1/export", get(export))
         .route("/api/v1/runs", get(provenance))
+        .route("/api/v1/observation-failures", get(provenance))
         .route("/api/v1/runs/{id}", get(provenance_detail))
         .route("/api/v1/snapshot-groups", get(provenance))
         .route("/api/v1/snapshot-groups/{id}", get(provenance_detail))

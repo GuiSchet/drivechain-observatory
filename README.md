@@ -6,10 +6,10 @@ database/role names and API fields such as `pulse_revision` remain compatible.
 The rename requires no database migration or evidence rewrite. Historical
 fixture labels are retained with their original hashes and protobuf envelopes.
 
-Public Betanet BIP300/301 observatory consuming a **fresh monitor contract v6 /
-SQL schema 7 dataset**. It follows published `bip300-monitor-review` main
-`f8badd49` and the pinned observer enforcer; see [SOURCE_CONTRACT.md](SOURCE_CONTRACT.md).
-The monitor deployment is operated separately. Projection version 5 includes the
+Public Betanet BIP300/301 observatory consuming a **fresh monitor contract v7 /
+SQL schema8 dataset**. This release candidate uses the reviewed monitor and
+observer sources in [SOURCE_CONTRACT.md](SOURCE_CONTRACT.md); deployment is
+operated separately. Projection version 6 includes the
 complete protocol read model and visual explorer.
 
 ## Architecture
@@ -55,7 +55,7 @@ Run the isolated fixture, migration and behavioral integration suite:
 
 Requires Docker Compose, Rust, Python 3 and curl; uses loopback ports
 55433/55434/18080/18081. It creates and removes only its own temporary Compose
-project. The default v6 fixture uses all seven actual monitor migrations and
+project. The default v7 fixture uses all eight actual monitor migrations and
 a separate Observatory database. The exact upstream files are included under
 `fixtures/upstream/bip300-monitor`, with their commit, license and checksums;
 no sibling monitor checkout is needed. Older v5 suites remain historical references.
@@ -75,7 +75,7 @@ loopback port 13000. One option is a separate temporary npm project:
 For an existing installation outside the project, set
 `PULSE_PLAYWRIGHT_MODULE` to its absolute module entrypoint and
 `PULSE_BROWSER_EXECUTABLE` to the Chromium executable. Screenshots are written to
-`/tmp/drivechain-observatory-browser-v6` (override with `PULSE_BROWSER_ARTIFACTS`).
+`/tmp/drivechain-observatory-browser-v7` (override with `PULSE_BROWSER_ARTIFACTS`).
 
 For interactive development, start the two databases using `compose.dev.yaml`,
 run migrations with the admin role, run `pulse-sync` with the reader/sync roles,
@@ -122,13 +122,13 @@ also bind the branch revision. HTTP 409 `cursor_reset_required` means restart
 pagination. Block details retain alternatives and expose up to 200 facts and
 occurrences with explicit truncation. Evidence links keep the dataset identity.
 
-Start a new Observatory destination for the fresh v6 dataset. Old datasets are retained
-separately, not migrated. For later projection changes **within that v6 dataset**,
+Start a new Observatory destination for the fresh v7 dataset. Old datasets are retained
+separately, not migrated. For later projection changes **within that v7 dataset**,
 `pulse-sync rebuild --dataset-id <uuid>` uses only local evidence and destination
 credentials, resumes checkpoints, and publishes a new generation atomically.
-Version 5 uses `enforcer-0740a393-v2`. Apply the additive SQL migration, then
-rebuild the existing v6 dataset before restarting sync. An older active generation
-remains readable until atomic promotion; checkpoints from version 4 cannot resume
+Version 6 uses `observer-v7-work-readiness-revision`. Apply the additive SQL migration, then
+rebuild the existing v7 dataset before restarting sync. An older active generation
+remains readable until atomic promotion; checkpoints from older implementations cannot resume
 under the new semantics. Source IDs, envelopes and dataset identity are retained.
 See [deploy/README.md](deploy/README.md) for the maintenance window.
 
@@ -152,4 +152,4 @@ conservative REST/SSE watermark.
 Add `PULSE_SCALE_TESTS=1` to `scripts/verify-local.sh` to generate a disposable
 million-event fixture, interrupt/resume rebuilding, inspect an indexed query
 plan and measure one incremental extension. The report is written to
-`/tmp/drivechain-observatory-scale-v6.json`. It can be combined with browser checks.
+`/tmp/drivechain-observatory-scale-v7.json`. It can be combined with browser checks.

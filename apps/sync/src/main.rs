@@ -150,6 +150,8 @@ struct SourceSnapshotGroup {
     tip_after_height: i32,
     consistency: String,
     attempts: i32,
+    revision_before: Option<String>,
+    revision_after: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -313,7 +315,7 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
             .context("reading monitor schema version")?;
     if schema_version != REQUIRED_MONITOR_SCHEMA_VERSION {
         return Err(incompatible(format!(
-            "monitor SQL schema {schema_version}; reviewed schema 7 is required"
+            "monitor SQL schema {schema_version}; reviewed schema 8 is required"
         )));
     }
     // Probe the actual required columns, including additive v5/v6 migrations.
@@ -352,22 +354,22 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         })
     {
         return Err(incompatible(
-            "current run must provide contract v6 and all required capabilities",
+            "current run must provide contract v7 and all required capabilities",
         ));
     }
-    if run.event_contract_version == 6 {
-        if schema_version < 7 {
-            return Err(incompatible("monitor contract v6 requires SQL schema 7"));
+    if run.event_contract_version == 7 {
+        if schema_version < 8 {
+            return Err(incompatible("monitor contract v7 requires SQL schema 8"));
         }
         let old_identity: bool = sqlx::query_scalar(
-            "SELECT d.initial_event_contract_version <> 6 FROM dataset_manifest d WHERE d.dataset_id=$1",
+            "SELECT d.initial_event_contract_version <> 7 FROM dataset_manifest d WHERE d.dataset_id=$1",
         )
         .bind(run.dataset_id)
         .fetch_one(source)
         .await?;
         if old_identity {
             return Err(incompatible(
-                "a fresh v6 dataset is required; pre-v6 datasets cannot be reused",
+                "a fresh v7 dataset is required; pre-v7 datasets cannot be reused",
             ));
         }
     }
@@ -377,6 +379,14 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         destination,
         args.dataset_id
             .context("PULSE_DATASET_ID or --dataset-id is required")?,
+    )
+    .await?;
+    sync_failures(
+        source,
+        destination,
+        run.dataset_id,
+        args.batch_size,
+        args.max_pages_per_cycle,
     )
     .await?;
     sync_dataset(
@@ -389,6 +399,41 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         args.max_pages_per_cycle,
     )
     .await
+}
+
+async fn sync_failures(
+    source: &PgPool,
+    destination: &PgPool,
+    dataset: Uuid,
+    limit: i64,
+    pages: u32,
+) -> Result<()> {
+    #[derive(sqlx::FromRow)]
+    struct Failure {
+        failure_id: i64,
+        run_id: Uuid,
+        worker: String,
+        observed_at: DateTime<Utc>,
+        error: String,
+    }
+    for _ in 0..pages {
+        let mut tx = destination.begin().await?;
+        let after = cursor(&mut tx, dataset, "observation_failures").await?;
+        let rows = sqlx::query_as::<_, Failure>("SELECT failure_id,run_id,worker,observed_at,error FROM observation_failure WHERE dataset_id=$1 AND failure_id>$2 ORDER BY failure_id LIMIT $3")
+            .bind(dataset).bind(after).bind(limit).fetch_all(source).await?;
+        for row in &rows {
+            sqlx::query("INSERT INTO ingest.observation_failures VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING")
+                .bind(dataset).bind(row.failure_id).bind(row.run_id).bind(&row.worker).bind(row.observed_at).bind(&row.error).execute(&mut *tx).await?;
+        }
+        if let Some(last) = rows.last() {
+            advance_cursor(&mut tx, dataset, "observation_failures", last.failure_id).await?;
+        }
+        tx.commit().await?;
+        if rows.len() < usize::try_from(limit)? {
+            break;
+        }
+    }
+    Ok(())
 }
 
 async fn sync_datasets(source: &PgPool, destination: &PgPool, args: &Args) -> Result<()> {
@@ -417,7 +462,7 @@ async fn sync_datasets(source: &PgPool, destination: &PgPool, args: &Args) -> Re
                 .is_some_and(|caps| caps.iter().any(|v| v.as_str() == Some(cap)))
         }) {
             return Err(incompatible(
-                "fresh dataset manifest lacks required v6 capabilities",
+                "fresh dataset manifest lacks required v7 capabilities",
             ));
         }
         if dataset.network_id != args.network_id
@@ -817,7 +862,7 @@ async fn load_snapshot_groups(
     sqlx::query_as::<_, SourceSnapshotGroup>(
         "SELECT snapshot_group_id, dataset_id, run_id, capture_method, started_at, \
                 finished_at, tip_before_hash, tip_before_height, tip_after_hash, \
-                tip_after_height, consistency, attempts \
+                tip_after_height, consistency, attempts, revision_before, revision_after \
            FROM snapshot_group \
           WHERE snapshot_group_id = ANY($1)",
     )
@@ -871,8 +916,8 @@ async fn sync_event_observation_page(
             "INSERT INTO ingest.snapshot_groups \
                 (snapshot_group_id, dataset_id, run_id, capture_method, started_at, \
                  finished_at, tip_before_hash, tip_before_height, tip_after_hash, \
-                 tip_after_height, consistency, attempts) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) \
+                 tip_after_height, consistency, attempts, revision_before, revision_after) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) \
              ON CONFLICT (snapshot_group_id) DO NOTHING",
         )
         .bind(group.snapshot_group_id)
@@ -887,6 +932,8 @@ async fn sync_event_observation_page(
         .bind(group.tip_after_height)
         .bind(&group.consistency)
         .bind(group.attempts)
+        .bind(group.revision_before)
+        .bind(group.revision_after)
         .execute(&mut *transaction)
         .await?;
     }

@@ -29,7 +29,7 @@ async fn observation_errors(
             SELECT 1 FROM ingest.event_observations o JOIN ingest.extractor_runs r ON r.run_id=o.run_id
             JOIN ingest.snapshot_groups g ON g.dataset_id=o.dataset_id AND g.run_id=o.run_id AND g.snapshot_group_id=o.snapshot_group_id
             WHERE o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id AND o.observation_id<=$4
-            AND r.enforcer_commit=$5 AND g.consistency='stable' AND g.tip_before_hash=g.tip_after_hash
+            AND r.enforcer_commit=$5 AND g.consistency='stable' AND g.revision_before IS NOT NULL AND g.revision_before=g.revision_after AND g.tip_before_hash=g.tip_after_hash
             AND g.tip_before_height=g.tip_after_height AND encode(g.tip_before_hash,'hex')=f.hash AND g.tip_before_height=f.height
         ) GROUP BY f.family")
         .bind(d).bind(generation).bind(cut.events).bind(cut.observations).bind(pulse_source::ENFORCER_COMMIT).fetch_all(conn).await?;
@@ -66,7 +66,7 @@ async fn normalize_page(
     let mut dirty: Option<i32> = None;
     let mut rows = vec![];
     for e in &events {
-        if e.event_contract_version != 6 {
+        if e.event_contract_version != 7 {
             continue;
         }
         let hash = e.block_hash.as_ref().map(hex::encode);
@@ -82,7 +82,12 @@ async fn normalize_page(
         // Parameter changes are assessed from reviewed occurrences below.
         if !matches!(
             e.kind.as_str(),
-            "chain_info" | "bmm_requests" | "chain_tip" | "block_disconnected"
+            "chain_info"
+                | "bmm_requests"
+                | "chain_tip"
+                | "block_disconnected"
+                | "mainchain_transition"
+                | "confirmed_bmm_fees"
         ) {
             dirty = match (dirty, e.height) {
                 (Some(a), Some(b)) => Some(a.min(b)),
@@ -316,7 +321,7 @@ pub async fn advance(
                     }
                 }
             }
-            let snapshots=sqlx::query("SELECT DISTINCT ON(f.kind,f.slot) f.*,o.observation_id FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id JOIN ingest.snapshot_groups s ON s.snapshot_group_id=o.snapshot_group_id AND s.dataset_id=o.dataset_id AND s.run_id=o.run_id JOIN ingest.extractor_runs r ON r.run_id=o.run_id WHERE f.dataset_id=$1 AND f.generation=$2 AND f.hash=$3 AND f.event_id<=$4 AND o.observation_id<=$5 AND f.kind IN ('active_set','proposal_set','ctip_snapshot','bundle_set') AND f.error IS NULL AND s.consistency='stable' AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=s.tip_after_height AND encode(s.tip_before_hash,'hex')=f.hash AND s.tip_before_height=f.height AND r.enforcer_commit=$6 ORDER BY f.kind,f.slot,r.started_at DESC,o.capture_seq DESC")
+            let snapshots=sqlx::query("SELECT DISTINCT ON(f.kind,f.slot) f.*,o.observation_id FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id JOIN ingest.snapshot_groups s ON s.snapshot_group_id=o.snapshot_group_id AND s.dataset_id=o.dataset_id AND s.run_id=o.run_id JOIN ingest.extractor_runs r ON r.run_id=o.run_id WHERE f.dataset_id=$1 AND f.generation=$2 AND f.hash=$3 AND f.event_id<=$4 AND o.observation_id<=$5 AND f.kind IN ('active_set','proposal_set','ctip_snapshot','bundle_set') AND f.error IS NULL AND s.consistency='stable' AND s.revision_before IS NOT NULL AND s.revision_before=s.revision_after AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=s.tip_after_height AND encode(s.tip_before_hash,'hex')=f.hash AND s.tip_before_height=f.height AND r.enforcer_commit=$6 ORDER BY f.kind,f.slot,r.started_at DESC,o.capture_seq DESC")
                 .bind(d).bind(g).bind(&hash).bind(cut.events).bind(cut.observations).bind(pulse_source::ENFORCER_COMMIT).fetch_all(&mut *tx).await?;
             let mut snapshots: Vec<Record> = snapshots.iter().map(record).collect::<Result<_>>()?;
             snapshots.sort_by_key(|r| match r.entry.kind.as_str() {

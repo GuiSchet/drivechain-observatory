@@ -6,4 +6,4 @@ GRANT CONNECT ON DATABASE bip300_monitor TO monitor_reader;
 GRANT USAGE ON SCHEMA public TO monitor_reader;
 GRANT SELECT ON schema_version,dataset_manifest,extractor_run,event,event_observation,
     tip_observation,snapshot_group,sidechain_instance,current_sidechain_instance,
-    history_coverage,history_coverage_revision,extractor_status,extractor_worker_status TO monitor_reader;
+    history_coverage,history_coverage_revision,extractor_status,extractor_worker_status,observation_failure TO monitor_reader;

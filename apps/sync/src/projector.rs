@@ -11,6 +11,16 @@ pub fn auction(payload: &Value, anchor: Option<&[u8]>) -> Result<(String, Vec<Bm
     let snapshot = payload
         .pointer("/monitor_event/Enforcer/event/BmmRequests")
         .context("missing BmmRequests payload")?;
+    if snapshot["observer_session"]
+        .as_str()
+        .is_none_or(str::is_empty)
+        || snapshot["mempool_generation"]
+            .as_u64()
+            .is_none_or(|g| g == 0)
+    {
+        bail!("BMM sample has no ready mempool generation");
+    }
+    let mut identities = std::collections::BTreeSet::new();
     let parent = hash(&snapshot["previous_mainchain_block_hash"])?;
     if anchor.is_none_or(|bytes| hex::encode(bytes) != parent) {
         bail!("BMM parent differs from event anchor");
@@ -20,7 +30,7 @@ pub fn auction(payload: &Value, anchor: Option<&[u8]>) -> Result<(String, Vec<Bm
         .context("missing BMM request array")?;
     let mut bids = Vec::with_capacity(requests.len());
     for request in requests {
-        bids.push(BmmBid {
+        let bid = BmmBid {
             slot: u8::try_from(
                 request["sidechain_number"]
                     .as_u64()
@@ -32,7 +42,11 @@ pub fn auction(payload: &Value, anchor: Option<&[u8]>) -> Result<(String, Vec<Bm
                 .as_u64()
                 .context("invalid BMM bid_sats")?
                 .to_string(),
-        });
+        };
+        if !identities.insert((bid.slot, bid.txid.clone())) {
+            bail!("duplicate BMM request");
+        }
+        bids.push(bid);
     }
     Ok((parent, bids))
 }
@@ -128,7 +142,7 @@ mod tests {
     use super::*;
     fn payload(requests: Value) -> Value {
         json!({"monitor_event":{"Enforcer":{"event":{"BmmRequests":{
-            "previous_mainchain_block_hash":"ab".repeat(32), "requests":requests
+            "observer_session":"test", "mempool_generation":1, "previous_mainchain_block_hash":"ab".repeat(32), "requests":requests
         }}}}})
     }
     #[test]

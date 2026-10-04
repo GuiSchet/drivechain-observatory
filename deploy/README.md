@@ -88,7 +88,7 @@ Monetary defaults are `PULSE_NATIVE_SYMBOL=sats`, `PULSE_NATIVE_DECIMALS=0`.
 The operator must additionally grant `SELECT` on `extractor_worker_status` to
 the existing monitor reader. For an already provisioned `pulse_sync_reader`:
 
-    GRANT SELECT ON public.extractor_worker_status TO pulse_sync_reader;
+    GRANT SELECT ON public.extractor_worker_status, public.observation_failure TO pulse_sync_reader;
 
 This document is a manual provisioning requirement. Observatory does not apply grants
 or migrations to the monitor. `start-monitor-tunnel.sh` now requires the existing

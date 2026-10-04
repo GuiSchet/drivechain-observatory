@@ -313,6 +313,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/observation-failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read observation-failures from the local Observatory dataset */
+        get: operations["observationfailures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/observations": {
         parameters: {
             query?: never;
@@ -746,6 +763,7 @@ export interface components {
         BlockSummary: {
             /** Format: date-time */
             block_time: string;
+            block_work?: string | null;
             chain_work: string;
             conflicted: boolean;
             /** Format: date-time */
@@ -862,6 +880,7 @@ export interface components {
             branch: components["schemas"]["BranchState"];
             local_status: string;
             meta: components["schemas"]["ResponseMeta"];
+            observation_quality: unknown;
             snapshot_history: string;
             streams: components["schemas"]["CoverageScope"][];
         };
@@ -1948,6 +1967,57 @@ export interface operations {
                 };
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    observationfailures: {
+        parameters: {
+            query?: {
+                dataset?: string;
+                scope?: string;
+                slot?: number;
+                kind?: string;
+                hash?: string;
+                key?: string;
+                from_height?: number;
+                to_height?: number;
+                from_time?: string;
+                to_time?: string;
+                /** @description block (default), observation, or ingestion. */
+                time_basis?: string;
+                q?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtocolPage"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

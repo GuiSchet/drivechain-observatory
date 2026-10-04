@@ -6,11 +6,17 @@ use uuid::Uuid;
 pub mod protocol;
 pub use protocol::*;
 
-pub const PROJECTION_VERSION: i32 = 5;
-pub const PROJECTION_GENERATION: i64 = 5;
-pub const REQUIRED_MONITOR_SCHEMA_VERSION: i32 = 7;
-pub const MONITOR_EVENT_CONTRACT_VERSIONS: &[i32] = &[6];
+pub const PROJECTION_VERSION: i32 = 6;
+pub const PROJECTION_GENERATION: i64 = 6;
+pub const REQUIRED_MONITOR_SCHEMA_VERSION: i32 = 8;
+pub const MONITOR_EVENT_CONTRACT_VERSIONS: &[i32] = &[7];
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
+    "absolute_chain_work",
+    "mempool_readiness_generation",
+    "global_mainchain_transitions",
+    "certified_hash_history",
+    "immutable_fact_conflicts",
+    "snapshot_state_revision",
     "event_facts",
     "event_observations",
     "tip_observations",
@@ -152,6 +158,7 @@ pub struct CoverageResponse {
     pub streams: Vec<CoverageScope>,
     pub local_status: String,
     pub snapshot_history: String,
+    pub observation_quality: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -416,6 +423,7 @@ pub struct BlockSummary {
     pub parent_hash: String,
     pub height: i32,
     pub chain_work: String,
+    pub block_work: Option<String>,
     pub block_time: DateTime<Utc>,
     pub first_observed_at: DateTime<Utc>,
     pub last_observed_at: DateTime<Utc>,

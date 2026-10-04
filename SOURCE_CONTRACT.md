@@ -1,27 +1,28 @@
 # Reviewed source contract
 
-Review: 2026-09-25. Published monitor main:
-`f8badd49b81cb00ff1c711885afd744bbde43e7e`.
-Monitor image build: `88da099049bb469aeee3dec3cc5d86a056970382`.
-Reviewed enforcer runtime: `0740a39380b39885fe8655f79f78150001d8a15b`.
-These identify the reviewed source; they do not attest a live deployment.
-The operator promotes the monitor manually.
+Review candidate: 2026-10-04. Enforcer source:
+`9b2a15621469a88ea5d3b8f1dcd5ee1bb21e0ac4`.
+Monitor source: `ecf5b8290e6b5501508a4a3913bd93c83728cca1`. Image pins are recorded in the paired release manifest. These
+identify reviewed source; they do not attest a live deployment.
 
-Observatory requires **a fresh contract-6 dataset, SQL schema 7**, and all 17 published
-capabilities in both the dataset manifest and current running extractor. Earlier
-datasets are rejected even when they contain no sidechain rows. Observatory does not
-migrate old dataset identities. Use a new Observatory database with the explicitly
-configured v6 dataset UUID. Old databases remain separate archives.
+Observatory requires **a fresh contract-7 dataset, SQL schema8** and all required
+capabilities listed in `crates/domain/src/lib.rs`, in both the dataset manifest
+and current extractor run. It rejects older identities before importing them.
+Use a new Observatory database and the explicitly configured v7 dataset UUID.
+Old databases remain separate archives; v6 work must never be relabeled as
+cumulative work.
 
 Reviewed protobuf SHA-256:
 
 - `event.proto`: `02f7fa9e75ecc965fe46a0fdb4a9757274f6e29e33b741d5108f954f15574b3e`
-- `enforcer_extractor.proto`: `65f42692a82d962e22e81ac6c3afbd8be2ba79b58f5729174287586e35ef65ad`
+- `enforcer_extractor.proto`: `37651d1935a895cceb8bbd23d3be7373fa41e23d72fd30ebab1e5af810ea9fd4`
 
 | Source kind | Observatory interpretation |
 |---|---|
 | `chain_info` | Raw network enums, activation and voting constants |
-| `chain_tip` | Header, parent, height, exact accumulated work |
+| `chain_tip` | Header, parent, height, per-block and absolute cumulative work |
+| `mainchain_transition` | Global committed connect/disconnect and subscription boundary evidence |
+| `confirmed_bmm_fees` | Separate exact fee enrichment, with explicit unavailable reason |
 | `active_sidechains` | Stable observations of instances and declarations |
 | `sidechain_proposals` | Proposal observations and reconstruction reconciliation |
 | `ctip` | Treasury output, explicit absence, provenance and discrepancies |
@@ -58,13 +59,27 @@ ratios for unknown/zero denominators and explicit missing heights.
 Semantic reconstruction uses only occurrences from the reviewed enforcer.
 Unreviewed current builds, missing parameters or conflicting constants disable
 verified rule calculations. Snapshot validation binds dataset, run, capture,
-both tip hashes/heights and selected branch. Latest current-run observations
+both tip hashes/heights, non-null equal chain revisions and selected branch. Latest current-run observations
 remain visible even if inconsistent; they cannot borrow an older occurrence's
 validity. Historical reconstruction can use compatible prior runs in the same
 fresh dataset, with their original evidence retained.
 
 The SQL writer is serialized and migration 7 fences running extractors per
 source/dataset. Observatory reads PostgreSQL only; it neither depends on NATS delivery
-nor writes to the monitor. Integration fixtures use the seven actual source SQL
+nor writes to the monitor. Integration fixtures use the eight actual source SQL
 migrations and generated protobuf envelopes. The scale fixture is explicitly
 synthetic and is not evidence of wire-level conformance.
+
+The chain projection requires `parent.cumulative_work + child.block_work =
+child.cumulative_work` and positive block work. It retains alternatives and
+rejects contradictions in header or immutable block contents, scoped by dataset,
+contract, source and sidechain instance. Gaps recorded by the global-stream worker
+are imported separately through `/api/v1/observation-failures`; backfill cannot
+reconstruct missed live transitions. Coverage exposes 24-hour snapshot/failure
+counts, conflict counts and the independent failure import cursor.
+
+`/api/v1/bmm/confirmed` retains original confirmations and separate
+`confirmed_bmm_fee` observations. Their exact decimal-string fee may be unknown
+then become known; the original block delta never changes. BMM bids are never
+substituted for confirmed fees. Each record carries source evidence and branch
+membership.

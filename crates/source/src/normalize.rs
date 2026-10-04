@@ -47,7 +47,12 @@ fn description(raw: &str, expected: &str) -> Result<()> {
 fn check_header(h: &Header, a: &Anchor<'_>) -> Result<()> {
     hash(&h.hash)?;
     hash(&h.previous_hash)?;
-    hash(&h.chain_work)?;
+    hash(&h.block_work)?;
+    hash(&h.cumulative_work)?;
+    ensure!(
+        hex::decode(&h.block_work)?.iter().any(|b| *b != 0),
+        "zero block work"
+    );
     ensure!(
         a.hash == Some(h.hash.as_str()) && a.height == Some(h.height),
         "header differs from envelope anchor"
@@ -152,6 +157,67 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                     "blocks",
                     entry("tip", "blocks", h.hash.clone(), None, h, vec![]),
                 );
+            }
+            "mainchain_transition" => {
+                let x: MainchainTransition = decode(v)?;
+                ensure!(
+                    !x.observer_session.is_empty() && (1..=3).contains(&x.action),
+                    "invalid chain transition"
+                );
+                if x.action == 3 {
+                    ensure!(
+                        x.header.is_none() && anchor.hash.is_none(),
+                        "subscription boundary must be unanchored"
+                    );
+                } else {
+                    check_header(
+                        x.header.as_ref().context("missing transition header")?,
+                        &anchor,
+                    )?;
+                }
+                push(
+                    &mut out,
+                    "blocks",
+                    entry(
+                        "mainchain_transition",
+                        "blocks",
+                        format!("{}:{}", x.observer_session, x.sequence),
+                        None,
+                        x,
+                        vec![],
+                    ),
+                );
+            }
+            "confirmed_bmm_fees" => {
+                let x: ConfirmedFees = decode(v)?;
+                check_header(&x.header, &anchor)?;
+                ensure!(x.source == "ecash-node:getblock:3", "unknown fee source");
+                let mut keys = std::collections::BTreeSet::new();
+                for fee in &x.fees {
+                    hash(&fee.txid)?;
+                    ensure!(
+                        keys.insert((fee.sidechain_number, &fee.txid)),
+                        "duplicate confirmed fee"
+                    );
+                    ensure!(
+                        fee.fee_sats.is_some() == fee.unavailable_reason.is_empty(),
+                        "fee availability is inconsistent"
+                    );
+                }
+                for fee in x.fees {
+                    push(
+                        &mut out,
+                        "bmm",
+                        entry(
+                            "confirmed_bmm_fee",
+                            "bmm",
+                            format!("{}:{}", fee.sidechain_number, fee.txid),
+                            Some(fee.sidechain_number),
+                            &fee,
+                            vec![fee.txid.clone()],
+                        ),
+                    );
+                }
             }
             "active_sidechains" => {
                 let xs: Vec<Active> = decode(&v["sidechains"])?;
@@ -283,6 +349,10 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
             }
             "bmm_requests" => {
                 let x: Auction = decode(v)?;
+                ensure!(
+                    !x.observer_session.is_empty() && x.mempool_generation > 0,
+                    "BMM sample has no ready generation"
+                );
                 hash(&x.previous_mainchain_block_hash)?;
                 ensure!(
                     anchor.hash == Some(x.previous_mainchain_block_hash.as_str()),

@@ -349,7 +349,7 @@ fn replacement_preserves_bundle_completeness_instead_of_inventing_it() {
 #[test]
 fn malformed_m4_effect_preserves_other_slots_in_the_same_message() {
     let hash = "ab".repeat(32);
-    let header = json!({"hash":hash,"previous_hash":"cd".repeat(32),"height":101,"chain_work":"01".repeat(32),"timestamp":1000});
+    let header = json!({"hash":hash,"previous_hash":"cd".repeat(32),"height":101,"block_work":"01".repeat(32),"cumulative_work":"02".repeat(32),"timestamp":1000});
     let good =
         json!({"sidechain_number":9,"action":1,"upvoted_m6id":null,"downvoted_m6ids":["aa"]});
     let bad =

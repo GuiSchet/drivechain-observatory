@@ -38,7 +38,8 @@ pub struct Header {
     pub hash: String,
     pub previous_hash: String,
     pub height: u32,
-    pub chain_work: String,
+    pub block_work: String,
+    pub cumulative_work: String,
     #[serde(with = "exact")]
     pub timestamp: u64,
 }
@@ -286,6 +287,9 @@ pub struct Bid {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Auction {
+    pub observer_session: String,
+    #[serde(with = "exact")]
+    pub mempool_generation: u64,
     pub previous_mainchain_block_hash: String,
     pub requests: Vec<Bid>,
 }
@@ -301,4 +305,27 @@ impl<'de> Deserialize<'de> for DeclarationVersion {
             Ok(Self::Unknown)
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MainchainTransition {
+    pub observer_session: String,
+    #[serde(with = "exact")]
+    pub sequence: u64,
+    pub action: i32,
+    pub header: Option<Header>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfirmedFees {
+    pub header: Header,
+    pub fees: Vec<ConfirmedFee>,
+    pub source: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfirmedFee {
+    pub sidechain_number: u8,
+    pub txid: String,
+    #[serde(default, with = "optional_exact")]
+    pub fee_sats: Option<u64>,
+    pub unavailable_reason: String,
 }

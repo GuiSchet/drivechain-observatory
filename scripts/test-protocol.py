@@ -1,4 +1,4 @@
-"""Fresh published-v6 integration, with a real read-only source and public API."""
+"""Fresh v7 integration, with a real read-only source and public API."""
 import concurrent.futures
 import importlib.util
 import json
@@ -11,7 +11,7 @@ import urllib.request
 from urllib.parse import quote
 
 ROOT=Path(__file__).resolve().parents[1]
-spec=importlib.util.spec_from_file_location("fixture",ROOT/"fixtures/v6.py")
+spec=importlib.util.spec_from_file_location("fixture",ROOT/"fixtures/v7.py")
 fixture=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 DATASET,RUN=fixture.DATASET,fixture.RUN
@@ -24,7 +24,7 @@ def sql(service,statement,*,user=None,fail=False):
     assert (p.returncode!=0)==fail,p.stderr
     return p.stdout.strip()
 def sync(*args,fail=False,env=None):
-    p=subprocess.run([str(ROOT/"target/debug/pulse-sync"),"--once",*args],env=env,capture_output=True,text=True)
+    p=subprocess.run([str(Path(os.environ.get("CARGO_TARGET_DIR", ROOT/"target"))/"debug/pulse-sync"),"--once",*args],env=env,capture_output=True,text=True)
     assert (p.returncode!=0)==fail,p.stdout+p.stderr
     return p
 def get(path):
@@ -40,7 +40,7 @@ def capture(event,*,consistency="stable",height=9):
     n=int(sql("monitor_fixture",f"SELECT last_capture_seq FROM extractor_run WHERE run_id='{RUN}'"))+1
     g=f"40000000-0000-4000-8000-{n:012d}"
     h=fixture.HASHES[height]
-    sql("monitor_fixture",f"INSERT INTO snapshot_group(snapshot_group_id,dataset_id,run_id,capture_method,started_at,finished_at,tip_before_hash,tip_before_height,tip_after_hash,tip_after_height,consistency,attempts) VALUES('{g}','{DATASET}','{RUN}','poll',now(),now(),decode('{h}','hex'),{fixture.ACTIVATION+height},decode('{h}','hex'),{fixture.ACTIVATION+height},'{consistency}',1); UPDATE extractor_run SET last_capture_seq={n} WHERE run_id='{RUN}'; INSERT INTO event_observation(dataset_id,run_id,capture_seq,capture_method,event_id,snapshot_group_id,observed_at) VALUES('{DATASET}','{RUN}',{n},'poll',{event},'{g}',now());")
+    sql("monitor_fixture",f"INSERT INTO snapshot_group(snapshot_group_id,dataset_id,run_id,capture_method,started_at,finished_at,tip_before_hash,tip_before_height,tip_after_hash,tip_after_height,consistency,attempts,revision_before,revision_after) VALUES('{g}','{DATASET}','{RUN}','poll',now(),now(),decode('{h}','hex'),{fixture.ACTIVATION+height},decode('{h}','hex'),{fixture.ACTIVATION+height},'{consistency}',1,'fixture:1','fixture:1'); UPDATE extractor_run SET last_capture_seq={n} WHERE run_id='{RUN}'; INSERT INTO event_observation(dataset_id,run_id,capture_seq,capture_method,event_id,snapshot_group_id,observed_at) VALUES('{DATASET}','{RUN}',{n},'poll',{event},'{g}',now());")
 
 sync("--batch-size","2","--max-pages-per-cycle","1")
 assert get("/api/v1/status")["sync_mode"]=="catching_up"
@@ -49,9 +49,9 @@ for _ in range(10):
     if get("/api/v1/status")["sync_mode"]=="following":break
 else:raise AssertionError("sync did not finish")
 meta=get("/api/v1/meta")
-assert meta["current_run"]["event_contract_version"]==6
+assert meta["current_run"]["event_contract_version"]==7
 assert meta["current_run"]["enforcer_commit"]==fixture.ENFORCER
-assert meta["meta"]["projection_version"]==5
+assert meta["meta"]["projection_version"]==6
 state=get("/api/v1/observatory")
 assert state["context"]["state"]=="available",state
 assert state["state"]["active"]["9"]["declaration"]["declaration"]["V0"]["title"]==fixture.TITLE,state
@@ -59,7 +59,7 @@ assert state["state"]["treasury"]["9"]["value_sats"]=="700",state
 assert state["state"]["bundles"]["9:"+fixture.BUNDLE_B]["bundle"]["vote_count"]==0
 assert "9:"+fixture.BUNDLE_A not in state["state"]["bundles"]
 assert all(f["first_error_event_id"] is None for f in state["context"]["families"]),state
-check("fresh v6 identity, typed complete state, decreasing votes, exact CTIP")
+check("fresh v7 identity, typed complete state, decreasing votes, exact CTIP")
 
 deposits=get("/api/v1/deposits")["items"]
 assert len(deposits)==1,deposits
@@ -114,7 +114,7 @@ with urllib.request.urlopen(BASE+"/api/v1/export?resource=deposits&format=csv") 
 check("all public resources, indexed search, scoped pagination and exports")
 
 if os.environ.get("PULSE_BROWSER_TESTS")=="1":
-    subprocess.run(["node","scripts/test-browser-v6.mjs"],cwd=ROOT,check=True)
+    subprocess.run(["node","scripts/test-browser-v7.mjs"],cwd=ROOT,check=True)
 revision=get("/api/v1/meta")["meta"]["pulse_revision"]
 sync()
 assert get("/api/v1/meta")["meta"]["pulse_revision"]==revision
@@ -123,6 +123,7 @@ sql("postgres","DELETE FROM ingest.source_events WHERE false",user="pulse_api",f
 check("restart idempotency and read-only source/API roles")
 
 events=fixture.fixture().events
+sql("monitor_fixture",f"UPDATE extractor_worker_status SET last_success_at=now(),updated_at=now() WHERE run_id='{RUN}';")
 capture(events["empty"])
 sync()
 assert get("/api/v1/bmm/auctions")["state"]=="empty"
@@ -135,28 +136,29 @@ sync()
 check("empty versus inconsistent snapshot; repeated facts retain per-occurrence validity")
 
 for mutate,restore in [
-    ("UPDATE extractor_run SET event_contract_version=5 WHERE status='running'","UPDATE extractor_run SET event_contract_version=6 WHERE status='running'"),
-    ("UPDATE dataset_manifest SET initial_event_contract_version=5","UPDATE dataset_manifest SET initial_event_contract_version=6"),
+    ("UPDATE extractor_run SET event_contract_version=5 WHERE status='running'","UPDATE extractor_run SET event_contract_version=7 WHERE status='running'"),
+    ("UPDATE dataset_manifest SET initial_event_contract_version=5","UPDATE dataset_manifest SET initial_event_contract_version=7"),
     ("UPDATE dataset_manifest SET capabilities=capabilities-'stable_parent_bmm_snapshots'",f"UPDATE dataset_manifest SET capabilities={fixture.lit(json.dumps(fixture.CAPS))}"),
     ("UPDATE extractor_run SET capabilities=capabilities-'stable_parent_bmm_snapshots'",f"UPDATE extractor_run SET capabilities={fixture.lit(json.dumps(fixture.CAPS))}")]:
     sql("monitor_fixture",mutate);sync(fail=True)
     assert get("/api/v1/status")["sync_mode"]=="incompatible"
     sql("monitor_fixture",restore);sync()
-check("v5, mixed identity, and missing v6 capability are rejected")
+check("v5, mixed identity, and missing v7 capability are rejected")
 
+exec((ROOT/"scripts/test-observation-quality.py").read_text(),globals())
 exec((ROOT/"scripts/test-protocol-stream.py").read_text(),globals())
 exec((ROOT/"scripts/test-protocol-branches.py").read_text(),globals())
 
 before=get("/api/v1/observatory")["state"]
 environment=dict(os.environ)
 environment.pop("MONITOR_DATABASE_URL",None)
-run=subprocess.run([str(ROOT/"target/debug/pulse-sync"),"rebuild","--dataset-id",DATASET],capture_output=True,text=True,env=environment)
+run=subprocess.run([str(Path(os.environ.get("CARGO_TARGET_DIR", ROOT/"target"))/"debug/pulse-sync"),"rebuild","--dataset-id",DATASET],capture_output=True,text=True,env=environment)
 assert run.returncode==0,run.stdout+run.stderr
 assert get("/api/v1/observatory")["state"]==before
 assert get("/api/v1/deposits")["items"][0]["data"]["value_sats"]=="1000"
 check("offline generation reconstruction equals incremental interpretation")
 exec((ROOT/"scripts/test-protocol-corrections.py").read_text(),globals())
-print("Published-v6 protocol integration passed",flush=True)
+print("V7 protocol integration passed",flush=True)
 
 if os.environ.get("PULSE_SCALE_TESTS")=="1":
-    exec((ROOT/"scripts/test-scale-v6.py").read_text(),globals())
+    exec((ROOT/"scripts/test-scale-v7.py").read_text(),globals())
