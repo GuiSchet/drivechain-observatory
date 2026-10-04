@@ -160,3 +160,14 @@ work. Use `--fresh` to select a new cut after repairing evidence from an earlier
 failed attempt. Restart sync after promotion. Older projection staging checkpoints are
 not reused. This procedure does not change the monitor deployment or migrate an
 older source dataset.
+
+## PostgreSQL18 data directory
+
+The v7 Compose configuration explicitly sets `PGDATA` to
+`/var/lib/postgresql/data/pgdata`, inside the named `pulse_postgres` mount.
+PostgreSQL18 otherwise defaults to `/var/lib/postgresql/18/docker`, outside the
+older mount path. New v7 destinations must start with a fresh volume. For an
+existing installation, inspect `SHOW data_directory` and container mounts,
+back up and restore into the new destination; do not silently reuse or relocate
+an old volume with this setting. Keep its paired old Compose configuration for
+archive access and rollback.

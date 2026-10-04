@@ -5,6 +5,7 @@ services:
     image: ${POSTGRES_IMAGE}
     restart: unless-stopped
     environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
       POSTGRES_DB: drivechain_pulse
       POSTGRES_USER: pulse_admin
       POSTGRES_PASSWORD: ${PULSE_POSTGRES_ADMIN_PASSWORD}

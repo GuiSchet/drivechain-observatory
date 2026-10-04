@@ -21,6 +21,14 @@ if [ "${PULSE_BROWSER_TESTS:-0}" = 1 ]; then
   NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:18080 npm --prefix apps/web run build
 fi
 compose up -d --wait --wait-timeout 90 postgres monitor_fixture || { compose logs --tail 70 postgres monitor_fixture; exit 1; }
+# Prove that container replacement preserves data in the named volume. All
+# objects belong to this disposable project; cleanup removes only its volumes.
+compose exec -T postgres psql -U pulse_admin -d drivechain_pulse -v ON_ERROR_STOP=1 -c   "CREATE TABLE public.volume_probe(value text); INSERT INTO public.volume_probe VALUES ('persisted');" >/dev/null
+compose up -d --wait --wait-timeout 90 --force-recreate postgres
+probe=$(compose exec -T postgres psql -XAt -U pulse_admin -d drivechain_pulse -c 'SELECT value FROM public.volume_probe')
+[ "$probe" = persisted ] || { echo 'PostgreSQL data did not survive container replacement' >&2; exit 1; }
+compose exec -T postgres psql -U pulse_admin -d drivechain_pulse -c 'DROP TABLE public.volume_probe' >/dev/null
+echo 'PASS PostgreSQL18 named-volume persistence across container replacement'
 PULSE_DATABASE_URL='postgres://pulse_admin:change-me-admin@127.0.0.1:55433/drivechain_pulse' "$build_dir/debug/pulse-api" migrate-only
 PULSE_DATABASE_URL='postgres://pulse_api:change-me-api@127.0.0.1:55433/drivechain_pulse' PULSE_API_BIND='127.0.0.1:18080' PULSE_CORS_ORIGIN='http://127.0.0.1:13000' "$build_dir/debug/pulse-api" &
 api_pid=$!
