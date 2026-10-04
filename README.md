@@ -109,7 +109,7 @@ retention and public-load checks remain operator work.
 
 ## Branch reconstruction and explorer
 
-Projection version 5 normalizes protocol state and headers, preserves conflicting facts, and follows
+Projection version 6 normalizes protocol state and headers, preserves conflicting facts, and follows
 explicit tip observations in the current run. Compatible live extensions stay
 provisional; contradictory live observations stay ambiguous until reconciled.
 Backfill can repair gaps but does not select a newer tip by itself. Chainwork is
