@@ -1,0 +1,37 @@
+name: Observatory quality
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: observatory-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_BUILD_JOBS: '2'
+  CARGO_TERM_COLOR: always
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install protobuf tools
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends protobuf-compiler
+      - name: Select locked Rust toolchain
+        run: rustup show active-toolchain
+      - name: Rust formatting, lint and units
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
+      - name: Web dependencies and production build
+        run: |
+          npm --prefix apps/web ci
+          npm --prefix apps/web run typecheck
+          npm --prefix apps/web run build
+      - name: Real PostgreSQL source, importer, API and volume persistence
+        run: sh scripts/verify-local.sh
