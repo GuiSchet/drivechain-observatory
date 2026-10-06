@@ -1,6 +1,7 @@
 # Official-source fixture inputs
 
-The protobuf and SQL 8/9 files are copied from the paired monitor candidate.
+The protobuf and SQL 8/9 files are copied from monitor source
+`2f2574d46d1bc9d888932f1161a2ab18d3b9dee6`.
 Migrations 1–7 are unchanged archived inputs under `../upstream/bip300-monitor`.
 The upstream MIT license is retained there. SHA256SUMS verifies the copies here.
 
