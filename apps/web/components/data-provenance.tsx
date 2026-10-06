@@ -43,7 +43,7 @@ export function DataProvenance({ meta, coverage, status }: { meta: Meta | null; 
       <dt>Groups read while state changed</dt><dd>{String(quality?.changed_groups ?? "Unknown")}</dd>
       <dt>Recorded failures in the last 24 hours</dt><dd>{String(quality?.failures ?? "Unknown")}</dd>
       <dt>Blocks with conflicting evidence</dt><dd>{String(quality?.conflicted_blocks ?? "Unknown")}</dd>
-    </dl><p>Only stable capture groups can establish state at a block. Historical backfill repairs coverage; it cannot recreate live transitions missed during an interruption.</p></section>
+    </dl><p>Equal tip reads do not establish atomic state at a block. Each response retains its own observation window. Historical backfill repairs coverage; it cannot recreate live transitions missed during an interruption.</p></section>
     <ProtocolList resource="observation-failures" heading="Recorded observation interruptions"/>
     <ProtocolList resource="chain-info" heading="Observed protocol parameters"/>
     <ProtocolList resource="runs" heading="Source runs"/>

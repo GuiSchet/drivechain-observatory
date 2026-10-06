@@ -48,7 +48,9 @@ fn check_header(h: &Header, a: &Anchor<'_>) -> Result<()> {
     hash(&h.hash)?;
     hash(&h.previous_hash)?;
     hash(&h.block_work)?;
-    hash(&h.cumulative_work)?;
+    if !h.cumulative_work.is_empty() {
+        hash(&h.cumulative_work)?;
+    }
     ensure!(
         hex::decode(&h.block_work)?.iter().any(|b| *b != 0),
         "zero block work"
@@ -104,11 +106,6 @@ fn entry(
 fn push(out: &mut Vec<Entry>, family: &str, result: Result<Entry>) {
     push_scoped(out, family, None, result);
 }
-fn slot(v: &Value) -> Option<u8> {
-    v["sidechain_number"]
-        .as_u64()
-        .and_then(|n| n.try_into().ok())
-}
 fn push_scoped(out: &mut Vec<Entry>, family: &str, slot: Option<u8>, result: Result<Entry>) {
     let mut e = result.unwrap_or_else(|error| Entry {
         ordinal: 0,
@@ -128,7 +125,11 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
     let mut out = Vec::new();
     let family = match kind {
         "chain_info" => "parameters",
-        "chain_tip" | "block_connected" | "block_disconnected" => "blocks",
+        "chain_tip"
+        | "mainchain_block"
+        | "mainchain_transition"
+        | "block_connected"
+        | "block_disconnected" => "blocks",
         "active_sidechains" => "sidechains",
         "sidechain_proposals" => "proposals",
         "ctip" => "treasury",
@@ -149,7 +150,7 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                     entry("parameters", family, "parameters".into(), None, x, vec![]),
                 );
             }
-            "chain_tip" => {
+            "chain_tip" | "mainchain_block" => {
                 let h: Header = decode(&v["header"])?;
                 check_header(&h, &anchor)?;
                 push(
@@ -160,20 +161,18 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
             }
             "mainchain_transition" => {
                 let x: MainchainTransition = decode(v)?;
+                ensure!((1..=2).contains(&x.action), "invalid official transition");
                 ensure!(
-                    !x.observer_session.is_empty() && (1..=3).contains(&x.action),
-                    "invalid chain transition"
+                    x.observer_session.is_empty() && x.sequence == 0,
+                    "official stream has no server sequence"
                 );
-                if x.action == 3 {
-                    ensure!(
-                        x.header.is_none() && anchor.hash.is_none(),
-                        "subscription boundary must be unanchored"
-                    );
-                } else {
+                if x.action == 1 {
                     check_header(
-                        x.header.as_ref().context("missing transition header")?,
+                        x.header.as_ref().context("missing connected header")?,
                         &anchor,
                     )?;
+                } else {
+                    hash(anchor.hash.context("missing disconnected hash")?)?;
                 }
                 push(
                     &mut out,
@@ -181,7 +180,7 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                     entry(
                         "mainchain_transition",
                         "blocks",
-                        format!("{}:{}", x.observer_session, x.sequence),
+                        format!("{}:{}", anchor.hash.unwrap_or_default(), x.action),
                         None,
                         x,
                         vec![],
@@ -191,7 +190,10 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
             "confirmed_bmm_fees" => {
                 let x: ConfirmedFees = decode(v)?;
                 check_header(&x.header, &anchor)?;
-                ensure!(x.source == "ecash-node:getblock:3", "unknown fee source");
+                ensure!(
+                    x.source == "ecash-node:getblock:3;observed_bids_only",
+                    "unknown fee source"
+                );
                 let mut keys = std::collections::BTreeSet::new();
                 for fee in &x.fees {
                     hash(&fee.txid)?;
@@ -205,6 +207,9 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                     );
                 }
                 for fee in x.fees {
+                    let mut data = serde_json::to_value(&fee)?;
+                    data["coverage"] = json!("observed_bids_only");
+                    data["source"] = json!(x.source);
                     push(
                         &mut out,
                         "bmm",
@@ -213,7 +218,7 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                             "bmm",
                             format!("{}:{}", fee.sidechain_number, fee.txid),
                             Some(fee.sidechain_number),
-                            &fee,
+                            data,
                             vec![fee.txid.clone()],
                         ),
                     );
@@ -318,7 +323,7 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                 let x: BundleSnapshot = decode(v)?;
                 check_slot(x.sidechain_number, &anchor)?;
                 for b in &x.proposals {
-                    bytes(&b.m6id)?;
+                    hash(&b.m6id)?;
                 }
                 push(
                     &mut out,
@@ -349,10 +354,6 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
             }
             "bmm_requests" => {
                 let x: Auction = decode(v)?;
-                ensure!(
-                    !x.observer_session.is_empty() && x.mempool_generation > 0,
-                    "BMM sample has no ready generation"
-                );
                 hash(&x.previous_mainchain_block_hash)?;
                 ensure!(
                     anchor.hash == Some(x.previous_mainchain_block_hash.as_str()),
@@ -360,7 +361,7 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                 );
                 for b in &x.requests {
                     hash(&b.txid)?;
-                    bytes(&b.critical_hash)?;
+                    hash(&b.critical_hash)?;
                 }
                 push(
                     &mut out,
@@ -420,7 +421,7 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                     Some(x.sidechain_number),
                     (|| {
                         if let Some(c) = &x.bmm_commitment {
-                            bytes(c)?;
+                            hash(c)?;
                         }
                         entry(
                             "slot_block",
@@ -457,7 +458,7 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                                 )
                             }
                             SlotEventKind::WithdrawalBundle(b) => {
-                                bytes(&b.m6id)?;
+                                hash(&b.m6id)?;
                                 entry(
                                     "bundle_outcome",
                                     "bundles",
@@ -478,72 +479,7 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
                     push_scoped(&mut out, family, Some(x.sidechain_number), result);
                 }
             }
-            "bip300_block_delta" => {
-                let x: Delta = decode(v)?;
-                check_header(&x.header, &anchor)?;
-                hash(&x.coinbase_txid)?;
-                push(
-                    &mut out,
-                    "protocol",
-                    entry(
-                        "block_delta",
-                        "protocol",
-                        x.header.hash.clone(),
-                        None,
-                        json!({"coinbase_txid":x.coinbase_txid}),
-                        vec![x.coinbase_txid.clone()],
-                    ),
-                );
-                for item in x.coinbase_messages {
-                    let family = if item.pointer("/message/M1").is_some()
-                        || item.pointer("/message/M2").is_some()
-                    {
-                        "proposals"
-                    } else if item.pointer("/message/M3").is_some()
-                        || item.pointer("/message/M4").is_some()
-                    {
-                        "bundles"
-                    } else if item.pointer("/message/M7").is_some() {
-                        "bmm"
-                    } else {
-                        "protocol"
-                    };
-                    let scope = item["message"]
-                        .as_object()
-                        .and_then(|m| m.values().next())
-                        .and_then(slot);
-                    normalize_message(&mut out, family, scope, &item);
-                }
-                for item in x.treasury_transitions {
-                    push_scoped(&mut out, "treasury", slot(&item), transition(&item));
-                }
-                for item in x.confirmed_bmm_requests {
-                    push_scoped(
-                        &mut out,
-                        "bmm",
-                        slot(&item),
-                        (|| -> Result<Entry> {
-                            let b: ConfirmedBmm = decode(&item)?;
-                            hash(&b.txid)?;
-                            hash(&b.previous_mainchain_block_hash)?;
-                            bytes(&b.hstar)?;
-                            bytes(&b.transaction)?;
-                            ensure!(
-                                b.previous_mainchain_block_hash == x.header.previous_hash,
-                                "confirmed BMM parent differs from block parent"
-                            );
-                            entry(
-                                "confirmed_bmm",
-                                "bmm",
-                                format!("{}:{}", b.sidechain_number, b.txid),
-                                Some(b.sidechain_number),
-                                &b,
-                                vec![b.txid.clone(), b.hstar.clone()],
-                            )
-                        })(),
-                    );
-                }
-            }
+
             _ => unreachable!(),
         }
         Ok(())
@@ -552,172 +488,4 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
         push_scoped(&mut out, family, anchor.slot, Err(error));
     }
     out
-}
-
-fn normalize_message(out: &mut Vec<Entry>, family: &str, scope: Option<u8>, item: &Value) {
-    // M4 contains independent resolved effects for multiple slots. Validate its
-    // envelope separately so one malformed effect does not suppress other slots.
-    if let Some(effects) = item
-        .pointer("/message/M4/effects")
-        .and_then(Value::as_array)
-    {
-        let mut valid = item.clone();
-        valid["message"]["M4"]["effects"] = json!([]);
-        if message(&valid).is_ok() {
-            let mut accepted = vec![];
-            for effect in effects {
-                let mut single = valid.clone();
-                single["message"]["M4"]["effects"] = json!([effect]);
-                match message(&single) {
-                    Ok(_) => accepted.push(effect.clone()),
-                    Err(error) => push_scoped(out, family, slot(effect), Err(error)),
-                }
-            }
-            valid["message"]["M4"]["effects"] = json!(accepted);
-            push(out, family, message(&valid));
-            return;
-        }
-    }
-    push_scoped(out, family, scope, message(item));
-}
-
-fn message(v: &Value) -> Result<Entry> {
-    let x: CoinbaseMessage = decode(v)?;
-    bytes(&x.raw_script_pubkey)?;
-    let (slot, search, family, name) =
-        match x.message.as_ref().context("missing coinbase message")? {
-            Message::M1(m) => {
-                description(&m.description, &m.description_hash)?;
-                (
-                    Some(m.sidechain_number),
-                    vec![m.description_hash.clone()],
-                    "proposals",
-                    "m1",
-                )
-            }
-            Message::M2(m) => {
-                hash(&m.description_hash)?;
-                ensure!(
-                    !x.accepted || (1..=3).contains(&m.effect),
-                    "unsupported accepted M2 effect"
-                );
-                (
-                    Some(m.sidechain_number),
-                    vec![m.description_hash.clone()],
-                    "proposals",
-                    "m2",
-                )
-            }
-            Message::M3(m) => {
-                bytes(&m.m6id)?;
-                (
-                    Some(m.sidechain_number),
-                    vec![m.m6id.clone()],
-                    "bundles",
-                    "m3",
-                )
-            }
-            Message::M4(m) => {
-                ensure!(
-                    !x.accepted || (1..=4).contains(&m.mode),
-                    "unsupported accepted M4 mode"
-                );
-                let mut search = vec![];
-                for e in &m.effects {
-                    search.push(format!("slot:{}", e.sidechain_number));
-                    ensure!((1..=2).contains(&e.action), "unsupported M4 effect action");
-                    if let Some(id) = &e.upvoted_m6id {
-                        bytes(id)?;
-                        search.push(id.clone());
-                    }
-                    for id in &e.downvoted_m6ids {
-                        bytes(id)?;
-                        search.push(id.clone());
-                    }
-                }
-                (None, search, "bundles", "m4")
-            }
-            Message::M7(m) => {
-                bytes(&m.hstar)?;
-                (Some(m.sidechain_number), vec![m.hstar.clone()], "bmm", "m7")
-            }
-            Message::Unknown => anyhow::bail!("unsupported coinbase message"),
-        };
-    entry(name, family, x.vout.to_string(), slot, x, search)
-}
-fn transition(v: &Value) -> Result<Entry> {
-    let x: Transition = decode(v)?;
-    if let Some(c) = &x.previous_ctip {
-        ctip(c)?;
-    }
-    if let Some(c) = &x.new_ctip {
-        ctip(c)?;
-    }
-    if let Some(s) = &x.transaction {
-        bytes(s)?;
-    }
-    if let Some(s) = &x.sidechain_address {
-        bytes(s)?;
-    }
-    if let Some(s) = &x.m6id {
-        bytes(s)?;
-    }
-    let old = x.previous_ctip.as_ref().map_or(0, |c| c.value_sats);
-    match x.kind {
-        1 => {
-            let c = x.new_ctip.as_ref().context("deposit has no new CTIP")?;
-            ensure!(
-                c.value_sats.checked_sub(old) == x.delta_sats && x.delta_sats.is_some(),
-                "deposit delta differs from CTIP change"
-            );
-        }
-        2 => {
-            let c = x
-                .new_ctip
-                .as_ref()
-                .context("successful withdrawal has no new CTIP")?;
-            ensure!(
-                x.previous_ctip.is_some()
-                    && old.checked_sub(c.value_sats) == x.delta_sats
-                    && x.delta_sats.is_some(),
-                "withdrawal delta differs from CTIP change"
-            );
-            if let (Some(p), Some(f)) = (x.payout_sats, x.fee_sats) {
-                ensure!(
-                    p.checked_add(f) == x.delta_sats,
-                    "payout plus fee differs from treasury reduction"
-                );
-            }
-            ensure!(x.m6id.is_some(), "withdrawal has no m6id");
-        }
-        3 => {
-            ensure!(x.m6id.is_some(), "failed withdrawal has no m6id");
-        }
-        _ => anyhow::bail!("unsupported treasury transition {}", x.kind),
-    }
-    let mut search = vec![];
-    if let Some(c) = &x.new_ctip {
-        search.extend([c.txid.clone(), format!("{}:{}", c.txid, c.vout)]);
-    }
-    if let Some(id) = &x.m6id {
-        search.push(id.clone());
-    }
-    let key = if x.kind == 1 {
-        let c = x.new_ctip.as_ref().expect("validated deposit");
-        format!("{}:{}:{}", x.sidechain_number, c.txid, c.vout)
-    } else {
-        format!(
-            "{}:{}",
-            x.sidechain_number,
-            x.m6id.as_deref().unwrap_or_default()
-        )
-    };
-    entry(
-        "treasury_transition",
-        if x.kind == 3 { "bundles" } else { "treasury" },
-        key,
-        Some(x.sidechain_number),
-        x,
-        search,
-    )
 }

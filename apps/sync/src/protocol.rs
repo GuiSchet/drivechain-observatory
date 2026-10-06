@@ -2,42 +2,12 @@
 use super::{SourceEvent, append_update, chain::Cut};
 use anyhow::{Context, Result};
 use pulse_source::{
-    ChainInfo,
     normalize::{self, Anchor, Entry},
-    replay::{Evidence, Record, State},
+    observations::{Evidence, Record, State},
 };
 use serde_json::{Value, json};
 use sqlx::{Connection, PgConnection, Row};
 use uuid::Uuid;
-
-// Evaluate snapshot diagnostics once at publication, while this build's branch
-// and cut are still fixed. Readers must not reevaluate them against the mutable
-// membership of a subsequent build or reorg.
-async fn observation_errors(
-    conn: &mut PgConnection,
-    d: Uuid,
-    generation: i64,
-    cut: &Cut,
-) -> Result<std::collections::BTreeMap<String, String>> {
-    let errors:Vec<(String,i64)>=sqlx::query_as("SELECT f.family,min(f.event_id) FROM projection.protocol_facts f
-        JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id
-        JOIN projection.chain_members m ON m.dataset_id=f.dataset_id AND m.generation=f.generation AND m.hash=f.hash
-        WHERE f.dataset_id=$1 AND f.generation=$2 AND f.ordinal=0
-        AND (f.error IS NOT NULL OR (e.kind='bmm_requests' AND e.interpretation_error IS NOT NULL))
-        AND e.kind IN ('active_sidechains','sidechain_proposals','ctip','withdrawal_bundle_proposals','bmm_requests')
-        AND f.event_id<=$3 AND EXISTS(
-            SELECT 1 FROM ingest.event_observations o JOIN ingest.extractor_runs r ON r.run_id=o.run_id
-            JOIN ingest.snapshot_groups g ON g.dataset_id=o.dataset_id AND g.run_id=o.run_id AND g.snapshot_group_id=o.snapshot_group_id
-            WHERE o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id AND o.observation_id<=$4
-            AND r.enforcer_commit=$5 AND g.consistency='stable' AND g.revision_before IS NOT NULL AND g.revision_before=g.revision_after AND g.tip_before_hash=g.tip_after_hash
-            AND g.tip_before_height=g.tip_after_height AND encode(g.tip_before_hash,'hex')=f.hash AND g.tip_before_height=f.height
-        ) GROUP BY f.family")
-        .bind(d).bind(generation).bind(cut.events).bind(cut.observations).bind(pulse_source::ENFORCER_COMMIT).fetch_all(conn).await?;
-    Ok(errors
-        .into_iter()
-        .map(|(family, id)| (family, id.to_string()))
-        .collect())
-}
 
 async fn normalize_page(
     conn: &mut PgConnection,
@@ -66,7 +36,7 @@ async fn normalize_page(
     let mut dirty: Option<i32> = None;
     let mut rows = vec![];
     for e in &events {
-        if e.event_contract_version != 7 {
+        if e.event_contract_version != 8 {
             continue;
         }
         let hash = e.block_hash.as_ref().map(hex::encode);
@@ -87,7 +57,6 @@ async fn normalize_page(
                 | "chain_tip"
                 | "block_disconnected"
                 | "mainchain_transition"
-                | "confirmed_bmm_fees"
         ) {
             dirty = match (dirty, e.height) {
                 (Some(a), Some(b)) => Some(a.min(b)),
@@ -159,6 +128,21 @@ pub async fn advance(
     if normalized < cut.events {
         return Ok(false);
     }
+    for _ in 0..pages {
+        if normalize_observations(conn, d, g, cut, limit).await? {
+            break;
+        }
+    }
+    let observed: i64 = sqlx::query_scalar(
+        "SELECT observation_cursor FROM ops.protocol_jobs WHERE dataset_id=$1 AND generation=$2",
+    )
+    .bind(d)
+    .bind(g)
+    .fetch_one(&mut *conn)
+    .await?;
+    if observed < cut.observations {
+        return Ok(false);
+    }
     let branch = super::chain::state(conn, d, g).await?;
     let current=sqlx::query("SELECT b.* FROM projection.protocol_head h JOIN ops.protocol_builds b USING(build_id) WHERE h.dataset_id=$1 AND h.generation=$2").bind(d).bind(g).fetch_optional(&mut *conn).await?;
     if current.as_ref().is_some_and(|r| {
@@ -179,19 +163,13 @@ pub async fn advance(
             serde_json::from_value::<State>(row.get("state"))?,
         )
     } else {
-        let after_observations = current
-            .as_ref()
-            .map(|r| {
-                r.get::<Value, _>("cut")["observations"]
-                    .as_i64()
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
-        let mut dirty:Option<i32>=sqlx::query_scalar("SELECT least(j.dirty_height,(SELECT min(e.height) FROM ingest.event_observations o JOIN ingest.source_events e ON e.dataset_id=o.dataset_id AND e.source_event_id=o.source_event_id JOIN ingest.extractor_runs r ON r.run_id=o.run_id WHERE o.dataset_id=$1 AND o.observation_id>$3 AND o.observation_id<=$4 AND r.enforcer_commit=$5 AND (
-            e.kind IN ('active_sidechains','sidechain_proposals','ctip','withdrawal_bundle_proposals') OR
-            (e.kind IN ('block_connected','bip300_block_delta') AND NOT EXISTS(SELECT 1 FROM ingest.event_observations prior JOIN ingest.extractor_runs pr ON pr.run_id=prior.run_id WHERE prior.dataset_id=o.dataset_id AND prior.source_event_id=o.source_event_id AND prior.observation_id<=$3 AND pr.enforcer_commit=$5))
-        ))) FROM ops.protocol_jobs j WHERE j.dataset_id=$1 AND j.generation=$2")
-            .bind(d).bind(g).bind(after_observations).bind(cut.observations).bind(pulse_source::ENFORCER_COMMIT).fetch_one(&mut *conn).await?;
+        let mut dirty: Option<i32> = sqlx::query_scalar(
+            "SELECT dirty_height FROM ops.protocol_jobs WHERE dataset_id=$1 AND generation=$2",
+        )
+        .bind(d)
+        .bind(g)
+        .fetch_one(&mut *conn)
+        .await?;
         let mut state = State::default();
         let mut base = -1;
         if let Some(row) = &current {
@@ -218,73 +196,8 @@ pub async fn advance(
                 state = serde_json::from_value(row.get("state"))?;
             }
         }
-        let supported: bool = sqlx::query_scalar(
-            "SELECT coalesce(enforcer_commit=$2,false) FROM ingest.extractor_runs WHERE run_id=$1",
-        )
-        .bind(cut.run)
-        .bind(pulse_source::ENFORCER_COMMIT)
-        .fetch_one(&mut *conn)
-        .await?;
-        // Constants are process-invariant for the reviewed build and dataset.
-        // Prefer current-run evidence; a restart before its startup snapshot can
-        // reuse verified prior-run constants, but never an unreviewed build.
-        let parameters=sqlx::query("SELECT f.*,o.observation_id FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id JOIN ingest.extractor_runs r ON r.run_id=o.run_id JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id WHERE f.dataset_id=$1 AND f.generation=$2 AND e.kind='chain_info' AND f.ordinal=0 AND r.enforcer_commit=$3 AND o.observation_id<=$4 AND f.event_id<=$5 ORDER BY (o.run_id=$6) DESC,r.started_at DESC,o.capture_seq DESC")
-            .bind(d).bind(g).bind(pulse_source::ENFORCER_COMMIT).bind(cut.observations).bind(cut.events).bind(cut.run).fetch_all(&mut *conn).await?;
-        let latest = parameters.first().map(record).transpose()?;
-        let info = latest
-            .as_ref()
-            .filter(|r| r.entry.error.is_none())
-            .map(|r| serde_json::from_value::<ChainInfo>(r.entry.data.clone()))
-            .transpose()?;
-        let constants = info.as_ref().and_then(|v| v.bip300_constants.clone());
-        let activation:i32=sqlx::query_scalar("SELECT activation_height FROM ingest.datasets WHERE dataset_id=$1 AND network_id='betanet'").bind(d).fetch_one(&mut *conn).await?;
-        let mut parameter_error = None;
-        for row in &parameters {
-            let r = record(row)?;
-            let valid = r.entry.error.is_none()
-                && info.as_ref().is_some_and(|i| {
-                    i.network == 2
-                        && i.raw_network == 2
-                        && r.entry.data == latest.as_ref().expect("parameters present").entry.data
-                        && i.bip300_constants.as_ref().is_some_and(|c| {
-                            i64::from(c.activation_height) == i64::from(activation)
-                        })
-                });
-            if !valid {
-                parameter_error = Some(
-                    parameter_error.map_or(row.get::<i64, _>("event_id"), |old: i64| {
-                        old.min(row.get("event_id"))
-                    }),
-                );
-            }
-        }
-        let semantics_issue = if !supported {
-            Some("The current enforcer build has not been reviewed.".to_owned())
-        } else if latest.is_none() {
-            Some(
-                "Awaiting verified chain parameters for this dataset and enforcer build."
-                    .to_owned(),
-            )
-        } else if parameter_error.is_some() {
-            Some("Reviewed chain parameters are invalid, contradictory, or incompatible with Betanet activation.".to_owned())
-        } else {
-            None
-        };
-        let supported = supported && constants.is_some() && parameter_error.is_none();
-        if state.constants != constants || state.semantics_supported != supported {
-            state = State::default();
-            base = -1;
-        }
-        state.constants = constants;
-        state.semantics_supported = supported;
-        state.semantics_issue = semantics_issue;
-        state.parameters_evidence = latest.map(|r| r.evidence);
-        state.first_errors.remove("parameters");
-        if let Some(event) = parameter_error {
-            state
-                .first_errors
-                .insert("parameters".into(), event.to_string());
-        }
+        state.semantics_supported = false;
+        state.semantics_issue=Some("Historical protocol effects are unavailable through the official API. State maps contain separate observed responses, not atomic block state.".into());
         let build:i64=sqlx::query_scalar("INSERT INTO ops.protocol_builds(dataset_id,generation,cut,branch_revision,cursor_height,state) VALUES($1,$2,$3,$4,$5,$6) RETURNING build_id").bind(d).bind(g).bind(json!(cut)).bind(&branch.revision).bind(base).bind(json!(state)).fetch_one(&mut *conn).await?;
         (build, base, state)
     };
@@ -297,65 +210,11 @@ pub async fn advance(
             let hash: String = h.get("hash");
             let height: i32 = h.get("height");
             let parent: String = h.get("parent");
-            let rows=sqlx::query("SELECT f.*,NULL::bigint AS observation_id,EXISTS(SELECT 1 FROM ingest.event_observations o JOIN ingest.extractor_runs r ON r.run_id=o.run_id WHERE o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id AND o.observation_id<=$5 AND r.enforcer_commit=$6) AS supported FROM projection.protocol_facts f WHERE dataset_id=$1 AND generation=$2 AND hash=$3 AND event_id<=$4 AND EXISTS(SELECT 1 FROM ingest.source_events e WHERE e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id AND e.kind IN ('bip300_block_delta','block_connected')) ORDER BY event_id,ordinal")
-                .bind(d).bind(g).bind(&hash).bind(cut.events).bind(cut.observations).bind(pulse_source::ENFORCER_COMMIT).fetch_all(&mut *tx).await?;
-            let mut records: Vec<Record> = rows
-                .iter()
-                .filter(|r| r.get::<bool, _>("supported"))
-                .map(record)
-                .collect::<Result<_>>()?;
-            let global = records.iter().any(|r| r.entry.kind == "block_delta");
-            let (prepared, corroboration) = pulse_source::replay::reconcile(records);
-            records = prepared;
-            let mut changes =
-                state.block(&hash, &parent, u32::try_from(height)?, &records, global)?;
-            for c in &mut changes {
-                if c.kind == "deposit" {
-                    for r in &corroboration {
-                        if r.entry.key == c.key
-                            && matches!(r.entry.kind.as_str(), "deposit" | "treasury_transition")
-                            && !c.evidence.contains(&r.evidence)
-                        {
-                            c.evidence.push(r.evidence.clone());
-                        }
-                    }
-                }
-            }
-            let snapshots=sqlx::query("SELECT DISTINCT ON(f.kind,f.slot) f.*,o.observation_id FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id JOIN ingest.snapshot_groups s ON s.snapshot_group_id=o.snapshot_group_id AND s.dataset_id=o.dataset_id AND s.run_id=o.run_id JOIN ingest.extractor_runs r ON r.run_id=o.run_id WHERE f.dataset_id=$1 AND f.generation=$2 AND f.hash=$3 AND f.event_id<=$4 AND o.observation_id<=$5 AND f.kind IN ('active_set','proposal_set','ctip_snapshot','bundle_set') AND f.error IS NULL AND s.consistency='stable' AND s.revision_before IS NOT NULL AND s.revision_before=s.revision_after AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=s.tip_after_height AND encode(s.tip_before_hash,'hex')=f.hash AND s.tip_before_height=f.height AND r.enforcer_commit=$6 ORDER BY f.kind,f.slot,r.started_at DESC,o.capture_seq DESC")
-                .bind(d).bind(g).bind(&hash).bind(cut.events).bind(cut.observations).bind(pulse_source::ENFORCER_COMMIT).fetch_all(&mut *tx).await?;
-            let mut snapshots: Vec<Record> = snapshots.iter().map(record).collect::<Result<_>>()?;
-            snapshots.sort_by_key(|r| match r.entry.kind.as_str() {
-                "active_set" => 0,
-                "proposal_set" => 1,
-                _ => 2,
-            });
-            for r in snapshots {
-                changes.extend(state.snapshot(&r)?);
-            }
+            let rows=sqlx::query("SELECT f.*,NULL::bigint AS observation_id FROM projection.protocol_facts f WHERE dataset_id=$1 AND generation=$2 AND hash=$3 AND event_id<=$4 AND EXISTS(SELECT 1 FROM ingest.source_events e WHERE e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id AND e.kind IN ('block_connected','confirmed_bmm_fees')) AND NOT EXISTS(SELECT 1 FROM projection.chain_headers h WHERE h.dataset_id=f.dataset_id AND h.generation=f.generation AND h.hash=f.hash AND h.conflicted) ORDER BY event_id,ordinal")
+                .bind(d).bind(g).bind(&hash).bind(cut.events).fetch_all(&mut *tx).await?;
+            let records = rows.iter().map(record).collect::<Result<Vec<_>>>()?;
+            let changes = state.block(&hash, &parent, u32::try_from(height)?, &records, false)?;
             sqlx::query("INSERT INTO projection.protocol_block_versions VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING").bind(d).bind(g).bind(&hash).bind(height).bind(build).execute(&mut *tx).await?;
-            for c in &changes {
-                if matches!(c.kind.as_str(), "proposal" | "bundle") && !c.key.contains(":observed:")
-                {
-                    let value = if c.kind == "proposal" {
-                        &c.data["proposal"]
-                    } else {
-                        &c.data["bundle"]
-                    };
-                    let identifier = if c.kind == "proposal" {
-                        value["description_hash"].as_str()
-                    } else {
-                        value["m6id"].as_str().or_else(|| c.data["m6id"].as_str())
-                    };
-                    let proposed = value["proposal_height"].as_u64().or_else(|| {
-                        c.data
-                            .pointer("/transition/proposal_height")
-                            .and_then(Value::as_u64)
-                    });
-                    if let (Some(slot), Some(id), Some(proposed)) = (c.slot, identifier, proposed) {
-                        sqlx::query("INSERT INTO projection.protocol_aliases VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING").bind(d).bind(g).bind(&c.kind).bind(format!("{slot}:{id}:observed:{proposed}")).bind(&c.key).bind(&hash).execute(&mut *tx).await?;
-                    }
-                }
-            }
             let changes:Vec<_>=changes.iter().enumerate().map(|(ordinal,c)|json!({"ordinal":ordinal,"kind":c.kind,"entity_key":c.key,"slot":c.slot,"data":c.data,"quality":c.quality,"evidence":c.evidence,"issue":c.issue})).collect();
             sqlx::query("INSERT INTO projection.protocol_history SELECT $1,$2,$3,$4,$5,r.* FROM jsonb_to_recordset($6) AS r(ordinal integer,kind text,entity_key text,slot smallint,data jsonb,quality text,evidence jsonb,issue text) ON CONFLICT DO NOTHING")
                 .bind(d).bind(g).bind(build).bind(&hash).bind(height).bind(json!(changes)).execute(&mut *tx).await?;
@@ -365,7 +224,7 @@ pub async fn advance(
             at = height;
         }
         if complete {
-            state.observation_errors = observation_errors(&mut tx, d, g, cut).await?;
+            refresh_observations(&mut tx, d, g, cut, &mut state).await?;
         }
         sqlx::query("UPDATE ops.protocol_builds SET cursor_height=$2,state=$3,complete=$4 WHERE build_id=$1").bind(build).bind(at).bind(json!(state)).bind(complete).execute(&mut *tx).await?;
         if complete {
@@ -428,4 +287,119 @@ pub async fn advance(
         }
     }
     Ok(false)
+}
+
+fn window(row: &sqlx::postgres::PgRow) -> Result<Value> {
+    Ok(row.try_get("window")?)
+}
+const SNAPSHOT_ROWS: &str = "SELECT f.*,e.kind AS snapshot_kind,o.observation_id,s.consistency,
+    jsonb_build_object('observation_id',o.observation_id::text,'run_id',o.run_id,'started_at',s.started_at,'finished_at',s.finished_at,
+    'consistency',s.consistency,'sidechain_instance_id',e.sidechain_instance_id,'atomicity_proven',false,'reference_tip_hash',encode(s.tip_before_hash,'hex'),
+    'reference_tip_height',s.tip_before_height,'tip_after_hash',encode(s.tip_after_hash,'hex'),'tip_after_height',s.tip_after_height) AS window,
+    (s.consistency='tip_matched' AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=s.tip_after_height AND s.revision_before IS NULL AND s.revision_after IS NULL) AS usable
+    FROM projection.protocol_facts f JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id
+    JOIN ingest.snapshot_groups s ON s.dataset_id=o.dataset_id AND s.run_id=o.run_id AND s.snapshot_group_id=o.snapshot_group_id
+    WHERE f.dataset_id=$1 AND f.generation=$2 AND f.event_id<=$3 AND o.observation_id<=$4
+    AND f.ordinal=0 AND e.kind IN ('active_sidechains','sidechain_proposals','ctip','withdrawal_bundle_proposals')";
+
+async fn normalize_observations(
+    conn: &mut PgConnection,
+    d: Uuid,
+    g: i64,
+    cut: &Cut,
+    limit: i64,
+) -> Result<bool> {
+    let after: i64 = sqlx::query_scalar(
+        "SELECT observation_cursor FROM ops.protocol_jobs WHERE dataset_id=$1 AND generation=$2",
+    )
+    .bind(d)
+    .bind(g)
+    .fetch_one(&mut *conn)
+    .await?;
+    let rows = sqlx::query(&format!(
+        "{SNAPSHOT_ROWS} AND o.observation_id>$5 ORDER BY o.observation_id LIMIT $6"
+    ))
+    .bind(d)
+    .bind(g)
+    .bind(cut.events)
+    .bind(cut.observations)
+    .bind(after)
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    let complete = rows.len() < usize::try_from(limit)?;
+    let next = if complete {
+        cut.observations
+    } else {
+        rows.last()
+            .context("nonempty observations")?
+            .get("observation_id")
+    };
+    let mut tx = conn.begin().await?;
+    for row in rows {
+        let r = record(&row)?;
+        if r.entry.error.is_some() {
+            continue;
+        }
+        let mut s = State::default();
+        for (ordinal, mut c) in s.snapshot(&r)?.into_iter().enumerate() {
+            c.data["observation_window"] = window(&row)?;
+            if !row.get::<Option<bool>, _>("usable").unwrap_or(false) {
+                c.quality = "unknown".into();
+                c.issue = Some("Tips changed or consistency is unknown during observation".into());
+            }
+            sqlx::query("INSERT INTO projection.snapshot_history(dataset_id,generation,observation_id,ordinal,kind,entity_key,slot,data,quality,evidence,issue) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING")
+                .bind(d).bind(g).bind(row.get::<i64,_>("observation_id")).bind(i32::try_from(ordinal)?).bind(c.kind).bind(c.key).bind(c.slot.map(i16::from)).bind(c.data).bind(c.quality).bind(json!(c.evidence)).bind(c.issue).execute(&mut *tx).await?;
+        }
+    }
+    sqlx::query(
+        "UPDATE ops.protocol_jobs SET observation_cursor=$3 WHERE dataset_id=$1 AND generation=$2",
+    )
+    .bind(d)
+    .bind(g)
+    .bind(next)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(complete)
+}
+async fn refresh_observations(
+    conn: &mut PgConnection,
+    d: Uuid,
+    g: i64,
+    cut: &Cut,
+    state: &mut State,
+) -> Result<()> {
+    // Select the latest occurrence before validating it. A changed/invalid latest
+    // response must never silently resurrect an older good response.
+    let rows=sqlx::query(&format!("SELECT DISTINCT ON(snapshot_kind,slot) * FROM ({SNAPSHOT_ROWS} AND o.run_id=$5) latest ORDER BY snapshot_kind,slot,observation_id DESC"))
+        .bind(d).bind(g).bind(cut.events).bind(cut.observations).bind(cut.run).fetch_all(&mut *conn).await?;
+    state.active.clear();
+    state.proposals.clear();
+    state.treasury.clear();
+    state.bundles.clear();
+    state.bundle_complete.clear();
+    state.active_complete = false;
+    state.proposals_complete = false;
+    state.observation_windows.clear();
+    state.observation_errors.clear();
+    for row in rows {
+        let r = record(&row)?;
+        state.observation_windows.insert(
+            format!(
+                "{}:{}",
+                row.get::<String, _>("snapshot_kind"),
+                r.entry.slot.map(|s| s.to_string()).unwrap_or_default()
+            ),
+            window(&row)?,
+        );
+        if r.entry.error.is_some() || !row.get::<Option<bool>, _>("usable").unwrap_or(false) {
+            state
+                .observation_errors
+                .insert(r.entry.family, r.evidence.event_id);
+            continue;
+        }
+        state.snapshot(&r)?;
+    }
+    Ok(())
 }

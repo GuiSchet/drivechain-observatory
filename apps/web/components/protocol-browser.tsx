@@ -14,7 +14,7 @@ export function CopyValue({ value }: { value: string }) {
 }
 export function ContextNote({ context }: { context: ProtocolContext }) {
   return <aside className="context-note" aria-label="Reconstruction context"><Quality value={context.state}/><span>At {context.anchor_height == null ? "unknown height" : `block ${context.anchor_height.toLocaleString("en-US")}`}</span><span>Branch {context.branch.status}</span>
-    {!context.semantics_supported && <strong>{context.semantics_issue ?? "Rules are unverified for this enforcer build."} Derived thresholds are unavailable.</strong>}
+    {!context.semantics_supported && <strong>{context.semantics_issue ?? "Historical protocol effects are not exposed by the official API."} Derived thresholds are unavailable.</strong>}
     <Link className="text-link" href="/about/data">Coverage and provenance</Link>
     {context.families.filter(f => f.first_error_event_id).map(f => <span className="error-text" key={f.family}>{f.family}: interpretation stopped at <Link className="text-link" href={`/datasets/${context.meta.dataset_id}/events/${f.first_error_event_id}`}>event {f.first_error_event_id}</Link></span>)}
   </aside>;
@@ -52,7 +52,7 @@ export function ProtocolCard({ item, context, expanded = false }: { item: Protoc
     {declaration != null && <><p>{text(object(declaration).description, "No declared description")}</p><DataFields value={declaration} omit={["title","description"]}/></>}
     {(item.kind === "proposal" || item.kind === "bundle") && <VoteWindow item={item} context={context}/>}
     {Object.keys(entity).length > 0 && <DataFields value={entity} omit={["raw_description","vote_count"]}/>}
-    {item.kind === "ctip" && (d.ctip === null ? <p>A stable observation reports no current treasury output.</p> : <DataFields value={d.ctip}/>)}
+    {item.kind === "ctip" && (d.ctip === null ? <p>This response reported no treasury output during its observation window.</p> : <DataFields value={d.ctip}/>)}
     {item.kind === "deposit" && <DataFields value={d.outpoint}/>}
     <DataFields value={d} omit={["raw_description","raw_script_pubkey","status","max_age","required_votes","transaction"]}/>
     {d.message != null && Object.entries(object(d.message)).map(([name,value])=><section key={name}><h4>{name} · {object(d).accepted===true?"Accepted":"Not accepted"}</h4><DataFields value={value}/>{array(object(value).effects).map((effect,i)=><details key={i}><summary>Resolved effect · slot {text(object(effect).sidechain_number)}</summary><pre>{JSON.stringify(effect,null,2)}</pre></details>)}</section>)}
@@ -73,7 +73,7 @@ export function ProtocolList({ resource, query = {}, heading, limit = 25, compac
     {heading && <h2>{heading}</h2>}{context && !compact && <ContextNote context={context}/>}
     {result.isPending && <p role="status">Loading observations…</p>}
     {result.isError && <div className="inline-notice" role="status"><p>{result.error instanceof ApiFailure && result.error.status===409 ? "The branch or published build changed. Restart this list to use its new consistent view." : result.error instanceof ApiFailure && result.error.status===404 ? "No matching record has been imported in this dataset." : "This view is unavailable. Previously loaded values may be stale."}</p><button onClick={()=>{void result.refetch();}}>Reload observations</button></div>}
-    {!result.isPending && !result.isError && !items.length && <p className="empty-state">{context?.state==="catching_up" ? "Reconstruction is catching up with the selected branch." : "No matching records in the imported coverage."}</p>}
+    {!result.isPending && !result.isError && !items.length && <p className="empty-state">{context?.state==="catching_up" ? "Observed data is catching up with the selected branch." : "No matching records in the imported coverage."}</p>}
     {context && items.map(item=><ProtocolCard key={item.id} item={item} context={context} expanded={details}/>)}
     {result.hasNextPage && <div className="pagination"><button disabled={result.isFetchingNextPage} onClick={()=>{void result.fetchNextPage();}}>{result.isFetchingNextPage ? "Loading…" : "Load more observations"}</button></div>}
     {!!items.length && <p className="scope-note">{items.length} records loaded. {result.hasNextPage ? "More records are available." : "End of this result."}</p>}

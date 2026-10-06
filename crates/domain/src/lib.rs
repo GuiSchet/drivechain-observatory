@@ -6,34 +6,26 @@ use uuid::Uuid;
 pub mod protocol;
 pub use protocol::*;
 
-pub const PROJECTION_VERSION: i32 = 6;
-pub const PROJECTION_GENERATION: i64 = 6;
-pub const REQUIRED_MONITOR_SCHEMA_VERSION: i32 = 8;
-pub const MONITOR_EVENT_CONTRACT_VERSIONS: &[i32] = &[7];
+pub const PROJECTION_VERSION: i32 = 7;
+pub const PROJECTION_GENERATION: i64 = 7;
+pub const REQUIRED_MONITOR_SCHEMA_VERSION: i32 = 9;
+pub const MONITOR_EVENT_CONTRACT_VERSIONS: &[i32] = &[8];
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
-    "absolute_chain_work",
-    "mempool_readiness_generation",
-    "global_mainchain_transitions",
-    "certified_hash_history",
-    "immutable_fact_conflicts",
-    "snapshot_state_revision",
+    "official_enforcer_api",
+    "tip_matched_snapshots",
+    "bmm_readiness_unknown",
     "event_facts",
     "event_observations",
     "tip_observations",
     "snapshot_consistency",
+    "certified_hash_history",
+    "immutable_fact_conflicts",
     "per_worker_health",
-    "mempool_backed_bmm_bid_snapshots",
-    "extractor_status",
     "resumable_sidechain_history",
-    "resumable_global_bip300_history",
-    "raw_bip300_coinbase_scripts",
-    "resolved_m1_m8_deltas",
-    "treasury_transitions",
-    "live_bmm_bid_snapshots",
-    "bip300_description_hash_identity",
-    "stable_parent_bmm_snapshots",
+    "node_block_evidence",
+    "absolute_chain_work",
+    "resumable_node_history",
     "validated_chain_identity",
-    "orphan_run_reconciliation",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -186,8 +178,11 @@ pub struct BmmBid {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BmmAuctionsResponse {
+    /// Official GetSeenBmmRequests exposes neither readiness nor total mempool coverage.
+    pub mempool_readiness: String,
+    pub bid_coverage: String,
     pub meta: ResponseMeta,
-    /// available, empty, stale, unavailable, awaiting_observation, rpc_error,
+    /// available, no_observed_bids, stale, unavailable, awaiting_observation, rpc_error,
     /// interpretation_error, or awaiting_current_parent.
     pub state: String,
     pub source_event_id: Option<String>,
@@ -373,6 +368,14 @@ mod tests {
 /// A branch verdict is bounded by its verified lower boundary, not consensus finality.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct BranchState {
+    #[serde(default)]
+    pub node_tip_hash: Option<String>,
+    #[serde(default)]
+    pub node_tip_height: Option<i32>,
+    /// matched, different_tips, or unknown. Does not change the selected enforcer branch.
+    #[serde(default)]
+    pub joint_source_status: String,
+
     pub processing: bool,
     pub status: String,
     pub basis: String,

@@ -491,12 +491,12 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
             && r.status == "running"
             && r.capabilities
                 .as_array()
-                .is_some_and(|caps| caps.iter().any(|c| c == "mempool_backed_bmm_bid_snapshots"))
+                .is_some_and(|caps| caps.iter().any(|c| c == "live_bmm_bid_snapshots"))
     });
     let row=sqlx::query("SELECT o.observation_id,o.observed_at,o.run_id,e.source_event_id,e.interpretation_error,
         b.parent_hash,b.requests,
         (e.event_contract_version=$4 AND COALESCE(
-            g.run_id=o.run_id AND g.consistency='stable' AND g.revision_before IS NOT NULL AND g.revision_before=g.revision_after
+            g.run_id=o.run_id AND g.consistency='tip_matched' AND g.revision_before IS NULL AND g.revision_after IS NULL
             AND g.tip_before_hash=e.block_hash AND g.tip_after_hash=e.block_hash
             AND g.tip_before_height=e.height AND g.tip_after_height=e.height,
             false)) AS consistent
@@ -509,6 +509,8 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
         .bind(status.meta.dataset_id).bind(run.as_ref().map(|r|r.run_id)).bind(MONITOR_EVENT_CONTRACT_VERSIONS)
         .bind(run.as_ref().map(|r|r.event_contract_version)).fetch_optional(&mut *tx).await?;
     let mut response = BmmAuctionsResponse {
+        mempool_readiness: "unknown".into(),
+        bid_coverage: "observed_only".into(),
         meta: status.meta,
         state: if capable {
             "awaiting_observation"
@@ -549,7 +551,7 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
         } else if raw.is_none() {
             "awaiting_observation"
         } else if response.requests.is_empty() {
-            "empty"
+            "no_observed_bids"
         } else {
             "available"
         }
@@ -562,7 +564,7 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
         }
         if let (Some(tip), Some(parent)) = (&status.latest_observed_block, &response.parent_hash)
             && tip.hash != *parent
-            && matches!(response.state.as_str(), "available" | "empty")
+            && matches!(response.state.as_str(), "available" | "no_observed_bids")
         {
             response.state = "awaiting_current_parent".to_owned();
         }
@@ -575,7 +577,7 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
     if status.branch.status == "ambiguous"
         && matches!(
             response.state.as_str(),
-            "available" | "empty" | "awaiting_current_parent"
+            "available" | "no_observed_bids" | "awaiting_current_parent"
         )
     {
         response.state = "branch_unresolved".into();

@@ -67,17 +67,22 @@ fn validate_slot(event: &SourceEvent, body: &Value) -> Result<()> {
 }
 fn header(event: &SourceEvent) -> Result<Header> {
     ensure!(
-        event.event_contract_version == 7,
+        event.event_contract_version == 8,
         "unsupported header contract"
     );
     let name = match event.kind.as_str() {
         "chain_tip" => "ChainTip",
         "mainchain_transition" => "MainchainTransition",
         "block_connected" => "BlockConnected",
-        "bip300_block_delta" => "Bip300BlockDelta",
+        "mainchain_block" => "MainchainBlock",
         _ => bail!("not a header fact"),
     };
-    let body = &event.payload["monitor_event"]["Enforcer"]["event"][name];
+    let source = if event.source == "node" {
+        "Node"
+    } else {
+        "Enforcer"
+    };
+    let body = &event.payload["monitor_event"][source]["event"][name];
     if event.kind == "block_connected" {
         validate_slot(event, body)?;
     }
@@ -101,7 +106,15 @@ fn header(event: &SourceEvent) -> Result<Header> {
         hash,
         parent,
         height,
-        work: work(&h["cumulative_work"])?,
+        work: if event.source == "node" {
+            work(&h["cumulative_work"])?
+        } else {
+            ensure!(
+                h["cumulative_work"].as_str() == Some(""),
+                "official enforcer must not claim cumulative work"
+            );
+            "0".into()
+        },
         block_work: work(&h["block_work"])?,
         time: DateTime::from_timestamp(
             i64::try_from(h["timestamp"].as_u64().context("invalid block timestamp")?)?,
@@ -146,12 +159,13 @@ pub async fn normalize(
     };
     let mut headers = Vec::new();
     let mut facts = Vec::new();
+    let mut reports = Vec::new();
     for event in events {
         if !matches!(
             event.kind.as_str(),
             "chain_tip"
                 | "block_connected"
-                | "bip300_block_delta"
+                | "mainchain_block"
                 | "block_disconnected"
                 | "mainchain_transition"
         ) {
@@ -160,13 +174,23 @@ pub async fn normalize(
         if event.kind == "mainchain_transition" && event.block_hash.is_none() {
             continue; // Unanchored subscription boundary, retained in protocol evidence.
         }
-        let result = if event.kind == "block_disconnected" {
+        let result = if event.kind == "mainchain_transition"
+            && event.payload["monitor_event"]["Enforcer"]["event"]["MainchainTransition"]["action"]
+                == 2
+        {
+            event
+                .block_hash
+                .as_ref()
+                .filter(|h| h.len() == 32)
+                .context("invalid disconnected hash")
+                .map(|_| None)
+        } else if event.kind == "block_disconnected" {
             let h = hash(
                 &event.payload["monitor_event"]["Enforcer"]["event"]["BlockDisconnected"]["block_hash"],
             );
             h.and_then(|h| {
                 ensure!(
-                    event.event_contract_version == 7,
+                    event.event_contract_version == 8,
                     "unsupported disconnect contract"
                 );
                 validate_slot(
@@ -187,7 +211,11 @@ pub async fn normalize(
         };
         let error = match result {
             Ok(Some(h)) => {
-                headers.push(h);
+                if event.source == "node" {
+                    headers.push(h);
+                } else {
+                    reports.push(h);
+                }
                 None
             }
             Ok(None) => None,
@@ -204,6 +232,8 @@ pub async fn normalize(
         ON CONFLICT(dataset_id,generation,hash) DO UPDATE SET last_observed_at=greatest(h.last_observed_at,excluded.last_observed_at),
         conflicted=h.conflicted OR excluded.conflicted OR (h.parent,h.height,h.chain_work,h.block_work,h.block_time) IS DISTINCT FROM (excluded.parent,excluded.height,excluded.chain_work,excluded.block_work,excluded.block_time)")
         .bind(dataset).bind(generation).bind(json!(headers)).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO projection.reported_headers SELECT $1,$2,r.event,r.hash,r.parent,r.height,r.block_work,r.time FROM jsonb_to_recordset($3) AS r(event bigint,hash text,parent text,height integer,block_work numeric,time timestamptz) ON CONFLICT DO NOTHING")
+        .bind(dataset).bind(generation).bind(json!(reports)).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO projection.chain_facts(dataset_id,generation,event_id,hash,kind,slot,instance_id,contract,error)
         SELECT $1,$2,f.event,f.hash,f.kind,f.slot,f.instance,f.contract,coalesce(f.error,CASE WHEN h.conflicted THEN 'conflicting headers for this hash' END)
         FROM jsonb_to_recordset($3) AS f(event bigint,hash text,kind text,slot smallint,instance text,contract integer,error text)
@@ -214,8 +244,10 @@ pub async fn normalize(
     sqlx::query("UPDATE projection.chain_headers h SET conflicted=true WHERE h.dataset_id=$1 AND h.generation=$2
         AND h.hash IN (SELECT encode(block_hash,'hex') FROM ingest.source_events WHERE dataset_id=$1 AND source_event_id>$3 AND source_event_id<=$4)
         AND EXISTS(SELECT 1 FROM ingest.source_events e WHERE e.dataset_id=$1 AND e.block_hash=decode(h.hash,'hex')
-            AND e.source_event_id<=$4 AND e.kind IN ('block_connected','bip300_block_delta')
+            AND e.source_event_id<=$4 AND e.kind IN ('block_connected','mainchain_block')
             GROUP BY e.event_contract_version,e.source,e.kind,e.sidechain,e.sidechain_instance_id,e.block_hash HAVING count(DISTINCT e.fact_sha256)>1)")
+        .bind(dataset).bind(generation).bind(after).bind(next).execute(&mut *tx).await?;
+    sqlx::query("UPDATE projection.chain_headers h SET conflicted=true WHERE h.dataset_id=$1 AND h.generation=$2 AND EXISTS(SELECT 1 FROM projection.chain_facts f WHERE f.dataset_id=$1 AND f.generation=$2 AND f.hash=h.hash AND f.event_id>$3 AND f.event_id<=$4) AND EXISTS(SELECT 1 FROM projection.reported_headers r WHERE r.dataset_id=h.dataset_id AND r.generation=h.generation AND r.hash=h.hash AND (r.parent,r.height,r.block_work,r.block_time) IS DISTINCT FROM (h.parent,h.height,h.block_work,h.block_time))")
         .bind(dataset).bind(generation).bind(after).bind(next).execute(&mut *tx).await?;
     sqlx::query("UPDATE ops.chain_jobs SET event_cursor=$3 WHERE dataset_id=$1 AND generation=$2")
         .bind(dataset)
@@ -283,7 +315,7 @@ async fn assess(conn: &mut PgConnection, d: Uuid, g: i64, state: &mut BranchStat
         None => "unobserved",
     }
     .into();
-    let lower:i32=sqlx::query_scalar("SELECT coalesce(min((row_data->>'coverage_start_height')::integer),$3) FROM (SELECT DISTINCT ON(event_contract_version,source,stream,sidechain,sidechain_instance_id) * FROM ingest.coverage_revisions WHERE dataset_id=$1 AND revision_id<=$2 ORDER BY event_contract_version,source,stream,sidechain,sidechain_instance_id,revision_id DESC) c WHERE stream='bip300_delta' AND lower(operation)<>'delete'")
+    let lower:i32=sqlx::query_scalar("SELECT coalesce(min((row_data->>'coverage_start_height')::integer),$3) FROM (SELECT DISTINCT ON(event_contract_version,source,stream,sidechain,sidechain_instance_id) * FROM ingest.coverage_revisions WHERE dataset_id=$1 AND revision_id<=$2 ORDER BY event_contract_version,source,stream,sidechain,sidechain_instance_id,revision_id DESC) c WHERE stream='mainchain_block' AND source='node' AND lower(operation)<>'delete'")
         .bind(d).bind(state.processed_coverage.parse::<i64>()?).bind(checkpoint).fetch_one(&mut *conn).await?;
     let conflicted:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection.chain_headers h JOIN projection.chain_members m USING(dataset_id,generation,hash) WHERE h.dataset_id=$1 AND h.generation=$2 AND h.conflicted)")
         .bind(d).bind(g).fetch_one(&mut *conn).await?;
@@ -455,6 +487,18 @@ pub async fn apply(
         next.processed_tips = cut.tips.to_string();
         next.processed_coverage = cut.coverage.to_string();
         assess(&mut tx, d, g, &mut next).await?;
+        let node:Option<(String,i32)>=sqlx::query_as("SELECT encode(t.tip_hash,'hex'),t.tip_height FROM ingest.tip_observations t JOIN ingest.extractor_runs r USING(run_id) WHERE t.dataset_id=$1 AND r.source='node' AND t.tip_observation_id<=$2 ORDER BY t.tip_observation_id DESC LIMIT 1")
+            .bind(d).bind(cut.tips).fetch_optional(&mut *tx).await?;
+        next.node_tip_hash = node.as_ref().map(|n| n.0.clone());
+        next.node_tip_height = node.map(|n| n.1);
+        next.joint_source_status = if next.tip_hash.is_none() || next.node_tip_hash.is_none() {
+            "unknown"
+        } else if next.tip_hash == next.node_tip_hash && next.tip_height == next.node_tip_height {
+            "matched"
+        } else {
+            "different_tips"
+        }
+        .into();
         // Malformed redundant facts remain diagnostics. Only unresolved header
         // evidence on the selected path (including its missing boundary) blocks
         // its completeness; independent valid headers can repair missing ones.
@@ -530,7 +574,7 @@ async fn certify(
             .and_then(|x| i32::try_from(x).ok());
         let stream: String = r.try_get("stream")?;
         let kind = match stream.as_str() {
-            "bip300_delta" => Some("bip300_block_delta"),
+            "mainchain_block" => Some("mainchain_block"),
             "block" => Some("block_connected"),
             _ => None,
         };
@@ -547,7 +591,9 @@ async fn certify(
                 .as_str()
                 .map(|s| s.trim_start_matches("\\x").to_lowercase());
             let compatible:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND height=$3 AND hash=$4)").bind(d).bind(g).bind(end).bind(&target).fetch_one(&mut *conn).await?;
-            if state.status == "ambiguous" {
+            if state.joint_source_status != "matched" {
+                result.status = "sources_not_matched".into();
+            } else if state.status == "ambiguous" {
                 result.status = "branch_ambiguous".into();
             } else if !compatible {
                 result.status = "branch_mismatch".into();

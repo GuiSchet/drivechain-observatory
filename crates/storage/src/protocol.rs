@@ -12,11 +12,13 @@ pub struct ProtocolQuery {
     pub kind: Option<String>,
     pub hash: Option<String>,
     pub key: Option<String>,
+    /// Exact instance identity recorded when capturing an observation.
+    pub instance_id: Option<String>,
     pub from_height: Option<i32>,
     pub to_height: Option<i32>,
     pub from_time: Option<DateTime<Utc>>,
     pub to_time: Option<DateTime<Utc>>,
-    /// block (default), observation, or ingestion.
+    /// observation (history default), block (facts default), or ingestion.
     pub time_basis: Option<String>,
     pub q: Option<String>,
     pub limit: Option<u32>,
@@ -124,7 +126,7 @@ pub(super) async fn context(
 pub(super) async fn current_state(
     tx: &mut Transaction<'_, Postgres>,
     c: &ProtocolContext,
-) -> Result<Option<pulse_source::replay::State>, StorageError> {
+) -> Result<Option<pulse_source::observations::State>, StorageError> {
     if !matches!(c.state.as_str(), "available" | "partial") {
         return Ok(None);
     }
@@ -232,9 +234,9 @@ pub async fn observatory(
     let c = context(&mut tx, &d).await?;
     let state:Option<Value>=sqlx::query_scalar("SELECT state FROM ops.protocol_builds WHERE build_id=$1 AND dataset_id=$2 AND generation=$3").bind(c.build_id.as_ref().and_then(|s|s.parse::<i64>().ok())).bind(d.dataset_id).bind(c.meta.projection_generation).fetch_optional(&mut *tx).await?;
     let rows=sqlx::query("SELECT DISTINCT ON(e.kind,e.sidechain) o.observation_id::text AS id,NULL::text AS entity_id,e.kind,e.sidechain AS slot,encode(e.block_hash,'hex') AS hash,e.height,o.observed_at,h.block_time,
-        CASE WHEN f.error IS NOT NULL THEN 'unknown' WHEN s.consistency='stable' AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=s.tip_after_height AND s.tip_before_hash=e.block_hash AND s.tip_before_height=e.height AND s.run_id=o.run_id AND s.dataset_id=o.dataset_id AND m.hash IS NOT NULL THEN 'observed' ELSE 'unknown' END AS quality,
+        CASE WHEN f.error IS NOT NULL THEN 'unknown' WHEN s.consistency='tip_matched' AND s.revision_before IS NULL AND s.revision_after IS NULL AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=s.tip_after_height AND s.run_id=o.run_id AND s.dataset_id=o.dataset_id THEN 'tip_matched' ELSE 'unknown' END AS quality,
         jsonb_build_array(jsonb_build_object('event_id',e.source_event_id::text,'ordinal',coalesce(f.ordinal,0),'observation_id',o.observation_id::text)) AS evidence,
-        jsonb_build_object('value',f.data,'snapshot_group_id',s.snapshot_group_id,'consistency',s.consistency,'run_id',o.run_id,'capture_seq',o.capture_seq::text,'capture_method',o.capture_method,'tip_before_hash',encode(s.tip_before_hash,'hex'),'tip_before_height',s.tip_before_height,'tip_after_hash',encode(s.tip_after_hash,'hex'),'tip_after_height',s.tip_after_height,'started_at',s.started_at,'finished_at',s.finished_at,'attempts',s.attempts) AS data,f.error AS issue
+        jsonb_build_object('value',f.data,'atomicity_proven',false,'snapshot_group_id',s.snapshot_group_id,'consistency',s.consistency,'run_id',o.run_id,'capture_seq',o.capture_seq::text,'capture_method',o.capture_method,'tip_before_hash',encode(s.tip_before_hash,'hex'),'tip_before_height',s.tip_before_height,'tip_after_hash',encode(s.tip_after_hash,'hex'),'tip_after_height',s.tip_after_height,'started_at',s.started_at,'finished_at',s.finished_at,'attempts',s.attempts) AS data,f.error AS issue
         FROM ingest.extractor_status status JOIN ingest.event_observations o ON o.dataset_id=status.dataset_id AND o.run_id=status.run_id JOIN ingest.source_events e ON e.dataset_id=o.dataset_id AND e.source_event_id=o.source_event_id
         LEFT JOIN projection.protocol_facts f ON f.dataset_id=e.dataset_id AND f.generation=$2 AND f.event_id=e.source_event_id AND f.ordinal=0
         LEFT JOIN ingest.snapshot_groups s USING(snapshot_group_id)
@@ -301,6 +303,11 @@ async fn list_bounded(
     if history {
         let state = current_state(&mut tx, &c).await?;
         for i in &mut items {
+            if i.hash.is_none() {
+                // Snapshot membership and exact block state are unknown.
+                i.is_current = None;
+                continue;
+            }
             if i.membership != "selected" {
                 i.is_current = Some(false);
                 continue;
@@ -345,7 +352,10 @@ async fn list_bounded(
     }
     if resource == "sidechain-instances" {
         for i in &mut items {
-            if i.is_current != Some(true) && i.data.get("ended_height").is_none() {
+            if i.hash.is_some()
+                && i.is_current != Some(true)
+                && i.data.get("ended_height").is_none()
+            {
                 let last:Option<i32>=sqlx::query_scalar("SELECT max(p.height) FROM projection.protocol_history p JOIN projection.chain_members m ON m.dataset_id=p.dataset_id AND m.generation=p.generation AND m.hash=p.hash WHERE p.dataset_id=$1 AND p.generation=$2 AND p.kind='instance' AND p.entity_key=$3 AND p.data->>'status'='active' AND p.build_id<=$4 AND NOT EXISTS(SELECT 1 FROM projection.protocol_block_versions v WHERE v.dataset_id=p.dataset_id AND v.generation=p.generation AND v.hash=p.hash AND v.build_id>p.build_id AND v.build_id<=$4)").bind(c.meta.dataset_id).bind(c.meta.projection_generation).bind(&i.entity_id).bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok())).fetch_one(&mut *tx).await?;
                 if let Some(data) = i.data.as_object_mut() {
                     data.insert("last_active_height".into(), json!(last));
@@ -361,7 +371,14 @@ async fn list_bounded(
                 &q,
                 resource,
                 &c,
-                vec![i.height.unwrap_or(-1).to_string(), i.id.clone()],
+                vec![
+                    if history {
+                        i.observed_at.map(|t| t.to_rfc3339()).unwrap_or_default()
+                    } else {
+                        i.height.unwrap_or(-1).to_string()
+                    },
+                    i.id.clone(),
+                ],
             )
         })
     } else {
@@ -398,6 +415,9 @@ fn apply_filters<'a>(
     if let Some(key) = &q.key {
         qb.push(format!(" AND ({alias}.entity_key=")).push_bind(key).push(format!(" OR EXISTS(SELECT 1 FROM projection.protocol_aliases a WHERE a.dataset_id={alias}.dataset_id AND a.generation={alias}.generation AND a.kind={alias}.kind AND a.target={alias}.entity_key AND a.alias=")).push_bind(key).push("))");
     }
+    if let Some(instance) = &q.instance_id {
+        qb.push(" AND e.sidechain_instance_id=").push_bind(instance);
+    }
     if let Some(h) = q.from_height {
         qb.push(format!(" AND {alias}.height>=")).push_bind(h);
     }
@@ -411,10 +431,18 @@ fn apply_filters<'a>(
         qb.push(format!(" AND ({alias}.hash IS NULL OR EXISTS(SELECT 1 FROM projection.chain_members m WHERE m.dataset_id={alias}.dataset_id AND m.generation={alias}.generation AND m.hash={alias}.hash))"));
     }
     if history {
-        qb.push(format!(" AND {alias}.height<="))
-            .push_bind(c.anchor_height.unwrap_or(-1));
+        qb.push(format!(" AND ({alias}.height IS NULL OR {alias}.height<="))
+            .push_bind(c.anchor_height.unwrap_or(-1))
+            .push(")");
     }
-    let time = match q.time_basis.as_deref().unwrap_or("block") {
+    let time = match q.time_basis.as_deref().unwrap_or(if history {
+        "observation"
+    } else {
+        "block"
+    }) {
+        "observation" if history => {
+            "coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id),e.observed_at)"
+        }
         "observation" => "e.observed_at",
         "ingestion" => "e.imported_at",
         _ => "h.block_time",
@@ -452,11 +480,12 @@ async fn history_page(
         "withdrawal-bundles" | "bundle-attempts" | "sidechain-proposals" | "sidechain-instances"
     );
     let mut qb = sqlx::QueryBuilder::new(if latest {
-        "WITH candidates AS (SELECT DISTINCT ON(p.kind,p.entity_key) p.*,e.observed_at,h.block_time FROM projection.protocol_history p"
+        "WITH candidates AS (SELECT DISTINCT ON(p.kind,p.entity_key) p.*,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id),e.observed_at) AS observed_at,h.block_time FROM projection.observed_history p"
     } else {
-        "WITH candidates AS (SELECT p.*,e.observed_at,h.block_time FROM projection.protocol_history p"
+        "WITH candidates AS (SELECT p.*,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id),e.observed_at) AS observed_at,h.block_time FROM projection.observed_history p"
     });
     qb.push(" LEFT JOIN ingest.source_events e ON e.dataset_id=p.dataset_id AND e.source_event_id=(p.evidence->0->>'event_id')::bigint LEFT JOIN projection.chain_headers h ON h.dataset_id=p.dataset_id AND h.generation=p.generation AND h.hash=p.hash WHERE p.dataset_id=").push_bind(c.meta.dataset_id).push(" AND p.generation=").push_bind(c.meta.projection_generation).push(" AND p.build_id<=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0));
+    qb.push(" AND (p.observation_id IS NULL OR p.observation_id <= coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).push("),0))");
     if let Some(k) = kind {
         qb.push(" AND p.kind=").push_bind(k);
     }
@@ -470,23 +499,23 @@ async fn history_page(
         if q.scope.as_deref() == Some("all") {
             qb.push("EXISTS(SELECT 1 FROM projection.chain_members m WHERE m.dataset_id=p.dataset_id AND m.generation=p.generation AND m.hash=p.hash) DESC,");
         }
-        qb.push("p.height DESC,p.ordinal DESC");
+        qb.push("p.height DESC NULLS FIRST,p.observation_id DESC,p.ordinal DESC");
     }
-    qb.push("), listed AS (SELECT *,height::text || ':' || hash || ':' || build_id::text || ':' || ordinal::text AS page_id FROM candidates) SELECT page_id AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,block_time,quality,evidence,data,issue FROM listed WHERE true");
+    qb.push("), listed AS (SELECT *,coalesce(height,-1)::text || ':' || coalesce(hash,lpad(observation_id::text,20,'0')) || ':' || build_id::text || ':' || ordinal::text AS page_id FROM candidates) SELECT page_id AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,block_time,quality,evidence,data,issue FROM listed WHERE true");
     if let Some(p) = page {
-        let height = p
+        let observed = p
             .after
             .first()
-            .and_then(|v| v.parse::<i32>().ok())
+            .and_then(|v| v.parse::<DateTime<Utc>>().ok())
             .ok_or(StorageError::InvalidQuery)?;
         let id = p.after.get(1).ok_or(StorageError::InvalidQuery)?;
-        qb.push(" AND (height,page_id)<(")
-            .push_bind(height)
+        qb.push(" AND (observed_at,page_id)<(")
+            .push_bind(observed)
             .push(",")
             .push_bind(id)
             .push(")");
     }
-    qb.push(" ORDER BY height DESC,page_id DESC LIMIT ")
+    qb.push(" ORDER BY observed_at DESC,page_id DESC LIMIT ")
         .push_bind(i64::from(limit) + 1);
     qb.build()
         .fetch_all(&mut **tx)
@@ -574,7 +603,7 @@ async fn facts_page(
             .push_bind(ordinal)
             .push(")");
     }
-    qb.push(" ORDER BY f.event_id DESC,f.ordinal DESC LIMIT ").push_bind(i64::from(limit)+1).push(") SELECT event_id::text || ':' || ordinal::text AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,block_time,CASE WHEN error IS NULL THEN 'observed' ELSE 'unknown' END AS quality,jsonb_build_array(jsonb_build_object('event_id',event_id::text,'ordinal',ordinal,'observation_id',NULL)) AS evidence,data,error AS issue FROM page ORDER BY event_id DESC,ordinal DESC");
+    qb.push(" ORDER BY f.event_id DESC,f.ordinal DESC LIMIT ").push_bind(i64::from(limit)+1).push(") SELECT event_id::text || ':' || ordinal::text AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,block_time,CASE WHEN error IS NULL THEN 'tip_matched' ELSE 'unknown' END AS quality,jsonb_build_array(jsonb_build_object('event_id',event_id::text,'ordinal',ordinal,'observation_id',NULL)) AS evidence,data,error AS issue FROM page ORDER BY event_id DESC,ordinal DESC");
     qb.build()
         .fetch_all(&mut **tx)
         .await?
@@ -668,7 +697,7 @@ async fn auction_history(
     limit: u32,
 ) -> Result<Vec<ProtocolItem>, StorageError> {
     let mut qb = sqlx::QueryBuilder::new(
-        "SELECT o.observation_id::text AS id,NULL::text AS entity_id,'auction_sample' AS kind,NULL::smallint AS slot,f.hash,f.height,o.observed_at,h.block_time,CASE WHEN s.consistency='stable' AND s.revision_before IS NOT NULL AND s.revision_before=s.revision_after AND s.run_id=o.run_id AND s.dataset_id=o.dataset_id AND encode(s.tip_before_hash,'hex')=f.hash AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=f.height AND s.tip_after_height=f.height THEN 'observed' ELSE 'unknown' END AS quality,jsonb_build_array(jsonb_build_object('event_id',f.event_id::text,'ordinal',f.ordinal,'observation_id',o.observation_id::text)) AS evidence,f.data || jsonb_build_object('snapshot_group_id',s.snapshot_group_id,'run_id',o.run_id,'consistency',s.consistency) AS data,f.error AS issue FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id LEFT JOIN ingest.snapshot_groups s USING(snapshot_group_id) LEFT JOIN projection.chain_headers h ON h.dataset_id=f.dataset_id AND h.generation=f.generation AND h.hash=f.hash WHERE f.dataset_id=",
+        "SELECT o.observation_id::text AS id,NULL::text AS entity_id,'auction_sample' AS kind,NULL::smallint AS slot,f.hash,f.height,o.observed_at,h.block_time,CASE WHEN s.consistency='tip_matched' AND s.revision_before IS NULL AND s.revision_after IS NULL AND s.run_id=o.run_id AND s.dataset_id=o.dataset_id AND encode(s.tip_before_hash,'hex')=f.hash AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=f.height AND s.tip_after_height=f.height THEN 'tip_matched' ELSE 'unknown' END AS quality,jsonb_build_array(jsonb_build_object('event_id',f.event_id::text,'ordinal',f.ordinal,'observation_id',o.observation_id::text)) AS evidence,f.data || jsonb_build_object('snapshot_group_id',s.snapshot_group_id,'run_id',o.run_id,'consistency',s.consistency) AS data,f.error AS issue FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id LEFT JOIN ingest.snapshot_groups s USING(snapshot_group_id) LEFT JOIN projection.chain_headers h ON h.dataset_id=f.dataset_id AND h.generation=f.generation AND h.hash=f.hash WHERE f.dataset_id=",
     );
     qb.push_bind(c.meta.dataset_id).push(" AND f.generation=").push_bind(c.meta.projection_generation).push(" AND f.kind='auction' AND f.event_id<=").push_bind(c.source_event_cut.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).push(" AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok())).push("),0)");
     let mut no_slot = q.clone();

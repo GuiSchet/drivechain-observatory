@@ -11,15 +11,6 @@ pub fn auction(payload: &Value, anchor: Option<&[u8]>) -> Result<(String, Vec<Bm
     let snapshot = payload
         .pointer("/monitor_event/Enforcer/event/BmmRequests")
         .context("missing BmmRequests payload")?;
-    if snapshot["observer_session"]
-        .as_str()
-        .is_none_or(str::is_empty)
-        || snapshot["mempool_generation"]
-            .as_u64()
-            .is_none_or(|g| g == 0)
-    {
-        bail!("BMM sample has no ready mempool generation");
-    }
     let mut identities = std::collections::BTreeSet::new();
     let parent = hash(&snapshot["previous_mainchain_block_hash"])?;
     if anchor.is_none_or(|bytes| hex::encode(bytes) != parent) {

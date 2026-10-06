@@ -15,7 +15,7 @@ export function BranchSummary({ branch, dataset }: { branch: Branch; dataset: st
   return <section className="panel compact-panel branch-panel" aria-label="Observed branch">
     <h2>Observed branch · {branch.status}</h2><p>{basis[branch.basis] ?? branch.basis.replaceAll("_", " ")}</p>
     <dl className="facts"><dt>Selected tip</dt><dd>{branch.tip_hash ? <Link className="text-link hash" href={`/datasets/${dataset}/blocks/${branch.tip_hash}`}>{branch.tip_height} · {branch.tip_hash}</Link> : "No selection yet"}</dd>
-      <dt>Verified lower boundary</dt><dd>{branch.verified_from_height ?? "Not established"}</dd>
+      <dt>Node tip</dt><dd className="hash">{branch.node_tip_hash ?? "Unknown"}</dd><dt>Source agreement</dt><dd>{branch.joint_source_status || "Unknown"}</dd><dt>Verified lower boundary</dt><dd>{branch.verified_from_height ?? "Not established"}</dd>
       <dt>Activation checkpoint</dt><dd>{branch.checkpoint_status}</dd>
       <dt>Selection evidence</dt><dd>{branch.evidence_type?.replaceAll("_", " ") ?? "None"}{branch.evidence_id && ` #${branch.evidence_id}`} · revision {branch.revision}</dd>
       {branch.missing_parent && <><dt>Missing parent</dt><dd className="hash">{branch.missing_parent}</dd></>}

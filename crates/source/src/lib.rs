@@ -2,12 +2,10 @@
 //! source envelope; typed values are an interpretation, never its replacement.
 pub mod model;
 pub mod normalize;
-pub mod replay;
+pub mod observations;
 pub use model::*;
 
-pub const MONITOR_COMMIT: &str = "ecf5b8290e6b5501508a4a3913bd93c83728cca1";
-pub const ENFORCER_COMMIT: &str = "9b2a15621469a88ea5d3b8f1dcd5ee1bb21e0ac4";
-pub const SEMANTICS_VERSION: &str = "observer-v7-work-readiness-revision";
+pub const SEMANTICS_VERSION: &str = "official-observations-v8";
 pub const KINDS: &[(&str, &str)] = &[
     ("mainchain_transition", "MainchainTransition"),
     ("confirmed_bmm_fees", "ConfirmedBmmFees"),
@@ -19,7 +17,7 @@ pub const KINDS: &[(&str, &str)] = &[
     ("block_connected", "BlockConnected"),
     ("block_disconnected", "BlockDisconnected"),
     ("withdrawal_bundle_proposals", "WithdrawalBundleProposals"),
-    ("bip300_block_delta", "Bip300BlockDelta"),
+    ("mainchain_block", "MainchainBlock"),
     ("bmm_requests", "BmmRequests"),
 ];
 
@@ -34,6 +32,7 @@ pub fn body<'a>(
     Ok(Some(
         payload
             .pointer(&format!("/monitor_event/Enforcer/event/{name}"))
+            .or_else(|| payload.pointer(&format!("/monitor_event/Node/event/{name}")))
             .context("event kind differs from payload variant")?,
     ))
 }

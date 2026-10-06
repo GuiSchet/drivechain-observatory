@@ -6,11 +6,10 @@ database/role names and API fields such as `pulse_revision` remain compatible.
 The rename requires no database migration or evidence rewrite. Historical
 fixture labels are retained with their original hashes and protobuf envelopes.
 
-Public Betanet BIP300/301 observatory consuming a **fresh monitor contract v7 /
-SQL schema8 dataset**. This release candidate uses the reviewed monitor and
-observer sources in [SOURCE_CONTRACT.md](SOURCE_CONTRACT.md); deployment is
-operated separately. Projection version 6 includes the
-complete protocol read model and visual explorer.
+Public Betanet BIP300/301 observatory consuming a **fresh monitor contract 8 /
+SQL schema 9 dataset**, with projection 7. It uses unmodified official enforcer
+APIs and independent node evidence; unsupported protocol effects remain unknown.
+See [SOURCE_CONTRACT.md](SOURCE_CONTRACT.md). Deployment is operated separately.
 
 ## Architecture
 
@@ -55,9 +54,9 @@ Run the isolated fixture, migration and behavioral integration suite:
 
 Requires Docker Compose, Rust, Python 3 and curl; uses loopback ports
 55433/55434/18080/18081. It creates and removes only its own temporary Compose
-project. The default v7 fixture uses all eight actual monitor migrations and
+project. The default v8 fixture uses all nine actual monitor migrations and
 a separate Observatory database. The exact upstream files are included under
-`fixtures/upstream/bip300-monitor`, with their commit, license and checksums;
+`fixtures/v8`, with their commit, license and checksums;
 no sibling monitor checkout is needed. Older v5 suites remain historical references.
 
 To include Chromium checks against that same fixture, run:
@@ -75,7 +74,7 @@ loopback port 13000. One option is a separate temporary npm project:
 For an existing installation outside the project, set
 `PULSE_PLAYWRIGHT_MODULE` to its absolute module entrypoint and
 `PULSE_BROWSER_EXECUTABLE` to the Chromium executable. Screenshots are written to
-`/tmp/drivechain-observatory-browser-v7` (override with `PULSE_BROWSER_ARTIFACTS`).
+`/tmp/drivechain-observatory-browser-official` (override with `PULSE_BROWSER_ARTIFACTS`).
 
 For interactive development, start the two databases using `compose.dev.yaml`,
 run migrations with the admin role, run `pulse-sync` with the reader/sync roles,
@@ -107,49 +106,25 @@ evidence, verified boundary and uncertainty. Development verification uses
 isolated fixtures. Live-dataset certification, public deployment, backup/restore,
 retention and public-load checks remain operator work.
 
-## Branch reconstruction and explorer
+## Branches and observation quality
 
-Projection version 6 normalizes protocol state and headers, preserves conflicting facts, and follows
-explicit tip observations in the current run. Compatible live extensions stay
-provisional; contradictory live observations stay ambiguous until reconciled.
-Backfill can repair gaps but does not select a newer tip by itself. Chainwork is
-a lossless decimal string decoded from the monitor's little-endian uint256.
+Projection 7 follows the enforcer's observed tip while independently importing
+node headers and raw blocks. Alternatives and conflicting facts remain visible.
+Node/enforcer disagreement blocks joint certification. Chainwork is a lossless
+decimal string decoded from node little-endian uint256.
 
-Block lists default to the selected branch, 50 rows, descending height/hash.
-Use `scope=all`, `height`, `slot`, `dataset`, `limit` (1–200) and `cursor`.
-Cursors bind their filters and projection generation; selected-branch cursors
-also bind the branch revision. HTTP 409 `cursor_reset_required` means restart
-pagination. Block details retain alternatives and expose up to 200 facts and
-occurrences with explicit truncation. Evidence links keep the dataset identity.
+State responses are separate unanchored observations. Matching read-window tips
+are not atomic state. Latest invalid/changed occurrences cannot borrow earlier
+quality. Charts show points by observation time, with exact values in tables.
+There is no local protocol rules engine; voting, expiry and historical BMM
+eligibility are not inferred. Fees cover only previously observed matching bids.
 
-Start a new Observatory destination for the fresh v7 dataset. Old datasets are retained
-separately, not migrated. For later projection changes **within that v7 dataset**,
-`pulse-sync rebuild --dataset-id <uuid>` uses only local evidence and destination
-credentials, resumes checkpoints, and publishes a new generation atomically.
-Version 6 uses `observer-v7-work-readiness-revision`. Apply the additive SQL migration, then
-rebuild the existing v7 dataset before restarting sync. An older active generation
-remains readable until atomic promotion; checkpoints from older implementations cannot resume
-under the new semantics. Source IDs, envelopes and dataset identity are retained.
-See [deploy/README.md](deploy/README.md) for the maintenance window.
+Lists paginate with bounded limits and cursors tied to dataset, filters,
+projection/build and branch revision. A 409 cursor reset requires restarting
+pagination. Evidence links retain their dataset. History time filters default
+to occurrence time; explicit block filters exclude unanchored observations.
+Exports retain filters and report the 10,000-row truncation boundary.
 
-Errors are isolated by family and known slot. Block replay excludes snapshots and
-mempool samples; snapshot diagnostics require a reviewed occurrence and stable,
-branch-compatible group. Historical gaps remain visible even after a later
-snapshot recovers current state. Malformed redundant headers do not freeze a
-branch supported by independent valid evidence; contradictory valid headers do.
-`ReplaceActive` preserves pending withdrawals and their previous completeness.
-Verified constants can survive a reviewed restart in the same dataset, with
-`parameters_evidence` identifying their source; incompatible builds inherit no
-semantic support. “No CTIP” is an observed absence, distinct from a coverage gap.
-
-Protocol lists default to 50 rows (maximum 200); filters include `dataset`,
-`scope`, `slot`, `kind`, `hash`, `key`, `q`, height/time bounds and `time_basis`.
-Their cursors also bind the immutable build. Exports preserve those filters and
-report a 10,000-row truncation boundary. `source_event_cut` is the build's scan
-boundary; completeness is separately qualified by family progress and the
-conservative REST/SSE watermark.
-
-Add `PULSE_SCALE_TESTS=1` to `scripts/verify-local.sh` to generate a disposable
-million-event fixture, interrupt/resume rebuilding, inspect an indexed query
-plan and measure one incremental extension. The report is written to
-`/tmp/drivechain-observatory-scale-v7.json`. It can be combined with browser checks.
+Use a fresh destination database for the new contract-8 dataset and retain the
+old paired binaries/databases. Rebuilds operate only within the same dataset;
+they cannot turn old fork evidence into official-source guarantees.

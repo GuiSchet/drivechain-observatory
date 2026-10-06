@@ -16,6 +16,7 @@ cleanup() {
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
+(cd fixtures/v8 && sha256sum --check SHA256SUMS)
 cargo build --workspace --offline --locked
 if [ "${PULSE_BROWSER_TESTS:-0}" = 1 ]; then
   NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:18080 npm --prefix apps/web run build
@@ -38,4 +39,23 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ "$ready" = true ] || { echo 'API readiness timed out' >&2; exit 1; }
-python3 scripts/test-protocol.py
+python3 scripts/test-official-protocol.py
+
+# Prove paired dump/restore with real PostgreSQL, including evidence and projection.
+# Both databases belong only to this disposable Compose project.
+for service in monitor_fixture postgres; do
+  if [ "$service" = monitor_fixture ]; then
+    owner=monitor_owner; database=bip300_monitor
+    probe='SELECT (SELECT max(version) FROM schema_version),(SELECT count(*) FROM event),(SELECT count(*) FROM event_observation),(SELECT count(*) FROM history_coverage), (SELECT string_agg(dataset_id::text,chr(44) ORDER BY dataset_id) FROM dataset_manifest)'
+  else
+    owner=pulse_admin; database=drivechain_pulse
+    probe='SELECT (SELECT count(*) FROM ingest.source_events),(SELECT count(*) FROM ingest.event_observations),(SELECT count(*) FROM projection.snapshot_history),(SELECT count(*) FROM ops.protocol_builds),(SELECT string_agg(dataset_id::text,chr(44) ORDER BY dataset_id) FROM ops.active_dataset)'
+  fi
+  compose exec -T "$service" pg_dump -U "$owner" -d "$database" -Fc -f /tmp/paired-test.dump
+  compose exec -T "$service" createdb -U "$owner" restore_probe
+  compose exec -T "$service" pg_restore --exit-on-error -U "$owner" -d restore_probe /tmp/paired-test.dump
+  before=$(compose exec -T "$service" psql -XAt -U "$owner" -d "$database" -c "$probe")
+  after=$(compose exec -T "$service" psql -XAt -U "$owner" -d restore_probe -c "$probe")
+  [ "$before" = "$after" ] || { echo "Backup mismatch: $service" >&2; exit 1; }
+  echo "PASS paired dump/restore $service: $after"
+done

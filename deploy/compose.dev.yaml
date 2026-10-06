@@ -23,9 +23,10 @@ services:
       - ../fixtures/upstream/bip300-monitor/shared/schema/0005_event_fact_identity.sql:/docker-entrypoint-initdb.d/05-identity.sql:ro
       - ../fixtures/upstream/bip300-monitor/shared/schema/0006_worker_health_and_observation_order.sql:/docker-entrypoint-initdb.d/06-workers.sql:ro
       - ../fixtures/upstream/bip300-monitor/shared/schema/0007_single_active_run.sql:/docker-entrypoint-initdb.d/07-single-run.sql:ro
-      - ../fixtures/v7/0008_observation_quality.sql:/docker-entrypoint-initdb.d/08-quality.sql:ro
-      - ../fixtures/0010_v7_fixture.sql:/docker-entrypoint-initdb.d/09-fixture.sql:ro
-      - ../fixtures/0008_reader.sql:/docker-entrypoint-initdb.d/10-reader.sql:ro
+      - ../fixtures/v8/0008_observation_quality.sql:/docker-entrypoint-initdb.d/08-quality.sql:ro
+      - ../fixtures/v8/0009_official_sources.sql:/docker-entrypoint-initdb.d/09-official.sql:ro
+      - ../fixtures/0011_v8_fixture.sql:/docker-entrypoint-initdb.d/10-fixture.sql:ro
+      - ../fixtures/0008_reader.sql:/docker-entrypoint-initdb.d/11-reader.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U monitor_owner -d bip300_monitor"]
       interval: 3s

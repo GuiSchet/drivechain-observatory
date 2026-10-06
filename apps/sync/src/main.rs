@@ -315,7 +315,7 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
             .context("reading monitor schema version")?;
     if schema_version != REQUIRED_MONITOR_SCHEMA_VERSION {
         return Err(incompatible(format!(
-            "monitor SQL schema {schema_version}; reviewed schema 8 is required"
+            "monitor SQL schema {schema_version}; reviewed schema 9 is required"
         )));
     }
     // Probe the actual required columns, including additive v5/v6 migrations.
@@ -346,7 +346,6 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
     .await?
     .ok_or_else(|| incompatible("configured dataset has no current enforcer run"))?;
     if !MONITOR_EVENT_CONTRACT_VERSIONS.contains(&run.event_contract_version)
-        || run.status != "running"
         || !REQUIRED_CAPABILITIES.iter().all(|cap| {
             run.capabilities
                 .as_array()
@@ -354,15 +353,15 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         })
     {
         return Err(incompatible(
-            "current run must provide contract v7 and all required capabilities",
+            "current run must provide contract v8 and all required capabilities",
         ));
     }
-    if run.event_contract_version == 7 {
-        if schema_version < 8 {
-            return Err(incompatible("monitor contract v7 requires SQL schema 8"));
+    if run.event_contract_version == 8 {
+        if schema_version < 9 {
+            return Err(incompatible("monitor contract v8 requires SQL schema 9"));
         }
         let old_identity: bool = sqlx::query_scalar(
-            "SELECT d.initial_event_contract_version <> 7 FROM dataset_manifest d WHERE d.dataset_id=$1",
+            "SELECT d.initial_event_contract_version <> 8 FROM dataset_manifest d WHERE d.dataset_id=$1",
         )
         .bind(run.dataset_id)
         .fetch_one(source)

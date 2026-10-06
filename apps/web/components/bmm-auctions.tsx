@@ -9,13 +9,13 @@ import type { Auctions } from "@/lib/types";
 const explanations: Record<string, string> = {
   branch_unresolved: "The branch evidence is ambiguous. This retained sample is not a confirmed current auction.",
   available: "Requests seen in the latest successful auction poll.",
-  empty: "The latest successful poll contained no requests.",
+  no_observed_bids: "The API returned no bids. Mempool readiness and complete bid coverage are unknown.",
   stale: "The last sample is retained below. Its freshness is no longer established.",
   rpc_error: "The BMM worker reported a failure. The last sample is retained; this does not mean the auction is empty.",
   unavailable: "The current source has not advertised the required BMM capability.",
   awaiting_observation: "Waiting for a successfully imported and interpreted BMM sample.",
   interpretation_error: "The latest sample could not be interpreted. Inspect its evidence.",
-  inconsistent_snapshot: "The latest sample lacks matching stable-parent evidence. Retained bids do not establish a current auction.",
+  inconsistent_snapshot: "The latest sample lacks matching tip reads. Retained bids do not establish a current auction.",
   awaiting_current_parent: "The latest sample belongs to a different parent from the latest observed tip.",
 };
 export function BmmAuctions({ initial }: { initial: Auctions | null }) {
@@ -23,7 +23,7 @@ export function BmmAuctions({ initial }: { initial: Auctions | null }) {
   const data = query.data;
   return <main className="detail-shell">
     <div className="eyebrow">BIP301 · OBSERVED AUCTIONS</div><h1>BMM auctions</h1>
-    <p className="lede">Explore unconfirmed bids sampled by the Betanet monitor. Requests can enter and leave between polls.</p>
+    <p className="lede">Explore unconfirmed bids sampled by the Betanet monitor. Requests can enter and leave between polls. Mempool readiness and complete bid coverage are unknown.</p>
     <section className="panel compact-panel" aria-live="polite">
       <h2>{query.isError ? "API unavailable" : data?.state.replaceAll("_", " ") ?? "Awaiting data"}</h2>
       <p>{query.isError ? "Retrying. Any sample below is the last successfully loaded view." : data ? explanations[data.state] : "Waiting for the first synchronized sample."}</p>
