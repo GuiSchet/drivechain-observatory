@@ -6,6 +6,7 @@ import { Suspense, useState, type ReactNode } from "react";
 import { ApiFailure, apiBaseUrl, getJson } from "@/lib/api";
 import type { ProtocolContext, ProtocolItem, ProtocolPage } from "@/lib/types";
 import { apiQuery, array, at, detailHref, exact, label, number, object, short, text, title } from "@/lib/protocol";
+import { useUnit } from "@/lib/unit";
 
 export function Quality({ value }: { value: string }) { return <span className={`quality quality-${value}`}>{label(value)}</span>; }
 export function CopyValue({ value }: { value: string }) {
@@ -13,52 +14,53 @@ export function CopyValue({ value }: { value: string }) {
   return <span className="copy-value"><span className="hash">{value}</span><button aria-label={`Copy ${value}`} onClick={async () => { try { await navigator.clipboard.writeText(value); setCopied(true); } catch { setCopied(false); } }}>{copied ? "Copied" : "Copy"}</button></span>;
 }
 export function ContextNote({ context }: { context: ProtocolContext }) {
-  return <aside className="context-note" aria-label="Reconstruction context"><Quality value={context.state}/><span>At {context.anchor_height == null ? "unknown height" : `block ${context.anchor_height.toLocaleString("en-US")}`}</span><span>Branch {context.branch.status}</span>
+  return <aside className="context-note" aria-label="Observation context"><Quality value={context.state}/><span>At {context.anchor_height == null ? "unknown height" : `block ${context.anchor_height.toLocaleString("en-US")}`}</span><span>Branch {context.branch.status}</span>
     {!context.semantics_supported && <strong>{context.semantics_issue ?? "Historical protocol effects are not exposed by the official API."} Derived thresholds are unavailable.</strong>}
     <Link className="text-link" href="/about/data">Coverage and provenance</Link>
     {context.families.filter(f => f.first_error_event_id).map(f => <span className="error-text" key={f.family}>{f.family}: interpretation stopped at <Link className="text-link" href={`/datasets/${context.meta.dataset_id}/events/${f.first_error_event_id}`}>event {f.first_error_event_id}</Link></span>)}
   </aside>;
 }
 function Value({ value, name }: { value: unknown; name: string }) {
+  const unit = useUnit();
   if (value === null || value === undefined) return <>Unknown</>;
-  if (name.endsWith("sats")) return <>{exact(value)} sats</>;
+  if (name.endsWith("sats")) return <>{exact(value)} {unit}</>;
   const v = text(value);
   return v.length > 45 ? <CopyValue value={v}/> : <>{v}</>;
 }
 function DataFields({ value, omit = [] }: { value: unknown; omit?: string[] }) {
   return <dl className="facts">{Object.entries(object(value)).filter(([k,v]) => !omit.includes(k) && (v === null || typeof v !== "object")).map(([k,v]) => <div className="fact-row" key={k}><dt>{label(k)}</dt><dd><Value name={k} value={v}/></dd></div>)}</dl>;
 }
-function VoteWindow({ item, context }: { item: ProtocolItem; context: ProtocolContext }) {
+// The official API reports vote counts but no thresholds or expiry, so only
+// the count and the age at the read's own tip are shown; nothing is inferred.
+function VoteWindow({ item }: { item: ProtocolItem }) {
   const d = object(item.data), state = object(d.bundle ?? d.proposal);
-  const votes = number(state.vote_count), required = number(d.required_votes), maxAge = number(d.max_age), proposed = number(state.proposal_height);
-  const current = item.membership === "selected" && item.is_current===true && d.status === "pending" && ["available", "partial"].includes(context.state);
-  const age = proposed != null && context.anchor_height != null && current ? context.anchor_height - proposed : undefined;
-  const left = age != null && maxAge != null ? Math.max(0,maxAge - age) : undefined;
-  const needed = votes != null && required != null ? Math.max(0,required-votes) : undefined;
-  return <div className="vote-window"><strong>{votes ?? "Unknown"} votes{required != null && ` / ${required} required`}</strong>
-    {votes != null && required != null && <meter aria-label="Votes relative to required threshold" min={0} max={Math.max(1,required)} value={Math.min(votes,required)}/>}
-    <p>{age == null ? "Age at the current tip is unavailable." : `Age ${age} blocks.`} {left != null && `${left} future voting opportunities before the age limit.`} {needed != null && `${needed} additional votes required.`}</p>
-    {item.kind === "bundle" && left != null && needed != null && <p>Theoretical margin: {left-needed} blocks. Votes may decrease; this is not a success probability.</p>}
+  const votes = number(state.vote_count), proposed = number(state.proposal_height);
+  const tip = number(object(d.observation_window).reference_tip_height);
+  const age = proposed != null && tip != null ? tip - proposed : undefined;
+  return <div className="vote-window"><strong>{votes ?? "Unknown"} votes</strong>
+    <p>{age == null ? "Proposal age unknown." : `Proposal age ${age} blocks at this read's tip (height ${tip!.toLocaleString("en-US")}).`}</p>
   </div>;
 }
 export function ProtocolCard({ item, context, expanded = false }: { item: ProtocolItem; context: ProtocolContext; expanded?: boolean }) {
+  const unit = useUnit();
   const d = object(item.data), href = detailHref(item), dataset = context.meta.dataset_id;
+  const occurrences = Number(text(d.occurrences, "1"));
+  const readAt = number(object(d.observation_window).reference_tip_height);
   const entity = object(d.sidechain ?? d.proposal ?? d.bundle);
   const declaration = at(entity,"declaration","declaration","V0");
   return <article className="protocol-card">
-    <div className="record-heading"><div><span className="section-kicker">{label(item.kind)}{item.slot != null && <> · <Link href={`/sidechains/${item.slot}`}>slot #{item.slot}</Link></>}</span><h3>{href ? <Link className="text-link" href={`${href}?dataset=${dataset}`}>{title(item)}</Link> : title(item)}</h3></div><div className="badges"><Quality value={item.quality}/><Quality value={item.membership}/>{["instance","proposal","bundle"].includes(item.kind)&&<Quality value={item.is_current===true?"current":item.is_current===false?"historical":"current_state_unknown"}/>}{typeof d.status === "string" && <Quality value={d.status}/>}</div></div>
-    <div className="record-times">{item.hash && <Link className="text-link" href={`/datasets/${dataset}/blocks/${item.hash}`}>Block {item.height ?? short(item.hash)}</Link>}{item.block_time && <span>Block time: <time>{item.block_time}</time></span>}{item.observed_at && <span>Observed: <time>{item.observed_at}</time></span>}</div>
+    <div className="record-heading"><div><span className="section-kicker">{label(item.kind)}{item.slot != null && <> · <Link href={`/sidechains/${item.slot}`}>slot #{item.slot}</Link></>}</span><h3>{href ? <Link className="text-link" href={`${href}?dataset=${dataset}`}>{title(item, unit)}</Link> : title(item, unit)}</h3></div><div className="badges"><Quality value={item.quality}/><Quality value={item.membership}/>{item.is_current != null && <Quality value={item.is_current ? "current" : "historical"}/>}{typeof d.status === "string" && <Quality value={d.status}/>}</div></div>
+    <div className="record-times">{item.hash && <Link className="text-link" href={`/datasets/${dataset}/blocks/${item.hash}`}>Block {item.height ?? short(item.hash)}</Link>}{item.block_time && <span>Block time: <time>{item.block_time}</time></span>}{item.observed_at && <span>{occurrences > 1 ? "Last read" : "Observed"}: <time>{item.observed_at}</time></span>}{item.first_observed_at && item.first_observed_at !== item.observed_at && <span>First read: <time>{item.first_observed_at}</time></span>}{occurrences > 1 && <span>Read {occurrences.toLocaleString("en-US")} times</span>}{readAt != null && <span>Holds at least at tip height {readAt.toLocaleString("en-US")}</span>}</div>
     {item.issue && <p className="inline-notice" role="status">{item.issue}</p>}
     {declaration != null && <><p>{text(object(declaration).description, "No declared description")}</p><DataFields value={declaration} omit={["title","description"]}/></>}
-    {(item.kind === "proposal" || item.kind === "bundle") && <VoteWindow item={item} context={context}/>}
+    {(item.kind === "proposal" || item.kind === "bundle") && <VoteWindow item={item}/>}
     {Object.keys(entity).length > 0 && <DataFields value={entity} omit={["raw_description","vote_count"]}/>}
     {item.kind === "ctip" && (d.ctip === null ? <p>This response reported no treasury output during its observation window.</p> : <DataFields value={d.ctip}/>)}
     {item.kind === "deposit" && <DataFields value={d.outpoint}/>}
-    <DataFields value={d} omit={["raw_description","raw_script_pubkey","status","max_age","required_votes","transaction"]}/>
-    {d.message != null && Object.entries(object(d.message)).map(([name,value])=><section key={name}><h4>{name} · {object(d).accepted===true?"Accepted":"Not accepted"}</h4><DataFields value={value}/>{array(object(value).effects).map((effect,i)=><details key={i}><summary>Resolved effect · slot {text(object(effect).sidechain_number)}</summary><pre>{JSON.stringify(effect,null,2)}</pre></details>)}</section>)}
-    {d.transition != null && <DataFields value={d.transition} omit={["transaction"]}/>}
-    {(item.kind === "confirmed_bmm" || item.kind === "confirmed_bmm_fee") && <p>Confirmed fee: {d.fee_sats == null ? "unknown; the sampled bid is a separate observation" : `${exact(d.fee_sats)} sats`}.</p>}
-    {d.requests != null && <div className="table-scroll"><table><caption>Sampled requests ({array(d.requests).length})</caption><thead><tr><th>Slot</th><th>Critical hash</th><th>Bid</th></tr></thead><tbody>{array(d.requests).map((request,i) => { const r=object(request); return <tr key={i}><td>{text(r.sidechain_number)}</td><td className="hash">{text(r.critical_hash)}</td><td>{exact(r.bid_sats)} sats</td></tr>; })}</tbody></table>{!array(d.requests).length && <p>This poll observed no requests.</p>}</div>}
+    {item.kind === "slot_block" && d.bmm_commitment == null && <p>No BMM commitment for this slot in this block (observed absence).</p>}
+    <DataFields value={d} omit={["raw_description","status","max_age","required_votes","transaction","occurrences",...(item.kind === "slot_block" && d.bmm_commitment == null ? ["bmm_commitment"] : [])]}/>
+    {item.kind === "confirmed_bmm_fee" && <p>Confirmed fee: {d.fee_sats == null ? "unknown; the sampled bid is a separate observation" : `${exact(d.fee_sats)} ${unit}`}.</p>}
+    {d.requests != null && <div className="table-scroll"><table><caption>Sampled requests ({array(d.requests).length})</caption><thead><tr><th>Slot</th><th>Critical hash</th><th>Bid</th></tr></thead><tbody>{array(d.requests).map((request,i) => { const r=object(request); return <tr key={i}><td>{text(r.sidechain_number)}</td><td className="hash">{text(r.critical_hash)}</td><td>{exact(r.bid_sats)} {unit}</td></tr>; })}</tbody></table>{!array(d.requests).length && <p>This poll observed no requests.</p>}</div>}
     {(d.run_id || d.snapshot_group_id) ? <p className="evidence-links">{typeof d.run_id === "string" && <Link className="text-link" href={`/about/data/runs/${d.run_id}?dataset=${dataset}`}>Source run</Link>}{typeof d.snapshot_group_id === "string" && <Link className="text-link" href={`/about/data/snapshots/${d.snapshot_group_id}?dataset=${dataset}`}>Snapshot group</Link>}</p> : null}
     {!!item.evidence.length && <div className="evidence-links">{item.evidence.map((ref,i) => <Link className="text-link" key={`${ref.event_id}:${ref.ordinal}:${i}`} href={`/datasets/${dataset}/events/${ref.event_id}`}>Evidence #{ref.event_id}:{ref.ordinal}{ref.observation_id && ` · occurrence ${ref.observation_id}`}</Link>)}</div>}
     <details open={expanded || undefined}><summary>All interpreted fields</summary><pre tabIndex={0}>{JSON.stringify(item.data,null,2)}</pre></details>
@@ -88,13 +90,13 @@ function ResourcePageInner({ resource: defaultResource, title: pageTitle, descri
   const exportQuery=apiQuery({...q,resource});
   return <main className="detail-shell"><div className="eyebrow">BIP300 / BIP301 OBSERVATORY</div><h1>{pageTitle}</h1><p className="lede">{description}</p>
     {!id && <form key={params.toString()} className="explorer-filters" action={update}>
-      {defaultResource==="explorer" && <label>Resource<select name="resource" defaultValue={resource}>{["events","search","protocol-messages","activity","deposits","withdrawal-bundles","sidechain-proposals","sidechain-instances","observations","bmm/history","bmm/confirmed"].map(v=><option key={v} value={v}>{label(v)}</option>)}</select></label>}
+      {defaultResource==="explorer" && <label>Resource<select name="resource" defaultValue={resource}>{["events","search","activity","deposits","withdrawal-bundles","sidechain-proposals","sidechain-instances","observations","ctip/history","bmm/history","bmm/commitments","bmm/confirmed","protocol-messages"].map(v=><option key={v} value={v}>{v === "protocol-messages" ? "interpretation errors" : label(v)}</option>)}</select></label>}
       <label>Hash, identifier or exact name<input name="q" defaultValue={q.q} placeholder="Transaction, m6id, description hash…"/></label>
       <label>Slot<input name="slot" type="number" min={0} max={255} defaultValue={q.slot}/></label>
       <label>Branch scope<select name="scope" defaultValue={q.scope??"selected"}><option value="selected">Selected branch</option><option value="all">All observed branches</option></select></label>
       <label>From height<input name="from_height" type="number" min={0} defaultValue={q.from_height}/></label><label>To height<input name="to_height" type="number" min={0} defaultValue={q.to_height}/></label>
       <label>Kind<input name="kind" defaultValue={q.kind} placeholder="Optional event kind"/></label>
-      <label>Time basis<select name="time_basis" defaultValue={q.time_basis??"block"}><option value="block">Block time</option><option value="observation">Observation time</option><option value="ingestion">Ingestion time</option></select></label>
+      <label>Time basis<select name="time_basis" defaultValue={q.time_basis??""}><option value="">Default (observation for history, block for facts)</option><option value="block">Block time</option><option value="observation">Observation time</option><option value="ingestion">Ingestion time</option></select></label>
       <label>From time (UTC)<input name="from_time" defaultValue={q.from_time} placeholder="2026-09-25T00:00:00Z"/></label><label>To time (UTC)<input name="to_time" defaultValue={q.to_time} placeholder="2026-09-26T00:00:00Z"/></label>
       <button type="submit">Apply filters</button>
     </form>}

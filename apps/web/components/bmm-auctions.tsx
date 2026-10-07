@@ -42,6 +42,6 @@ export function BmmAuctions({ initial }: { initial: Auctions | null }) {
     <BmmHistory/>
     <ProtocolList resource="bmm/history" heading="Auction sampling history"/>
     <ProtocolList resource="bmm/confirmed" heading="Confirmed BMM requests"/>
-    <ProtocolList resource="bmm/commitments" heading="M7 and slot commitments"/>
+    <ProtocolList resource="bmm/commitments" heading="Slot BMM commitments"/>
   </main>;
 }

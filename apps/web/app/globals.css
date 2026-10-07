@@ -716,8 +716,6 @@ summary { cursor:pointer; padding:8px 0; }
 .heat-cell { display:block; min-height:12px; min-width:9px; border:1px solid #7e776c; border-radius:2px; padding:0; background:#2c2925; }
 .heat-cell.present { background:#f7931a; border-color:#ffbe6b; }
 .heat-cell.observed_absent { background:#555b62; border-color:#a7b0b9; }
-.heat-cell.uncovered { background:repeating-linear-gradient(45deg,#333 0 2px,#141414 2px 5px); border-color:#bbb; }
-.heat-cell.inactive { background:#171717; border-color:#555; }
 .heat-cell.unknown_eligibility { background:#594365; border-color:#c7a9de; }
 .heat-row { display:grid; gap:3px; min-width:300px; padding:5px; }
 .heatmap-table td:last-child { width:70%; }

@@ -23,7 +23,6 @@ export function BlockDetail({dataset,hash,initial}:{dataset:string;hash:string;i
     {data.facts_truncated&&<p className="inline-notice">Showing the latest 200 facts for this block.</p>}
     <section className="panel compact-panel table-scroll"><h2>Connections and disconnections</h2><p>A disconnection is an observation, not a permanent exclusion of this block.</p><table><thead><tr><th>Observation</th><th>Kind / slot</th><th>Method</th><th>Time</th><th>Run / sequence</th></tr></thead><tbody>{data.observations.map(o=><tr key={o.observation_id}><td><Link className="text-link" href={`/datasets/${dataset}/events/${o.event_id}`}>#{o.observation_id}</Link></td><td>{o.kind.replaceAll("_"," ")} / {o.slot??"global"}</td><td>{o.capture_method}</td><td>{o.observed_at}</td><td className="hash">{o.run_id} / {o.capture_seq}</td></tr>)}</tbody></table>{!data.observations.length&&<p>No occurrences have been imported yet.</p>}{data.observations_truncated&&<p>Showing the latest 200 occurrences.</p>}</section></>}
     <ProtocolList resource="activity" query={{dataset,hash,scope:"all"}} heading="Protocol activity in this block"/>
-    <ProtocolList resource="protocol-messages" query={{dataset,hash,scope:"all"}} heading="Coinbase messages"/>
     <ProtocolList resource="events" query={{dataset,hash,scope:"all"}} heading="All block evidence"/>
     {!data&&!query.isError&&<p role="status">Loading block evidence…</p>}
   </main>;
