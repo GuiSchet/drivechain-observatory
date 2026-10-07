@@ -143,3 +143,16 @@ f=writer();f.event('mainchain_block','MainchainBlock',dict(header=fixture.header
 branch=get('/api/v1/status')['branch']
 assert branch['status']=='ambiguous',branch
 check('conflicting node fact blocks branch certification')
+# A row committed behind the import cursor is a loud incompatibility, never a
+# silently skipped fact or a foreign-key stall.
+f=writer();late=f.event_id+1;f.event_id+=1
+f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(12),raw_block="00"),12,source="node");commit(f,10)
+f=writer();f.event_id=late-1
+f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(13),raw_block="00"),13,source="node");f.finish(10)
+sql("monitor_fixture","\n".join(f.statements[:-1]))
+p=sync(fail=True)
+assert "committed behind the import cursor" in p.stdout+p.stderr,p.stdout+p.stderr
+assert get("/api/v1/status")["sync_mode"]=="incompatible"
+sql("monitor_fixture",f"DELETE FROM event_observation WHERE event_id={late}; DELETE FROM event WHERE id={late}")
+settle()
+check("a row committed behind the import cursor stops sync loudly")

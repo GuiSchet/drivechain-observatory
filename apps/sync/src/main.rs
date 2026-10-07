@@ -875,7 +875,6 @@ async fn sync_event_observation_page(
     batch_size: i64,
 ) -> Result<i64> {
     let observation_cursor = cursor(destination, dataset_id, "event_observations").await?;
-    let imported_event_id = cursor(destination, dataset_id, "source_events").await?;
     let observations = sqlx::query_as::<_, SourceEventObservation>(
         "SELECT observation_id, dataset_id, run_id, capture_seq, capture_method, \
                 event_id, snapshot_group_id, observed_at, ingested_at \
@@ -889,10 +888,24 @@ async fn sync_event_observation_page(
     .bind(batch_size)
     .fetch_all(source)
     .await?;
-    // Never filter out a blocked earlier occurrence and jump to a later replay.
+    // An occurrence waits for its event. Never filter out a blocked earlier
+    // occurrence and jump to a later one.
+    let referenced = observations
+        .iter()
+        .map(|row| row.event_id)
+        .collect::<Vec<_>>();
+    let imported: std::collections::HashSet<i64> = sqlx::query_scalar(
+        "SELECT source_event_id FROM ingest.source_events WHERE dataset_id=$1 AND source_event_id=ANY($2)",
+    )
+    .bind(dataset_id)
+    .bind(&referenced)
+    .fetch_all(&mut *destination)
+    .await?
+    .into_iter()
+    .collect();
     let observations = observations
         .into_iter()
-        .take_while(|row| row.event_id <= imported_event_id)
+        .take_while(|row| imported.contains(&row.event_id))
         .collect::<Vec<_>>();
     if observations.is_empty() {
         return Ok(0);
@@ -1299,6 +1312,7 @@ async fn check_continuity(
             )));
         }
     }
+    check_import_order(source, destination, dataset).await?;
     let witness: Option<(i64,Vec<u8>)> = sqlx::query_as("SELECT source_event_id,envelope FROM ingest.source_events WHERE dataset_id=$1 ORDER BY source_event_id DESC LIMIT 1")
         .bind(dataset).fetch_optional(&mut *destination).await?;
     if let Some((id, envelope)) = witness {
@@ -1315,6 +1329,89 @@ async fn check_continuity(
         }
     }
     Ok(high)
+}
+
+/// Import streams paged by `id > cursor`: cursor name, source table and id,
+/// destination table and id.
+const IMPORT_STREAMS: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "source_events",
+        "event",
+        "id",
+        "ingest.source_events",
+        "source_event_id",
+    ),
+    (
+        "event_observations",
+        "event_observation",
+        "observation_id",
+        "ingest.event_observations",
+        "observation_id",
+    ),
+    (
+        "tip_observations",
+        "tip_observation",
+        "tip_observation_id",
+        "ingest.tip_observations",
+        "tip_observation_id",
+    ),
+    (
+        "coverage_revisions",
+        "history_coverage_revision",
+        "revision_id",
+        "ingest.coverage_revisions",
+        "revision_id",
+    ),
+    (
+        "observation_failures",
+        "observation_failure",
+        "failure_id",
+        "ingest.observation_failures",
+        "failure_id",
+    ),
+];
+
+/// How far below each cursor the importer looks for rows it never saw.
+const IMPORT_ORDER_WINDOW: i64 = 5_000;
+
+/// Paging by `id > cursor` is complete only if the monitor commits rows in id
+/// order, which schema 10 guarantees. A row that appears behind a cursor
+/// anyway was skipped, and every projection paging the imported ids would
+/// skip it too: stop loudly instead of importing an incomplete history.
+async fn check_import_order(
+    source: &PgPool,
+    destination: &mut PgConnection,
+    dataset: Uuid,
+) -> Result<()> {
+    for (stream, table, id, imported, imported_id) in IMPORT_STREAMS {
+        let cursor = cursor(destination, dataset, stream).await?;
+        let low = (cursor - IMPORT_ORDER_WINDOW).max(0);
+        let present: Vec<i64> = sqlx::query_scalar(&format!(
+            "SELECT {id} FROM {table} WHERE dataset_id=$1 AND {id}>$2 AND {id}<=$3 ORDER BY {id}"
+        ))
+        .bind(dataset)
+        .bind(low)
+        .bind(cursor)
+        .fetch_all(source)
+        .await?;
+        let seen: std::collections::HashSet<i64> = sqlx::query_scalar(&format!(
+            "SELECT {imported_id} FROM {imported} WHERE dataset_id=$1 AND {imported_id}>$2 AND {imported_id}<=$3"
+        ))
+        .bind(dataset)
+        .bind(low)
+        .bind(cursor)
+        .fetch_all(&mut *destination)
+        .await?
+        .into_iter()
+        .collect();
+        if let Some(late) = present.iter().find(|row| !seen.contains(row)) {
+            return Err(incompatible(format!(
+                "{stream} row {late} was committed behind the import cursor {cursor}; \
+                 the monitor must commit in id order (schema 10); rebuild this dataset"
+            )));
+        }
+    }
+    Ok(())
 }
 
 async fn repair_fact_hashes(
