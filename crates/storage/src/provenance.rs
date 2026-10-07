@@ -128,6 +128,7 @@ pub async fn list(
             hash: None,
             height: None,
             observed_at: Some(r.try_get("observed_at")?),
+            first_observed_at: None,
             block_time: None,
             quality: "observed".into(),
             membership: "not_applicable".into(),

@@ -91,8 +91,15 @@ state=get("/api/v1/observatory")
 assert "9" not in state["state"]["treasury"],state
 latest=next(x for x in state["observations"] if x["kind"]=="ctip")
 assert latest["quality"]=="unknown" and latest["hash"] is None,latest
+# Fact lists report the quality and time of the latest occurrence too.
+fact=next(x for x in get("/api/v1/observations?kind=ctip_snapshot")["items"] if x["kind"]=="ctip_snapshot")
+assert fact["quality"]=="unknown" and fact["evidence"][0]["observation_id"],fact
+assert fact["observed_at"]>=fact["first_observed_at"],fact
 f=writer();f.observe(event,9);commit(f)
 assert get("/api/v1/observatory")["state"]["treasury"]["9"]["value_sats"]=="700"
+fact=next(x for x in get("/api/v1/observations")["items"] if x["kind"]=="ctip_snapshot")
+assert fact["quality"]=="tip_matched",fact
+assert all(x["quality"]=="observed" for x in get("/api/v1/chain-info")["items"])
 check("latest changed occurrence cannot borrow quality from a prior occurrence")
 # Time filtering uses the newer occurrence, not immutable fact creation time.
 latest=get("/api/v1/ctip/history?slot=9&limit=1")["items"][0]

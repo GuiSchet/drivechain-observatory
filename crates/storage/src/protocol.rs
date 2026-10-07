@@ -205,6 +205,18 @@ fn encode_cursor(
         .expect("serializable cursor"),
     )
 }
+/// A column only some item queries select; absent means not reported.
+fn optional_column<T>(r: &sqlx::postgres::PgRow, name: &str) -> Result<Option<T>, StorageError>
+where
+    T: for<'r> sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres>,
+{
+    match r.try_get::<Option<T>, _>(name) {
+        Ok(value) => Ok(value),
+        Err(sqlx::Error::ColumnNotFound(_)) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn item(r: sqlx::postgres::PgRow) -> Result<ProtocolItem, StorageError> {
     let evidence: Value = r.try_get("evidence")?;
     Ok(ProtocolItem {
@@ -215,6 +227,7 @@ fn item(r: sqlx::postgres::PgRow) -> Result<ProtocolItem, StorageError> {
         hash: r.try_get("hash")?,
         height: r.try_get("height")?,
         observed_at: r.try_get("observed_at")?,
+        first_observed_at: optional_column(&r, "first_observed_at")?,
         block_time: r.try_get("block_time")?,
         quality: r.try_get("quality")?,
         membership: "unknown".into(),
@@ -397,6 +410,9 @@ fn apply_filters<'a>(
     c: &ProtocolContext,
     alias: &str,
     history: bool,
+    // When this item was observed: the latest occurrence, never the time the
+    // immutable fact was first recorded.
+    observation_time: &str,
 ) {
     if let Some(slot) = q.slot {
         qb.push(format!(" AND ({alias}.slot=")).push_bind(slot);
@@ -435,18 +451,16 @@ fn apply_filters<'a>(
             .push_bind(c.anchor_height.unwrap_or(-1))
             .push(")");
     }
-    let time = match q.time_basis.as_deref().unwrap_or(if history {
-        "observation"
-    } else {
-        "block"
-    }) {
-        "observation" if history => {
-            "coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id),e.observed_at)"
-        }
-        "observation" => "e.observed_at",
-        "ingestion" => "e.imported_at",
-        _ => "h.block_time",
-    };
+    let time =
+        match q
+            .time_basis
+            .as_deref()
+            .unwrap_or(if history { "observation" } else { "block" })
+        {
+            "observation" => observation_time,
+            "ingestion" => "e.imported_at",
+            _ => "h.block_time",
+        };
     if let Some(t) = q.from_time {
         qb.push(format!(" AND {time}>=")).push_bind(t);
     }
@@ -490,7 +504,14 @@ async fn history_page(
         qb.push(" AND p.kind=").push_bind(k);
     }
     qb.push(" AND NOT EXISTS(SELECT 1 FROM projection.protocol_block_versions v WHERE v.dataset_id=p.dataset_id AND v.generation=p.generation AND v.hash=p.hash AND v.build_id>p.build_id AND v.build_id<=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).push(")");
-    apply_filters(&mut qb, q, c, "p", true);
+    apply_filters(
+        &mut qb,
+        q,
+        c,
+        "p",
+        true,
+        "coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id),e.observed_at)",
+    );
     if let Some(search) = q.q.as_deref().filter(|s| !s.is_empty()) {
         qb.push(" AND (p.entity_key=").push_bind(search).push(" OR coalesce(p.data->>'m6id',p.data#>>'{bundle,m6id}',p.data#>>'{proposal,description_hash}',p.data#>>'{sidechain,description_hash}')=").push_bind(search).push(" OR coalesce(p.data#>>'{outpoint,txid}',p.data#>>'{ctip,txid}',p.data#>>'{transition,txid}')=").push_bind(search).push(")");
     }
@@ -548,9 +569,24 @@ async fn facts_page(
         "search" => &[],
         _ => return Err(StorageError::InvalidQuery),
     };
+    // Quality and time describe the latest occurrence of a fact up to this
+    // build's cut: a snapshot is tip_matched only if that read was, and a
+    // block-anchored fact is plainly observed.
     let mut qb = sqlx::QueryBuilder::new(
-        "WITH page AS (SELECT f.*,e.observed_at,h.block_time FROM projection.protocol_facts f JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id LEFT JOIN projection.chain_headers h ON h.dataset_id=f.dataset_id AND h.generation=f.generation AND h.hash=f.hash WHERE f.dataset_id=",
+        "WITH page AS (SELECT f.*,coalesce(lo.observed_at,e.observed_at) AS observed_at,e.observed_at AS first_observed_at,h.block_time,lo.observation_id AS latest_observation_id,
+            CASE WHEN f.error IS NOT NULL THEN 'unknown'
+                 WHEN e.kind IN ('sidechain_proposals','active_sidechains','ctip','withdrawal_bundle_proposals','bmm_requests')
+                     THEN CASE WHEN lo.usable THEN 'tip_matched' ELSE 'unknown' END
+                 ELSE 'observed' END AS occurrence_quality
+          FROM projection.protocol_facts f JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id
+          LEFT JOIN projection.chain_headers h ON h.dataset_id=f.dataset_id AND h.generation=f.generation AND h.hash=f.hash
+          LEFT JOIN LATERAL (SELECT o.observation_id,o.observed_at,
+                EXISTS(SELECT 1 FROM ingest.state_snapshot_tip_matched t WHERE t.dataset_id=o.dataset_id AND t.observation_id=o.observation_id) AS usable
+              FROM ingest.event_observations o WHERE o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id
+               AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=",
     );
+    qb.push_bind(c.build_id.as_ref().and_then(|v| v.parse::<i64>().ok()))
+        .push("),9223372036854775807) ORDER BY o.observation_id DESC LIMIT 1) lo ON true WHERE f.dataset_id=");
     qb.push_bind(c.meta.dataset_id)
         .push(" AND f.generation=")
         .push_bind(c.meta.projection_generation)
@@ -570,7 +606,7 @@ async fn facts_page(
     if resource == "chain-info" {
         filters.scope = Some("all".into());
     }
-    apply_filters(&mut qb, &filters, c, "f", false);
+    apply_filters(&mut qb, &filters, c, "f", false, "lo.observed_at");
     if let Some(search) = q.q.as_deref().filter(|s| !s.is_empty()) {
         qb.push(" AND (f.search_terms @> ARRAY[")
             .push_bind(search)
@@ -603,7 +639,7 @@ async fn facts_page(
             .push_bind(ordinal)
             .push(")");
     }
-    qb.push(" ORDER BY f.event_id DESC,f.ordinal DESC LIMIT ").push_bind(i64::from(limit)+1).push(") SELECT event_id::text || ':' || ordinal::text AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,block_time,CASE WHEN error IS NULL THEN 'tip_matched' ELSE 'unknown' END AS quality,jsonb_build_array(jsonb_build_object('event_id',event_id::text,'ordinal',ordinal,'observation_id',NULL)) AS evidence,data,error AS issue FROM page ORDER BY event_id DESC,ordinal DESC");
+    qb.push(" ORDER BY f.event_id DESC,f.ordinal DESC LIMIT ").push_bind(i64::from(limit)+1).push(") SELECT event_id::text || ':' || ordinal::text AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,first_observed_at,block_time,occurrence_quality AS quality,jsonb_build_array(jsonb_build_object('event_id',event_id::text,'ordinal',ordinal,'observation_id',latest_observation_id::text)) AS evidence,data,error AS issue FROM page ORDER BY event_id DESC,ordinal DESC");
     qb.build()
         .fetch_all(&mut **tx)
         .await?
@@ -702,7 +738,7 @@ async fn auction_history(
     qb.push_bind(c.meta.dataset_id).push(" AND f.generation=").push_bind(c.meta.projection_generation).push(" AND f.kind='auction' AND f.event_id<=").push_bind(c.source_event_cut.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).push(" AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok())).push("),0)");
     let mut no_slot = q.clone();
     no_slot.slot = None;
-    apply_filters(&mut qb, &no_slot, c, "f", false);
+    apply_filters(&mut qb, &no_slot, c, "f", false, "o.observed_at");
     if let Some(p) = page {
         let id = p
             .after

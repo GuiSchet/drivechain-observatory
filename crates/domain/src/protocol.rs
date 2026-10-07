@@ -37,7 +37,10 @@ pub struct ProtocolItem {
     pub slot: Option<i16>,
     pub hash: Option<String>,
     pub height: Option<i32>,
+    /// The latest occurrence of this item (when it was last read).
     pub observed_at: Option<DateTime<Utc>>,
+    /// When the immutable fact was first recorded, if the list reports it.
+    pub first_observed_at: Option<DateTime<Utc>>,
     pub block_time: Option<DateTime<Utc>>,
     /// observed, tip_matched, unknown. Raw evidence is available separately.
     pub quality: String,
