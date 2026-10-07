@@ -117,10 +117,24 @@ assert branch["tip_hash"]==fixture.HASHES[9] and branch["node_tip_hash"]==fixtur
 check("node advances independently without moving enforcer branch")
 f=writer();f.tip(10);commit(f,10)
 assert get("/api/v1/status")["branch"]["joint_source_status"]=="matched"
+# The enforcer reports block 11 before the node header arrives: the selected
+# branch and its protocol state are kept, never wiped or marked ambiguous.
+f=writer();f.tip(11);commit(f,10)
+branch=get("/api/v1/status")["branch"]
+assert branch["tip_hash"]==fixture.HASHES[11] and branch["basis"]=="tip_header_missing" and branch["status"]!="ambiguous",branch
+assert get("/api/v1/blocks/"+fixture.HASHES[10])["block"]["membership"]=="selected"
+assert get("/api/v1/observatory")["context"]["state"]=="available"
+f=writer();f.event("block_connected","BlockConnected",dict(header=fixture.official_header(11),sidechain_number=9,events=[]),11,slot=9,method="live");commit(f,10)
+assert get("/api/v1/status")["branch"]["status"]!="ambiguous"
+f=writer();f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(11),raw_block="00"),11,source="node");f.tip(11,source="node");f.tip(11);commit(f,11)
+branch=get("/api/v1/status")["branch"]
+assert branch["status"]=="resolved" and branch["joint_source_status"]=="matched",branch
+assert get("/api/v1/blocks/"+fixture.HASHES[11])["block"]["membership"]=="selected"
+check("an enforcer tip ahead of the node header keeps the selected branch")
 # Enforcer stream can be stopped while node data is imported.
 sql("monitor_fixture",f"UPDATE extractor_run SET status='failed',finished_at=now(),finish_reason='test offline' WHERE run_id='{RUN}'")
-f=writer();f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(11),raw_block="00"),11,source="node");f.tip(11,source="node");commit(f,10)
-assert get("/api/v1/blocks/"+fixture.HASHES[11])["block"]["membership"]!="selected"
+f=writer();f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(12),raw_block="00"),12,source="node");f.tip(12,source="node");commit(f,11)
+assert get("/api/v1/blocks/"+fixture.HASHES[12])["block"]["membership"]!="selected"
 check("node evidence remains importable during enforcer outage")
 # Read-only source user cannot write.
 sql("monitor_fixture","DELETE FROM event",user="monitor_reader",fail=True)
@@ -131,7 +145,7 @@ sql('monitor_fixture',f"UPDATE extractor_run SET status='running',finished_at=NU
 original=fixture.HASHES[10]
 fixture.HASHES[10]='da'*32
 f=writer();f.event('mainchain_block','MainchainBlock',dict(header=fixture.header(10),raw_block='01'),10,source='node');f.tip(10,source='node');commit(f,10)
-assert get('/api/v1/status')['branch']['tip_hash']==original
+assert get('/api/v1/status')['branch']['tip_hash']==fixture.HASHES[11]
 f=writer();f.tip(10);commit(f,10)
 branch=get('/api/v1/status')['branch']
 assert branch['tip_hash']==fixture.HASHES[10] and branch['joint_source_status']=='matched',branch
@@ -146,9 +160,9 @@ check('conflicting node fact blocks branch certification')
 # A row committed behind the import cursor is a loud incompatibility, never a
 # silently skipped fact or a foreign-key stall.
 f=writer();late=f.event_id+1;f.event_id+=1
-f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(12),raw_block="00"),12,source="node");commit(f,10)
+f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(13),raw_block="00"),13,source="node");commit(f,10)
 f=writer();f.event_id=late-1
-f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(13),raw_block="00"),13,source="node");f.finish(10)
+f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(14),raw_block="00"),14,source="node");f.finish(10)
 sql("monitor_fixture","\n".join(f.statements[:-1]))
 p=sync(fail=True)
 assert "committed behind the import cursor" in p.stdout+p.stderr,p.stdout+p.stderr

@@ -270,7 +270,7 @@ async fn select_path(conn: &mut PgConnection, d: Uuid, g: i64, tip: &str) -> Res
         WHERE NOT c.shared AND NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND c.block_work>0 AND p.chain_work+c.block_work=c.chain_work)
         SELECT * FROM walk")
         .bind(d).bind(g).bind(tip).execute(&mut *conn).await?;
-    sqlx::query("DELETE FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND height>coalesce((SELECT min(height) FROM pulse_path WHERE shared),-1)")
+    sqlx::query("DELETE FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND height>coalesce((SELECT min(height) FROM pulse_path WHERE shared),-1) AND EXISTS(SELECT 1 FROM pulse_path)")
         .bind(d).bind(g).execute(&mut *conn).await?;
     sqlx::query("INSERT INTO projection.chain_members SELECT $1,$2,height,hash FROM pulse_path ON CONFLICT(dataset_id,generation,height) DO UPDATE SET hash=excluded.hash")
         .bind(d).bind(g).execute(&mut *conn).await?;
@@ -291,6 +291,17 @@ async fn assess(conn: &mut PgConnection, d: Uuid, g: i64, state: &mut BranchStat
     };
     if state.basis != "conflicting_live_observation" {
         state.status = "provisional".into();
+    }
+    // The enforcer reports a tip as soon as it connects a block; the node
+    // header arrives with the next node poll. Until then keep the selected
+    // branch: walking from an unknown tip would select nothing and wipe it.
+    let tip_known: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection.chain_headers WHERE dataset_id=$1 AND generation=$2 AND hash=$3)")
+        .bind(d).bind(g).bind(&tip).fetch_one(&mut *conn).await?;
+    if !tip_known {
+        if state.status != "ambiguous" {
+            state.basis = "tip_header_missing".into();
+        }
+        return Ok(());
     }
     select_path(conn, d, g, &tip).await?;
     let boundary=sqlx::query("SELECT h.*,d.activation_height,d.activation_block_hash FROM projection.chain_members m JOIN projection.chain_headers h ON h.dataset_id=m.dataset_id AND h.generation=m.generation AND h.hash=m.hash JOIN ingest.datasets d ON d.dataset_id=m.dataset_id WHERE m.dataset_id=$1 AND m.generation=$2 ORDER BY m.height LIMIT 1")
@@ -418,10 +429,10 @@ pub async fn apply(
     }
     let seq = next.capture_seq.parse::<i64>()?;
     let rows=sqlx::query("SELECT * FROM (
-        SELECT t.capture_seq,'tip' AS kind,encode(t.tip_hash,'hex') AS hash,t.tip_height AS height,t.observed_at,t.tip_observation_id AS id,t.capture_method,NULL::text AS parent,NULL::text AS error
+        SELECT t.capture_seq,'tip' AS kind,encode(t.tip_hash,'hex') AS hash,t.tip_height AS height,t.observed_at,t.tip_observation_id AS id,t.capture_method,NULL::text AS parent,NULL::text AS error,NULL::boolean AS header_known
         FROM (SELECT * FROM ingest.tip_observations WHERE dataset_id=$1 AND run_id=$3 AND tip_observation_id<=$5 AND capture_seq>$6 ORDER BY capture_seq LIMIT $7) t
         UNION ALL
-        SELECT o.capture_seq,coalesce(f.kind,'other'),f.hash,h.height,o.observed_at,o.observation_id,o.capture_method,h.parent,f.error
+        SELECT o.capture_seq,coalesce(f.kind,'other'),f.hash,h.height,o.observed_at,o.observation_id,o.capture_method,h.parent,f.error,h.hash IS NOT NULL
         FROM (SELECT * FROM ingest.event_observations WHERE dataset_id=$1 AND run_id=$3 AND observation_id<=$4 AND capture_seq>$6 ORDER BY capture_seq LIMIT $7) o LEFT JOIN projection.chain_facts f ON f.dataset_id=o.dataset_id AND f.generation=$2 AND f.event_id=o.source_event_id
         LEFT JOIN projection.chain_headers h ON h.dataset_id=f.dataset_id AND h.generation=f.generation AND h.hash=f.hash
 
@@ -449,6 +460,20 @@ pub async fn apply(
             && matches!(kind.as_str(), "block_connected" | "block_disconnected")
             && next.tip_hash.is_some()
         {
+            // A live connect seen before its node header is not yet evidence
+            // for or against the branch; the following tip read reassesses it.
+            if kind == "block_connected"
+                && r.try_get::<Option<bool>, _>("header_known")? == Some(false)
+            {
+                if next.status != "ambiguous" {
+                    next.status = "provisional".into();
+                    next.basis = "awaiting_header".into();
+                }
+                next.evidence_type = Some("event_observation".into());
+                next.evidence_id = Some(r.try_get::<i64, _>("id")?.to_string());
+                save_revision(&mut tx, d, g, &mut next, &mut recorded).await?;
+                continue;
+            }
             let member:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND hash=$3)")
                 .bind(d).bind(g).bind(&hash).fetch_one(&mut *tx).await?;
             if kind == "block_connected" && hash == next.tip_hash {
