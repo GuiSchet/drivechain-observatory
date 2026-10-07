@@ -151,6 +151,9 @@ pub struct CoverageResponse {
     pub local_status: String,
     pub snapshot_history: String,
     pub observation_quality: Value,
+    /// Subscription boundaries of the global transition stream, newest first:
+    /// each bounds an interval whose connects and disconnects are unknown.
+    pub transition_gaps: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

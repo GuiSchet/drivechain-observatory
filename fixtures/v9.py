@@ -153,6 +153,8 @@ def fixture():
     bid=dict(sidechain_number=9,txid="12"*32,critical_hash=COMMITMENT,bid_sats=18446744073709551615)
     auction=f.event("bmm_requests","BmmRequests",dict(previous_mainchain_block_hash=HASHES[9],requests=[bid]),9,method="poll",snapshot=True,label="auction")
     f.event("bmm_requests","BmmRequests",dict(previous_mainchain_block_hash=HASHES[9],requests=[]),9,method="poll",snapshot=True,label="empty")
+    # The enforcer stream was resubscribed at 9 after last seeing 7.
+    f.event("mainchain_transition","MainchainTransition",dict(action=3,header=official_header(9),gap_start=dict(hash=HASHES[7],height=ACTIVATION+7)),9,method="live",label="boundary")
     f.observe(auction,9);f.tip(9);f.tip(9,source="node");f.finish()
     f.statements += [f"INSERT INTO current_sidechain_instance(dataset_id,sidechain,sidechain_instance_id,observed_at) VALUES('{DATASET}',9,'{INSTANCE}',now());",
         f"INSERT INTO extractor_worker_status(run_id,worker,last_success_at) VALUES('{RUN}','mainchain_tip',now()),('{RUN}','bmm_requests',now()),('{RUN}','mainchain_events',now()),('{RUN}','enforcer_state',now()),('{NODE_RUN}','node_history',now());",

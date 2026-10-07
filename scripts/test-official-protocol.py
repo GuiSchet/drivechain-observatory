@@ -73,6 +73,8 @@ assert get("/api/v1/protocol-messages")["items"]==[]
 assert len(get("/api/v1/deposits")["items"])==1
 instance_ctips=get("/api/v1/sidechain-instances/"+quote(fixture.INSTANCE,safe="")+"/ctip")["items"]
 assert instance_ctips and all(x["data"]["observation_window"]["sidechain_instance_id"]==fixture.INSTANCE for x in instance_ctips),instance_ctips
+gaps=get("/api/v1/coverage")["transition_gaps"]
+assert gaps and gaps[0]["gap_start_height"]==fixture.ACTIVATION+7 and gaps[0]["gap_end_height"]==fixture.ACTIVATION+9,gaps
 check("official observations, unanchored windows, no rules replay")
 for path in ["/api/v1/status","/api/v1/coverage","/api/v1/blocks","/api/v1/events","/api/v1/bmm/commitments","/api/v1/bmm/confirmed","/api/v1/bmm/history","/api/v1/activity"]:get(path)
 block=get("/api/v1/blocks/"+fixture.HASHES[9])["block"]

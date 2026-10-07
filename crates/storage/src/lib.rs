@@ -467,9 +467,20 @@ pub async fn coverage(pool: &PgPool, stale: i64) -> Result<CoverageResponse, Sto
         'window_hours',24,
         'snapshot_groups',(SELECT count(*)::text FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours'),
         'changed_groups',(SELECT count(*)::text FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours' AND consistency='changed'),
+        'untrusted_groups',(SELECT count(*)::text FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours' AND consistency<>'tip_matched'),
+        'consistency',(SELECT coalesce(jsonb_object_agg(consistency,n),'{}'::jsonb) FROM (SELECT consistency,count(*)::text AS n FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours' GROUP BY consistency) c),
+        'import_conflicts',(SELECT count(*)::text FROM ingest.import_conflicts WHERE dataset_id=$1),
         'failures',(SELECT count(*)::text FROM ingest.observation_failures WHERE dataset_id=$1 AND observed_at>now()-interval '24 hours'),
         'failure_import_cursor',(SELECT cursor_value::text FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='observation_failures'),
         'conflicted_blocks',(SELECT count(*)::text FROM projection.chain_headers WHERE dataset_id=$1 AND generation=$2 AND conflicted))")
+        .bind(status.meta.dataset_id).bind(status.meta.projection_generation).fetch_one(&mut *tx).await?;
+    let transition_gaps: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(g ORDER BY (g->>'event_id')::bigint DESC),'[]'::jsonb) FROM (
+        SELECT jsonb_build_object('event_id',f.event_id::text,'observed_at',e.observed_at,
+            'gap_start_hash',f.data#>>'{gap_start,hash}','gap_start_height',f.data#>'{gap_start,height}',
+            'gap_end_hash',f.data#>>'{header,hash}','gap_end_height',f.data#>'{header,height}') AS g
+          FROM projection.protocol_facts f JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id
+         WHERE f.dataset_id=$1 AND f.generation=$2 AND f.kind='mainchain_transition' AND f.error IS NULL AND f.data->>'action'='3'
+         ORDER BY f.event_id DESC LIMIT 50) gaps")
         .bind(status.meta.dataset_id).bind(status.meta.projection_generation).fetch_one(&mut *tx).await?;
     let response = CoverageResponse {
         branch: status.branch,
@@ -478,6 +489,7 @@ pub async fn coverage(pool: &PgPool, stale: i64) -> Result<CoverageResponse, Sto
         local_status: local.to_owned(),
         snapshot_history: "observations_only".to_owned(),
         observation_quality,
+        transition_gaps,
     };
     tx.commit().await?;
     Ok(response)
