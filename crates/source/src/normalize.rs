@@ -161,18 +161,21 @@ pub fn normalize(kind: &str, payload: &Value, anchor: Anchor<'_>) -> Vec<Entry> 
             }
             "mainchain_transition" => {
                 let x: MainchainTransition = decode(v)?;
-                ensure!((1..=2).contains(&x.action), "invalid official transition");
-                ensure!(
-                    x.observer_session.is_empty() && x.sequence == 0,
-                    "official stream has no server sequence"
-                );
-                if x.action == 1 {
-                    check_header(
-                        x.header.as_ref().context("missing connected header")?,
+                ensure!((1..=3).contains(&x.action), "invalid official transition");
+                match x.action {
+                    1 | 3 => check_header(
+                        x.header.as_ref().context("missing transition header")?,
                         &anchor,
-                    )?;
-                } else {
-                    hash(anchor.hash.context("missing disconnected hash")?)?;
+                    )?,
+                    _ => {
+                        hash(anchor.hash.context("missing disconnected hash")?)?;
+                    }
+                }
+                if let Some(start) = &x.gap_start {
+                    ensure!(x.action == 3, "only a subscription boundary bounds a gap");
+                    hash(&start.hash)?;
+                    let end = x.header.as_ref().map_or(0, |h| h.height);
+                    ensure!(start.height <= end, "gap starts after its boundary");
                 }
                 push(
                     &mut out,

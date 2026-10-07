@@ -315,7 +315,7 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
             .context("reading monitor schema version")?;
     if schema_version != REQUIRED_MONITOR_SCHEMA_VERSION {
         return Err(incompatible(format!(
-            "monitor SQL schema {schema_version}; reviewed schema 9 is required"
+            "monitor SQL schema {schema_version}; reviewed schema {REQUIRED_MONITOR_SCHEMA_VERSION} is required"
         )));
     }
     // Probe the actual required columns, including additive v5/v6 migrations.
@@ -353,24 +353,21 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         })
     {
         return Err(incompatible(
-            "current run must provide contract v8 and all required capabilities",
+            "current run must provide a supported contract and all required capabilities",
         ));
     }
-    if run.event_contract_version == 8 {
-        if schema_version < 9 {
-            return Err(incompatible("monitor contract v8 requires SQL schema 9"));
-        }
-        let old_identity: bool = sqlx::query_scalar(
-            "SELECT d.initial_event_contract_version <> 8 FROM dataset_manifest d WHERE d.dataset_id=$1",
-        )
-        .bind(run.dataset_id)
-        .fetch_one(source)
-        .await?;
-        if old_identity {
-            return Err(incompatible(
-                "a fresh v7 dataset is required; pre-v7 datasets cannot be reused",
-            ));
-        }
+    // Every official contract owns a fresh dataset; facts never mix versions.
+    let old_identity: bool = sqlx::query_scalar(
+        "SELECT d.initial_event_contract_version <> $2 FROM dataset_manifest d WHERE d.dataset_id=$1",
+    )
+    .bind(run.dataset_id)
+    .bind(run.event_contract_version)
+    .fetch_one(source)
+    .await?;
+    if old_identity {
+        return Err(incompatible(
+            "the dataset was created by another event contract; a fresh dataset is required",
+        ));
     }
     sync_datasets(source, destination, args).await?;
     sync_runs(

@@ -6,10 +6,10 @@ use uuid::Uuid;
 pub mod protocol;
 pub use protocol::*;
 
-pub const PROJECTION_VERSION: i32 = 7;
-pub const PROJECTION_GENERATION: i64 = 7;
-pub const REQUIRED_MONITOR_SCHEMA_VERSION: i32 = 9;
-pub const MONITOR_EVENT_CONTRACT_VERSIONS: &[i32] = &[8];
+pub const PROJECTION_VERSION: i32 = 8;
+pub const PROJECTION_GENERATION: i64 = 8;
+pub const REQUIRED_MONITOR_SCHEMA_VERSION: i32 = 10;
+pub const MONITOR_EVENT_CONTRACT_VERSIONS: &[i32] = &[9];
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     "official_enforcer_api",
     "tip_matched_snapshots",

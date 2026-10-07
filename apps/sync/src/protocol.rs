@@ -1,6 +1,7 @@
 //! Immutable normalized facts and resumable, atomically published state builds.
 use super::{SourceEvent, append_update, chain::Cut};
 use anyhow::{Context, Result};
+use pulse_domain::MONITOR_EVENT_CONTRACT_VERSIONS;
 use pulse_source::{
     normalize::{self, Anchor, Entry},
     observations::{Evidence, Record, State},
@@ -36,7 +37,7 @@ async fn normalize_page(
     let mut dirty: Option<i32> = None;
     let mut rows = vec![];
     for e in &events {
-        if e.event_contract_version != 8 {
+        if !MONITOR_EVENT_CONTRACT_VERSIONS.contains(&e.event_contract_version) {
             continue;
         }
         let hash = e.block_hash.as_ref().map(hex::encode);

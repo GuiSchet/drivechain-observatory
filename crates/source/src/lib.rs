@@ -5,7 +5,7 @@ pub mod normalize;
 pub mod observations;
 pub use model::*;
 
-pub const SEMANTICS_VERSION: &str = "official-observations-v8";
+pub const SEMANTICS_VERSION: &str = "official-observations-v9";
 pub const KINDS: &[(&str, &str)] = &[
     ("mainchain_transition", "MainchainTransition"),
     ("confirmed_bmm_fees", "ConfirmedBmmFees"),

@@ -197,9 +197,6 @@ pub struct Bid {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Auction {
-    pub observer_session: String,
-    #[serde(with = "exact")]
-    pub mempool_generation: u64,
     pub previous_mainchain_block_hash: String,
     pub requests: Vec<Bid>,
 }
@@ -219,11 +216,17 @@ impl<'de> Deserialize<'de> for DeclarationVersion {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MainchainTransition {
-    pub observer_session: String,
-    #[serde(with = "exact")]
-    pub sequence: u64,
+    /// 1 = connected, 2 = disconnected, 3 = subscription boundary.
     pub action: i32,
     pub header: Option<Header>,
+    /// Boundary only: the last tip known before transitions became unknown.
+    #[serde(default)]
+    pub gap_start: Option<BlockRef>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockRef {
+    pub hash: String,
+    pub height: u32,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfirmedFees {

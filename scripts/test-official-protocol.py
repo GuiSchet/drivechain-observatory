@@ -1,4 +1,4 @@
-"""Official-source v8 integration, with a real read-only source and public API."""
+"""Official-source v9 integration, with a real read-only source and public API."""
 import concurrent.futures
 import importlib.util
 import json
@@ -11,7 +11,7 @@ import urllib.request
 from urllib.parse import quote
 
 ROOT=Path(__file__).resolve().parents[1]
-spec=importlib.util.spec_from_file_location("fixture",ROOT/"fixtures/v8.py")
+spec=importlib.util.spec_from_file_location("fixture",ROOT/"fixtures/v9.py")
 fixture=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 DATASET,RUN=fixture.DATASET,fixture.RUN
@@ -56,8 +56,8 @@ def commit(f,n=9):
 sync("--batch-size","2","--max-pages-per-cycle","1")
 settle()
 meta=get("/api/v1/meta")
-assert meta["meta"]["projection_version"]==7,meta
-assert meta["current_run"]["event_contract_version"]==8
+assert meta["meta"]["projection_version"]==8,meta
+assert meta["current_run"]["event_contract_version"]==9
 state=get("/api/v1/observatory")
 assert state["context"]["state"]=="available",state
 assert state["context"]["branch"]["joint_source_status"]=="matched",state

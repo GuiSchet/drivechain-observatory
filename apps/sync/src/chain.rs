@@ -2,7 +2,7 @@
 use super::{SourceEvent, append_update, cursor};
 use anyhow::{Context, Result, bail, ensure};
 use chrono::{DateTime, Utc};
-use pulse_domain::{BranchCoverage, BranchState};
+use pulse_domain::{BranchCoverage, BranchState, MONITOR_EVENT_CONTRACT_VERSIONS};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Connection, PgConnection, Row};
@@ -67,7 +67,7 @@ fn validate_slot(event: &SourceEvent, body: &Value) -> Result<()> {
 }
 fn header(event: &SourceEvent) -> Result<Header> {
     ensure!(
-        event.event_contract_version == 8,
+        MONITOR_EVENT_CONTRACT_VERSIONS.contains(&event.event_contract_version),
         "unsupported header contract"
     );
     let name = match event.kind.as_str() {
@@ -190,7 +190,7 @@ pub async fn normalize(
             );
             h.and_then(|h| {
                 ensure!(
-                    event.event_contract_version == 8,
+                    MONITOR_EVENT_CONTRACT_VERSIONS.contains(&event.event_contract_version),
                     "unsupported disconnect contract"
                 );
                 validate_slot(

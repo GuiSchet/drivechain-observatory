@@ -16,7 +16,7 @@ cleanup() {
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
-(cd fixtures/v8 && sha256sum --check SHA256SUMS)
+(cd fixtures/v9 && sha256sum --check SHA256SUMS)
 cargo build --workspace --offline --locked
 if [ "${PULSE_BROWSER_TESTS:-0}" = 1 ]; then
   NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:18080 npm --prefix apps/web run build

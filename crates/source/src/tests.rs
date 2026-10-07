@@ -100,7 +100,7 @@ fn official_snapshots_do_not_replay_votes_expiration_or_absence() {
 #[test]
 fn empty_bmm_response_does_not_require_or_invent_readiness() {
     let h = "ab".repeat(32);
-    let payload = json!({"monitor_event":{"Enforcer":{"event":{"BmmRequests":{"observer_session":"","mempool_generation":0,"previous_mainchain_block_hash":h,"requests":[]}}}}});
+    let payload = json!({"monitor_event":{"Enforcer":{"event":{"BmmRequests":{"previous_mainchain_block_hash":h,"requests":[]}}}}});
     let facts = normalize::normalize(
         "bmm_requests",
         &payload,
@@ -111,7 +111,7 @@ fn empty_bmm_response_does_not_require_or_invent_readiness() {
     );
     assert_eq!(facts.len(), 1);
     assert!(facts[0].error.is_none());
-    assert_eq!(facts[0].data["mempool_generation"], "0");
+    assert!(facts[0].data.get("mempool_generation").is_none());
 }
 #[test]
 fn official_header_without_cumulative_work_is_valid_but_not_fabricated() {
@@ -132,4 +132,32 @@ fn official_header_without_cumulative_work_is_valid_but_not_fabricated() {
 #[test]
 fn fork_only_payload_is_not_interpreted() {
     assert!(normalize::normalize("bip300_block_delta", &json!({}), Default::default()).is_empty());
+}
+#[test]
+fn a_subscription_boundary_bounds_an_unknown_interval() {
+    let tip = "aa".repeat(32);
+    let header = json!({"hash":tip,"previous_hash":"bb".repeat(32),"height":45,"block_work":"01".repeat(32),"cumulative_work":"","timestamp":1000});
+    let anchor = || normalize::Anchor {
+        hash: Some(&tip),
+        height: Some(45),
+        slot: None,
+    };
+    let boundary = |gap: serde_json::Value| json!({"monitor_event":{"Enforcer":{"event":{"MainchainTransition":{"action":3,"header":header,"gap_start":gap}}}}});
+    let facts = normalize::normalize(
+        "mainchain_transition",
+        &boundary(json!({"hash":"cc".repeat(32),"height":40})),
+        anchor(),
+    );
+    assert!(facts[0].error.is_none(), "{:?}", facts[0].error);
+    assert_eq!(facts[0].data["gap_start"]["height"], 40);
+    // The first subscription of a dataset bounds no gap.
+    let facts = normalize::normalize("mainchain_transition", &boundary(json!(null)), anchor());
+    assert!(facts[0].error.is_none());
+    // A gap cannot start after the tip that ends it.
+    let facts = normalize::normalize(
+        "mainchain_transition",
+        &boundary(json!({"hash":"cc".repeat(32),"height":46})),
+        anchor(),
+    );
+    assert!(facts[0].error.is_some());
 }
