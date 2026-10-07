@@ -33,6 +33,7 @@ pub fn extend_openapi(mut doc: Value) -> Value {
         "deposits",
         "withdrawal-bundles",
         "withdrawal-bundles/{id}",
+        "bundle-attempts",
         "bundle-attempts/{id}",
         "ctip/history",
         "protocol-messages",
@@ -94,6 +95,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/deposits", get(list))
         .route("/api/v1/withdrawal-bundles", get(list))
         .route("/api/v1/withdrawal-bundles/{id}", get(bundle))
+        .route("/api/v1/bundle-attempts", get(list))
         .route("/api/v1/bundle-attempts/{id}", get(detail))
         .route("/api/v1/ctip/history", get(list))
         .route("/api/v1/protocol-messages", get(list))

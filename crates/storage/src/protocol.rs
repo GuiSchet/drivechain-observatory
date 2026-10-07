@@ -89,14 +89,19 @@ pub(super) async fn context(
         "bmm",
         "protocol",
     ] {
-        let first = errors
-            .iter()
-            .find(|(name, _)| name == family)
-            .map(|(_, id)| *id);
+        let error = errors.iter().find(|(name, _, _)| name == family);
+        let first = error.map(|(_, id, _)| *id);
+        // A stale reading's event id says nothing about how far facts go.
+        let fact_error = error
+            .filter(|(_, _, observation)| !observation)
+            .map(|(_, id, _)| *id);
         families.push(FamilyProgress {
             family: family.into(),
-            processed_event_id: (through > 0)
-                .then(|| first.map_or(through, |n| through.min(n - 1)).to_string()),
+            processed_event_id: (through > 0).then(|| {
+                fact_error
+                    .map_or(through, |n| through.min(n - 1))
+                    .to_string()
+            }),
             first_error_event_id: first.map(|n| n.to_string()),
         });
     }
@@ -481,12 +486,13 @@ async fn history_page(
     if matches!(c.state.as_str(), "awaiting_data" | "catching_up") {
         return Ok(vec![]);
     }
-    let kind = match resource {
-        "deposits" => Some("deposit"),
-        "withdrawal-bundles" | "bundle-attempts" => Some("bundle"),
-        "sidechain-proposals" => Some("proposal"),
-        "sidechain-instances" => Some("instance"),
-        "ctip/history" => Some("ctip"),
+    let kinds: Option<&[&str]> = match resource {
+        "deposits" => Some(&["deposit"]),
+        // Observed pending bundles and their block outcomes (Succeeded/Failed).
+        "withdrawal-bundles" | "bundle-attempts" => Some(&["bundle", "bundle_outcome"]),
+        "sidechain-proposals" => Some(&["proposal"]),
+        "sidechain-instances" => Some(&["instance"]),
+        "ctip/history" => Some(&["ctip"]),
         _ => None,
     };
     let latest = matches!(
@@ -500,8 +506,8 @@ async fn history_page(
     });
     qb.push(" LEFT JOIN ingest.source_events e ON e.dataset_id=p.dataset_id AND e.source_event_id=(p.evidence->0->>'event_id')::bigint LEFT JOIN projection.chain_headers h ON h.dataset_id=p.dataset_id AND h.generation=p.generation AND h.hash=p.hash WHERE p.dataset_id=").push_bind(c.meta.dataset_id).push(" AND p.generation=").push_bind(c.meta.projection_generation).push(" AND p.build_id<=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0));
     qb.push(" AND (p.observation_id IS NULL OR p.observation_id <= coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).push("),0))");
-    if let Some(k) = kind {
-        qb.push(" AND p.kind=").push_bind(k);
+    if let Some(k) = kinds {
+        qb.push(" AND p.kind=ANY(").push_bind(k.to_vec()).push(")");
     }
     qb.push(" AND NOT EXISTS(SELECT 1 FROM projection.protocol_block_versions v WHERE v.dataset_id=p.dataset_id AND v.generation=p.generation AND v.hash=p.hash AND v.build_id>p.build_id AND v.build_id<=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).push(")");
     apply_filters(
@@ -561,9 +567,11 @@ async fn facts_page(
         return auction_history(tx, q, c, page, limit).await;
     }
     let kinds: &[&str] = match resource {
-        "protocol-messages" => &["m1", "m2", "m3", "m4", "m7", "interpretation_error"],
-        "bmm/commitments" => &["slot_block", "m7"],
-        "bmm/confirmed" => &["confirmed_bmm", "confirmed_bmm_fee"],
+        // The official sources report no coinbase messages; only facts that
+        // could not be interpreted remain listable here.
+        "protocol-messages" => &["interpretation_error"],
+        "bmm/commitments" => &["slot_block"],
+        "bmm/confirmed" => &["confirmed_bmm_fee"],
         "chain-info" => &["parameters"],
         "observations" => &["active_set", "proposal_set", "ctip_snapshot", "bundle_set"],
         "search" => &[],
@@ -655,7 +663,7 @@ async fn events_page(
     limit: u32,
 ) -> Result<Vec<ProtocolItem>, StorageError> {
     let mut qb = sqlx::QueryBuilder::new(
-        "SELECT e.source_event_id::text AS id,NULL::text AS entity_id,e.kind,e.sidechain AS slot,encode(e.block_hash,'hex') AS hash,e.height,e.observed_at,h.block_time,'observed' AS quality,jsonb_build_array(jsonb_build_object('event_id',e.source_event_id::text,'ordinal',0,'observation_id',NULL)) AS evidence,jsonb_build_object('event_contract_version',e.event_contract_version,'source',e.source,'fact_sha256',encode(e.fact_sha256,'hex'),'instance_id',e.sidechain_instance_id) AS data,e.interpretation_error AS issue FROM ingest.source_events e LEFT JOIN projection.chain_headers h ON h.dataset_id=e.dataset_id AND h.generation=",
+        "SELECT e.source_event_id::text AS id,NULL::text AS entity_id,e.kind,e.sidechain AS slot,encode(e.block_hash,'hex') AS hash,e.height,e.observed_at,h.block_time,'observed' AS quality,jsonb_build_array(jsonb_build_object('event_id',e.source_event_id::text,'ordinal',0,'observation_id',NULL)) AS evidence,jsonb_build_object('event_contract_version',e.event_contract_version,'source',e.source,'fact_sha256',encode(e.fact_sha256,'hex'),'instance_id',e.sidechain_instance_id) AS data,coalesce(e.interpretation_error,(SELECT string_agg(pf.error,'; ' ORDER BY pf.ordinal) FROM projection.protocol_facts pf WHERE pf.dataset_id=e.dataset_id AND pf.generation=h.generation AND pf.event_id=e.source_event_id AND pf.error IS NOT NULL)) AS issue FROM ingest.source_events e LEFT JOIN projection.chain_headers h ON h.dataset_id=e.dataset_id AND h.generation=",
     );
     qb.push_bind(c.meta.projection_generation)
         .push(" AND h.hash=encode(e.block_hash,'hex') WHERE e.dataset_id=")

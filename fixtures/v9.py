@@ -144,6 +144,7 @@ def fixture():
         if n>=4:
             events=[]
             if n==5:events=[{"event":{"Deposit":dict(sequence_number=0,outpoint=dict(txid=DEPOSIT_TXID,vout=0),address="abcd",value_sats=1000)}}]
+            if n==6:events=[{"event":{"WithdrawalBundle":dict(m6id=BUNDLE_A,state={"Succeeded":dict(sequence_number=1,transaction=WITHDRAW_TX)})}}]
             f.event("block_connected","BlockConnected",dict(header=official_header(n),sidechain_number=9,bmm_commitment=COMMITMENT if n==5 else None,events=events),n,slot=9)
     a=dict(sidechain_number=9,raw_description=RAW_DESCRIPTION,description_hash=DESCRIPTION_HASH,vote_count=3,proposal_height=ACTIVATION+1,activation_height=ACTIVATION+4,declaration=DECLARATION)
     f.event("active_sidechains","ActiveSidechains",dict(sidechains=[a]),9,method="poll",snapshot=True)

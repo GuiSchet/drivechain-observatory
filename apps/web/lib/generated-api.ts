@@ -131,6 +131,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bundle-attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read bundle-attempts from the local Observatory dataset */
+        get: operations["bundleattempts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bundle-attempts/{id}": {
         parameters: {
             query?: never;
@@ -891,6 +908,11 @@ export interface components {
             observation_quality: unknown;
             snapshot_history: string;
             streams: components["schemas"]["CoverageScope"][];
+            /**
+             * @description Subscription boundaries of the global transition stream, newest first:
+             *     each bounds an interval whose connects and disconnects are unknown.
+             */
+            transition_gaps: unknown;
         };
         CoverageScope: {
             /** Format: date-time */
@@ -1046,6 +1068,11 @@ export interface components {
             data: unknown;
             entity_id?: string | null;
             evidence: components["schemas"]["ProtocolEvidence"][];
+            /**
+             * Format: date-time
+             * @description When the immutable fact was first recorded, if the list reports it.
+             */
+            first_observed_at?: string | null;
             hash?: string | null;
             /** Format: int32 */
             height?: number | null;
@@ -1056,7 +1083,10 @@ export interface components {
             kind: string;
             /** @description selected, alternative, unknown, or not_applicable. */
             membership: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The latest occurrence of this item (when it was last read).
+             */
             observed_at?: string | null;
             /** @description observed, tip_matched, unknown. Raw evidence is available separately. */
             quality: string;
@@ -1457,6 +1487,59 @@ export interface operations {
         };
     };
     bmm_history: {
+        parameters: {
+            query?: {
+                dataset?: string;
+                scope?: string;
+                slot?: number;
+                kind?: string;
+                hash?: string;
+                key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
+                from_height?: number;
+                to_height?: number;
+                from_time?: string;
+                to_time?: string;
+                /** @description observation (history default), block (facts default), or ingestion. */
+                time_basis?: string;
+                q?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtocolPage"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    bundleattempts: {
         parameters: {
             query?: {
                 dataset?: string;

@@ -93,18 +93,23 @@ async fn response_meta(
 /// Errors affecting the published interpretation, with exactly the same cut and
 /// provenance for REST, status and outbox. Raw diagnostics remain independently
 /// accessible even when they are ineligible for this reconstruction.
+///
+/// Fact errors (`first_errors`) bound how far a family's facts were usable.
+/// An unusable latest state reading (`observation_errors`) makes the family
+/// partial, but its event id can be an old fact read again, so it never
+/// moves the processed watermark backwards.
 pub(crate) async fn protocol_errors(
     conn: &mut sqlx::PgConnection,
     dataset: Uuid,
     generation: i64,
-) -> Result<Vec<(String, i64)>, sqlx::Error> {
+) -> Result<Vec<(String, i64, bool)>, sqlx::Error> {
     sqlx::query_as("WITH head AS (
         SELECT b.state FROM projection.protocol_head h JOIN ops.protocol_builds b USING(build_id) WHERE h.dataset_id=$1 AND h.generation=$2
     ), errors AS (
-        SELECT e.key AS family,e.value::bigint AS event_id FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'first_errors','{}'::jsonb)) e
+        SELECT e.key AS family,e.value::bigint AS event_id,false AS observation FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'first_errors','{}'::jsonb)) e
         UNION ALL
-        SELECT e.key,e.value::bigint FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'observation_errors','{}'::jsonb)) e
-    ) SELECT family,min(event_id) FROM errors GROUP BY family ORDER BY family")
+        SELECT e.key,e.value::bigint,true FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'observation_errors','{}'::jsonb)) e
+    ) SELECT family,min(event_id),bool_and(observation) FROM errors GROUP BY family ORDER BY family")
         .bind(dataset).bind(generation).fetch_all(conn).await
 }
 
@@ -125,7 +130,12 @@ pub async fn projection_watermark(
         };
         let errors = protocol_errors(connection, dataset_id, generation).await?;
         let mut watermark = protocol.min(chain).min(materialized);
-        if let Some(first) = errors.iter().map(|(_, id)| id).min() {
+        if let Some(first) = errors
+            .iter()
+            .filter(|(_, _, observation)| !observation)
+            .map(|(_, id, _)| id)
+            .min()
+        {
             watermark = watermark.min(first - 1);
         }
         return Ok(Some(watermark));
@@ -287,14 +297,15 @@ async fn status_snapshot(
         progress = ["blocks", "bmm"]
             .into_iter()
             .map(|name| {
-                let error = errors
-                    .iter()
-                    .find(|(family, _)| family == name)
-                    .map(|(_, id)| *id);
+                let found = errors.iter().find(|(family, _, _)| family == name);
+                let error = found.map(|(_, id, _)| *id);
+                let fact_error = found
+                    .filter(|(_, _, observation)| !observation)
+                    .map(|(_, id, _)| *id);
                 ProjectionProgress {
                     name: name.into(),
                     processed_event_id: through
-                        .map(|n| error.map_or(n, |e| n.min(e - 1)).to_string()),
+                        .map(|n| fact_error.map_or(n, |e| n.min(e - 1)).to_string()),
                     error_event_id: error.map(|e| e.to_string()),
                 }
             })
@@ -644,7 +655,10 @@ pub async fn evidence(
         envelope_hex: row.try_get("envelope_hex")?,
         payload_json: row.try_get("payload_json")?,
         interpretation_error: match row.try_get::<Option<String>,_>("interpretation_error")? {
-            Some(e)=>Some(e),None=>sqlx::query_scalar("SELECT error FROM projection.chain_facts WHERE dataset_id=$1 AND generation=(SELECT projection_generation FROM ops.active_dataset WHERE dataset_id=$1) AND event_id=$2").bind(dataset_id).bind(event_id).fetch_optional(&mut *tx).await?.flatten()
+            // The importer's error, then the chain's, then the protocol facts'.
+            Some(e)=>Some(e),None=>sqlx::query_scalar("SELECT coalesce(
+                (SELECT error FROM projection.chain_facts WHERE dataset_id=$1 AND generation=(SELECT projection_generation FROM ops.active_dataset WHERE dataset_id=$1) AND event_id=$2),
+                (SELECT string_agg(error,'; ' ORDER BY ordinal) FROM projection.protocol_facts WHERE dataset_id=$1 AND generation=(SELECT projection_generation FROM ops.active_dataset WHERE dataset_id=$1) AND event_id=$2 AND error IS NOT NULL))").bind(dataset_id).bind(event_id).fetch_one(&mut *tx).await?
         },
         occurrences,
         occurrences_truncated: truncated,

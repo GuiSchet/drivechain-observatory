@@ -66,13 +66,21 @@ assert state["state"]["treasury"]["9"]["value_sats"]=="700",state
 assert state["state"]["active"]["9"]["declaration"]["declaration"]["V0"]["title"]==fixture.TITLE,state
 assert all(x["hash"] is None and x["height"] is None and x["quality"]=="tip_matched" for x in state["observations"]),state
 for resource in ["sidechain-instances","withdrawal-bundles","ctip/history"]:
-    items=get("/api/v1/"+resource)["items"]
+    # Snapshot rows only; block outcomes in the bundle list are anchored facts.
+    items=[x for x in get("/api/v1/"+resource)["items"] if x["kind"]!="bundle_outcome"]
     assert items and all(x["hash"] is None and x["height"] is None for x in items),(resource,items)
     assert all(x["data"]["observation_window"]["atomicity_proven"] is False for x in items)
 assert get("/api/v1/protocol-messages")["items"]==[]
 assert len(get("/api/v1/deposits")["items"])==1
 instance_ctips=get("/api/v1/sidechain-instances/"+quote(fixture.INSTANCE,safe="")+"/ctip")["items"]
 assert instance_ctips and all(x["data"]["observation_window"]["sidechain_instance_id"]==fixture.INSTANCE for x in instance_ctips),instance_ctips
+bundles=get("/api/v1/withdrawal-bundles?scope=all")["items"]
+assert {x["kind"] for x in bundles}=={"bundle","bundle_outcome"},bundles
+outcome=next(x for x in bundles if x["kind"]=="bundle_outcome")
+assert "Succeeded" in outcome["data"]["state"] and outcome["data"]["m6id"]==fixture.BUNDLE_A,outcome
+pending=next(x for x in bundles if x["kind"]=="bundle")
+attempt=get("/api/v1/bundle-attempts?scope=all&key="+quote(pending["entity_id"],safe=""))["items"]
+assert attempt and attempt[0]["entity_id"]==pending["entity_id"],attempt
 gaps=get("/api/v1/coverage")["transition_gaps"]
 assert gaps and gaps[0]["gap_start_height"]==fixture.ACTIVATION+7 and gaps[0]["gap_end_height"]==fixture.ACTIVATION+9,gaps
 check("official observations, unanchored windows, no rules replay")
@@ -116,6 +124,9 @@ assert "9" not in state["state"]["treasury"],state
 assert next(x for x in state["observations"] if x["kind"]=="ctip")["quality"]=="unknown",state
 f=writer();f.observe(event,9);commit(f)
 assert get("/api/v1/observatory")["state"]["treasury"]["9"]["value_sats"]=="700"
+state=get("/api/v1/observatory")
+treasury=next(x for x in state["context"]["families"] if x["family"]=="treasury")
+assert state["context"]["state"]=="partial" and treasury["first_error_event_id"],state["context"]
 check("invalid latest response cannot resurrect prior state")
 # Re-reading an unchanged value adds occurrences, not history rows.
 before=get("/api/v1/ctip/history?slot=9")["items"]
@@ -142,7 +153,8 @@ f=writer();f.tip(11);commit(f,10)
 branch=get("/api/v1/status")["branch"]
 assert branch["tip_hash"]==fixture.HASHES[11] and branch["basis"]=="tip_header_missing" and branch["status"]!="ambiguous",branch
 assert get("/api/v1/blocks/"+fixture.HASHES[10])["block"]["membership"]=="selected"
-assert get("/api/v1/observatory")["context"]["state"]=="available"
+# Partial: an earlier test recorded an invalid CTIP fact, which bounds its family.
+assert get("/api/v1/observatory")["context"]["state"] in ("available","partial")
 f=writer();f.event("block_connected","BlockConnected",dict(header=fixture.official_header(11),sidechain_number=9,events=[]),11,slot=9,method="live");commit(f,10)
 assert get("/api/v1/status")["branch"]["status"]!="ambiguous"
 f=writer();f.event("mainchain_block","MainchainBlock",dict(header=fixture.header(11),raw_block="00"),11,source="node");f.tip(11,source="node");f.tip(11);commit(f,11)

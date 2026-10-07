@@ -813,41 +813,6 @@ async fn sync_event_page(
     Ok(count)
 }
 
-async fn project_block(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &SourceEvent,
-) -> Result<()> {
-    if !matches!(
-        event.kind.as_str(),
-        "bip300_block_delta" | "block_connected" | "chain_tip"
-    ) {
-        return Ok(());
-    }
-    let (Some(block_hash), Some(height)) = (&event.block_hash, event.height) else {
-        return Ok(());
-    };
-    sqlx::query(
-        "INSERT INTO projection.blocks \
-            (dataset_id, block_hash, height, first_observed_at, last_observed_at, \
-             projection_version) \
-         VALUES ($1,$2,$3,$4,$4,$5) \
-         ON CONFLICT (dataset_id, block_hash) DO UPDATE SET \
-             height = EXCLUDED.height, \
-             last_observed_at = GREATEST( \
-                 projection.blocks.last_observed_at, EXCLUDED.last_observed_at \
-             ), \
-             projection_version = EXCLUDED.projection_version",
-    )
-    .bind(event.dataset_id)
-    .bind(block_hash)
-    .bind(height)
-    .bind(event.observed_at)
-    .bind(PROJECTION_VERSION)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
 async fn load_snapshot_groups(
     source: &PgPool,
     snapshot_group_ids: &[Uuid],

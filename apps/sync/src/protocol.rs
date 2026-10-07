@@ -226,6 +226,13 @@ pub async fn advance(
         }
         if complete {
             refresh_observations(&mut tx, d, g, cut, &mut state).await?;
+            // Facts that could not be interpreted bound each family's progress.
+            let errors: Vec<(String, i64)> = sqlx::query_as("SELECT family,min(event_id) FROM projection.protocol_facts WHERE dataset_id=$1 AND generation=$2 AND error IS NOT NULL AND event_id<=$3 GROUP BY family")
+                .bind(d).bind(g).bind(cut.events).fetch_all(&mut *tx).await?;
+            state.first_errors = errors
+                .into_iter()
+                .map(|(family, id)| (family, id.to_string()))
+                .collect();
         }
         sqlx::query("UPDATE ops.protocol_builds SET cursor_height=$2,state=$3,complete=$4 WHERE build_id=$1").bind(build).bind(at).bind(json!(state)).bind(complete).execute(&mut *tx).await?;
         if complete {
@@ -259,7 +266,7 @@ pub async fn advance(
                     .as_ref()
                     .is_some_and(|r| r.get::<Value, _>("cut")["run"] == json!(cut.run));
                 let parent_matches:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection.chain_headers WHERE dataset_id=$1 AND generation=$2 AND hash=$3 AND parent=$4)").bind(d).bind(g).bind(&state.hash).bind(previous.as_ref().and_then(|v|v["hash"].as_str())).fetch_one(&mut *tx).await?;
-                let fresh_live:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM ingest.event_observations o JOIN ingest.source_events e ON e.dataset_id=o.dataset_id AND e.source_event_id=o.source_event_id WHERE o.dataset_id=$1 AND o.run_id=$2 AND o.observation_id<=$3 AND o.capture_method='live' AND o.observed_at BETWEEN now()-interval '60 seconds' AND now()+interval '5 seconds' AND encode(e.block_hash,'hex')=$4 AND e.kind IN ('block_connected','bip300_block_delta'))").bind(d).bind(cut.run).bind(cut.observations).bind(&state.hash).fetch_one(&mut *tx).await?;
+                let fresh_live:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM ingest.event_observations o JOIN ingest.source_events e ON e.dataset_id=o.dataset_id AND e.source_event_id=o.source_event_id WHERE o.dataset_id=$1 AND o.run_id=$2 AND o.observation_id<=$3 AND o.capture_method='live' AND o.observed_at BETWEEN now()-interval '60 seconds' AND now()+interval '5 seconds' AND encode(e.block_hash,'hex')=$4 AND e.kind='block_connected')").bind(d).bind(cut.run).bind(cut.observations).bind(&state.hash).fetch_one(&mut *tx).await?;
                 let eligible = following
                     && fresh_live
                     && same_run
@@ -272,10 +279,16 @@ pub async fn advance(
                     let mut activity = vec![
                         json!({"kind":"block_observed","hash":state.hash,"height":state.height,"animation_eligible":true}),
                     ];
-                    let changes=sqlx::query("SELECT kind,slot,data,evidence FROM projection.protocol_history WHERE dataset_id=$1 AND generation=$2 AND build_id=$3 AND hash=$4 AND kind IN ('deposit','bundle','proposal','instance','bmm_commitment','bmm_confirmation') ORDER BY ordinal LIMIT 100").bind(d).bind(g).bind(build).bind(&state.hash).fetch_all(&mut *tx).await?;
+                    let changes=sqlx::query("SELECT kind,slot,data,evidence FROM projection.protocol_history WHERE dataset_id=$1 AND generation=$2 AND build_id=$3 AND hash=$4 AND kind IN ('deposit','bundle_outcome','bmm_commitment','bmm_confirmation') ORDER BY ordinal LIMIT 100").bind(d).bind(g).bind(build).bind(&state.hash).fetch_all(&mut *tx).await?;
                     for r in changes {
                         let data: Value = r.get("data");
-                        activity.push(json!({"kind":r.get::<String,_>("kind"),"slot":r.get::<Option<i16>,_>("slot"),"status":data["status"],"hash":state.hash,"height":state.height,"evidence":r.get::<Value,_>("evidence"),"animation_eligible":true}));
+                        // Block outcomes carry their state as {"Succeeded": ...}.
+                        let status = data["status"].as_str().map(str::to_owned).or_else(|| {
+                            data["state"]
+                                .as_object()
+                                .and_then(|o| o.keys().next().cloned())
+                        });
+                        activity.push(json!({"kind":r.get::<String,_>("kind"),"slot":r.get::<Option<i16>,_>("slot"),"status":status,"hash":state.hash,"height":state.height,"evidence":r.get::<Value,_>("evidence"),"animation_eligible":true}));
                     }
                     let activity = json!(activity);
                     sqlx::query("UPDATE ops.pulse_updates SET activity=$2 WHERE revision=(SELECT max(revision) FROM ops.pulse_updates WHERE dataset_id=$1)").bind(d).bind(activity).execute(&mut *tx).await?;

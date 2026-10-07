@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use sqlx::{Connection as _, PgConnection};
 use uuid::Uuid;
 
-use super::{SourceEvent, advance_cursor, append_update, cursor, project_block};
+use super::{SourceEvent, advance_cursor, append_update, cursor};
 
 pub fn auction(payload: &Value, anchor: Option<&[u8]>) -> Result<(String, Vec<BmmBid>)> {
     let snapshot = payload
@@ -89,15 +89,10 @@ pub async fn project_page(
                 Err(error) => bmm_error = Some(error.to_string()),
             }
         }
-        if matches!(
-            event.kind.as_str(),
-            "bip300_block_delta" | "block_connected" | "chain_tip"
-        ) {
-            if event.block_hash.is_none() || event.height.is_none() {
-                block_error = Some("block fact lacks its hash or height".to_owned());
-            } else {
-                project_block(&mut tx, event).await?;
-            }
+        if matches!(event.kind.as_str(), "block_connected" | "chain_tip")
+            && (event.block_hash.is_none() || event.height.is_none())
+        {
+            block_error = Some("block fact lacks its hash or height".to_owned());
         }
         let error = bmm_error.as_ref().or(block_error.as_ref());
         sqlx::query("UPDATE ingest.source_events SET interpretation_error=$3 WHERE dataset_id=$1 AND source_event_id=$2")
