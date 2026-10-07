@@ -1313,6 +1313,7 @@ async fn check_continuity(
         }
     }
     check_import_order(source, destination, dataset).await?;
+    audit_imported_content(source, destination, dataset).await?;
     let witness: Option<(i64,Vec<u8>)> = sqlx::query_as("SELECT source_event_id,envelope FROM ingest.source_events WHERE dataset_id=$1 ORDER BY source_event_id DESC LIMIT 1")
         .bind(dataset).fetch_optional(&mut *destination).await?;
     if let Some((id, envelope)) = witness {
@@ -1410,6 +1411,124 @@ async fn check_import_order(
                  the monitor must commit in id order (schema 10); rebuild this dataset"
             )));
         }
+    }
+    Ok(())
+}
+
+/// Ids compared per stream and cycle by the rotating content audit.
+const AUDIT_WINDOW: i64 = 2_000;
+
+/// One audited stream: the cursor it follows, and the same row text computed
+/// from the monitor table and from its imported copy, keyed by id range.
+struct Audit {
+    stream: &'static str,
+    source: &'static str,
+    imported: &'static str,
+}
+
+const AUDITS: &[Audit] = &[
+    Audit {
+        stream: "source_events",
+        source: "SELECT md5(string_agg(id::text||':'||encode(fact_sha256,'hex')||':'||coalesce(encode(envelope_sha256,'hex'),''),'|' ORDER BY id))
+                   FROM event WHERE dataset_id=$1 AND id BETWEEN $2 AND $3",
+        imported: "SELECT md5(string_agg(source_event_id::text||':'||encode(fact_sha256,'hex')||':'||coalesce(encode(envelope_sha256,'hex'),''),'|' ORDER BY source_event_id))
+                   FROM ingest.source_events WHERE dataset_id=$1 AND source_event_id BETWEEN $2 AND $3",
+    },
+    Audit {
+        stream: "event_observations",
+        source: "SELECT md5(string_agg(observation_id::text||':'||event_id||':'||run_id||':'||capture_seq||':'||capture_method||':'||coalesce(snapshot_group_id::text,''),'|' ORDER BY observation_id))
+                   FROM event_observation WHERE dataset_id=$1 AND observation_id BETWEEN $2 AND $3",
+        imported: "SELECT md5(string_agg(observation_id::text||':'||source_event_id||':'||run_id||':'||capture_seq||':'||capture_method||':'||coalesce(snapshot_group_id::text,''),'|' ORDER BY observation_id))
+                   FROM ingest.event_observations WHERE dataset_id=$1 AND observation_id BETWEEN $2 AND $3",
+    },
+    Audit {
+        // Groups are audited through the occurrences that reference them.
+        stream: "event_observations",
+        source: "SELECT md5(string_agg(g.snapshot_group_id||':'||g.consistency||':'||encode(g.tip_before_hash,'hex')||':'||g.tip_before_height||':'||encode(g.tip_after_hash,'hex')||':'||g.tip_after_height,'|' ORDER BY g.snapshot_group_id))
+                   FROM snapshot_group g WHERE g.snapshot_group_id IN
+                   (SELECT snapshot_group_id FROM event_observation WHERE dataset_id=$1 AND observation_id BETWEEN $2 AND $3)",
+        imported: "SELECT md5(string_agg(g.snapshot_group_id||':'||g.consistency||':'||encode(g.tip_before_hash,'hex')||':'||g.tip_before_height||':'||encode(g.tip_after_hash,'hex')||':'||g.tip_after_height,'|' ORDER BY g.snapshot_group_id))
+                   FROM ingest.snapshot_groups g WHERE g.snapshot_group_id IN
+                   (SELECT snapshot_group_id FROM ingest.event_observations WHERE dataset_id=$1 AND observation_id BETWEEN $2 AND $3)",
+    },
+    Audit {
+        stream: "tip_observations",
+        source: "SELECT md5(string_agg(tip_observation_id::text||':'||run_id||':'||capture_seq||':'||encode(tip_hash,'hex')||':'||tip_height,'|' ORDER BY tip_observation_id))
+                   FROM tip_observation WHERE dataset_id=$1 AND tip_observation_id BETWEEN $2 AND $3",
+        imported: "SELECT md5(string_agg(tip_observation_id::text||':'||run_id||':'||capture_seq||':'||encode(tip_hash,'hex')||':'||tip_height,'|' ORDER BY tip_observation_id))
+                   FROM ingest.tip_observations WHERE dataset_id=$1 AND tip_observation_id BETWEEN $2 AND $3",
+    },
+    Audit {
+        stream: "coverage_revisions",
+        source: "SELECT md5(string_agg(revision_id::text||':'||operation||':'||md5(row_data::text),'|' ORDER BY revision_id))
+                   FROM history_coverage_revision WHERE dataset_id=$1 AND revision_id BETWEEN $2 AND $3",
+        imported: "SELECT md5(string_agg(revision_id::text||':'||operation||':'||md5(row_data::text),'|' ORDER BY revision_id))
+                   FROM ingest.coverage_revisions WHERE dataset_id=$1 AND revision_id BETWEEN $2 AND $3",
+    },
+];
+
+/// Imported rows are copies of immutable monitor rows. A monitor row rewritten
+/// after import would otherwise keep serving its old value without notice.
+/// Each cycle compares one id window per stream, rotating over the imported
+/// range; a mismatch is recorded and stops the sync.
+async fn audit_imported_content(
+    source: &PgPool,
+    destination: &mut PgConnection,
+    dataset: Uuid,
+) -> Result<()> {
+    for (index, audit) in AUDITS.iter().enumerate() {
+        let key = format!("{}#{index}", audit.stream);
+        let imported_through = cursor(destination, dataset, audit.stream).await?;
+        if imported_through == 0 {
+            continue;
+        }
+        let next: i64 = sqlx::query_scalar(
+            "INSERT INTO ops.import_audit(dataset_id,stream) VALUES($1,$2)
+             ON CONFLICT(dataset_id,stream) DO UPDATE SET next_id=ops.import_audit.next_id
+             RETURNING next_id",
+        )
+        .bind(dataset)
+        .bind(&key)
+        .fetch_one(&mut *destination)
+        .await?;
+        let first = if next > imported_through { 1 } else { next };
+        let last = (first + AUDIT_WINDOW - 1).min(imported_through);
+        let expected: Option<String> = sqlx::query_scalar(audit.source)
+            .bind(dataset)
+            .bind(first)
+            .bind(last)
+            .fetch_one(source)
+            .await?;
+        let imported: Option<String> = sqlx::query_scalar(audit.imported)
+            .bind(dataset)
+            .bind(first)
+            .bind(last)
+            .fetch_one(&mut *destination)
+            .await?;
+        if expected != imported {
+            let detail = format!("content differs from the imported copy (audit {index})");
+            sqlx::query(
+                "INSERT INTO ingest.import_conflicts(dataset_id,stream,first_source_id,last_source_id,detail)
+                 VALUES($1,$2,$3,$4,$5)",
+            )
+            .bind(dataset)
+            .bind(audit.stream)
+            .bind(first.to_string())
+            .bind(last.to_string())
+            .bind(&detail)
+            .execute(&mut *destination)
+            .await?;
+            return Err(incompatible(format!(
+                "{} ids {first}..={last}: {detail}; reconcile the dataset",
+                audit.stream
+            )));
+        }
+        sqlx::query("UPDATE ops.import_audit SET next_id=$3 WHERE dataset_id=$1 AND stream=$2")
+            .bind(dataset)
+            .bind(&key)
+            .bind(last + 1)
+            .execute(&mut *destination)
+            .await?;
     }
     Ok(())
 }

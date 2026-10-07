@@ -156,3 +156,27 @@ assert get("/api/v1/status")["sync_mode"]=="incompatible"
 sql("monitor_fixture",f"DELETE FROM event_observation WHERE event_id={late}; DELETE FROM event WHERE id={late}")
 settle()
 check("a row committed behind the import cursor stops sync loudly")
+# Rewriting an already imported monitor row is detected and recorded.
+def tampered(stream,change,restore):
+    sql("monitor_fixture",change)
+    p=sync(fail=True)
+    assert "content differs" in p.stdout+p.stderr and stream in p.stdout+p.stderr,p.stdout+p.stderr
+    sql("monitor_fixture",restore);settle()
+first_event=sql("monitor_fixture","SELECT min(id) FROM event")
+tampered("source_events",f"UPDATE event SET envelope_sha256=sha256('x') WHERE id={first_event}",
+    f"UPDATE event SET envelope_sha256=sha256(envelope) WHERE id={first_event}")
+first_observation=sql("monitor_fixture","SELECT min(observation_id) FROM event_observation")
+tampered("event_observations",f"UPDATE event_observation SET capture_seq=capture_seq+100000 WHERE observation_id={first_observation}",
+    f"UPDATE event_observation SET capture_seq=capture_seq-100000 WHERE observation_id={first_observation}")
+group=sql("monitor_fixture","SELECT snapshot_group_id FROM event_observation WHERE snapshot_group_id IS NOT NULL ORDER BY observation_id LIMIT 1")
+original=sql("monitor_fixture",f"SELECT consistency FROM snapshot_group WHERE snapshot_group_id='{group}'")
+tampered("event_observations",f"UPDATE snapshot_group SET consistency='unknown' WHERE snapshot_group_id='{group}'",
+    f"UPDATE snapshot_group SET consistency='{original}' WHERE snapshot_group_id='{group}'")
+first_tip=sql("monitor_fixture","SELECT min(tip_observation_id) FROM tip_observation")
+tampered("tip_observations",f"UPDATE tip_observation SET capture_seq=capture_seq+100000 WHERE tip_observation_id={first_tip}",
+    f"UPDATE tip_observation SET capture_seq=capture_seq-100000 WHERE tip_observation_id={first_tip}")
+first_revision=sql("monitor_fixture","SELECT min(revision_id) FROM history_coverage_revision")
+tampered("coverage_revisions",f"UPDATE history_coverage_revision SET row_data=row_data||'{{\"tampered\":1}}' WHERE revision_id={first_revision}",
+    f"UPDATE history_coverage_revision SET row_data=row_data-'tampered' WHERE revision_id={first_revision}")
+assert int(sql("postgres","SELECT count(*) FROM ingest.import_conflicts"))==5
+check("rewritten imported rows are detected in every audited stream")
