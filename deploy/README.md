@@ -33,8 +33,10 @@ Docker-published database port is private.
 
 ## Monitor role
 
-Provision a dedicated pulse_sync_reader role with CONNECT and USAGE plus SELECT
-only on:
+The monitor deployment provisions this role with `just grant-reader`
+(`bip300-monitor` `deployments/ecash/scripts/grant-reader.sh`), which keeps the
+password in its secrets directory and verifies every grant. It is a dedicated
+`pulse_sync_reader` role with CONNECT and USAGE plus SELECT only on:
 
 - schema_version
 - dataset_manifest
@@ -59,9 +61,9 @@ connection only from the Observatory VM private address.
 ## Betanet source configuration and upgrade
 
 The source must provide a current running enforcer with the required
-capabilities: official contract 8 with SQL schema 9 and a fresh dataset.
+capabilities: official contract 9 with SQL schema 10 and a fresh dataset.
 Use the local fixtures while the operator promotes the monitor separately.
-See [the compatibility review](../SOURCE_CONTRACT.md) for the contract-8 boundary.
+See [the compatibility review](../SOURCE_CONTRACT.md) for the contract-9 boundary.
 
 Set `PULSE_DATASET_ID` to the source manifest UUID. Defaults for network identity
 are `betanet`, activation height `967680`, hash
@@ -70,14 +72,15 @@ A mismatching source, incompatible contract or loss of continuity stops import
 with `incompatible`; existing local evidence remains available. Dataset changes
 require an explicit local reconciliation; the API never selects the newest row.
 
-Observatory rejects every pre-v8 dataset, including those without sidechain rows.
+Observatory rejects every dataset created by another event contract, including
+those without sidechain rows.
 For a replacement monitor dataset, provision a fresh Observatory destination database
 and explicitly configure its UUID; retain the previous destination/backup for
 historical evidence. This release does not automate dataset replacement.
 The reconstruction command below changes a projection generation within one
 dataset; it does not migrate identities between datasets.
 
-Apply all Observatory migrations, including 0007, with the admin role on the fresh
+Apply all Observatory migrations, including 0012, with the admin role on the fresh
 destination before starting sync/API. Allow catch-up to
 finish before treating freshness as established. Use an Observatory database backup
 before upgrades; restore it to a separate database for rollback.
@@ -85,19 +88,15 @@ before upgrades; restore it to a separate database for rollback.
 `PULSE_STALE_AFTER_SECONDS` defaults to 30. Worker freshness is based on the last
 successful poll, not block cadence. BMM shows the latest occurrence from the
 current run. A new run does not inherit the previous run’s current auction.
-For contract 8, matching before/after tips qualify only a `tip_matched` observation.
+Matching before/after tips qualify only a `tip_matched` observation.
 Revisions stay null; readiness and exhaustive bid coverage remain unknown.
 Missing or contradictory metadata preserves evidence with unknown quality.
 Monetary defaults are `PULSE_NATIVE_SYMBOL=sats`, `PULSE_NATIVE_DECIMALS=0`.
 `bid_sats` always remains the original integer regardless of presentation config.
 
-The operator must additionally grant `SELECT` on `extractor_worker_status` and `observation_failure` to
-the existing monitor reader. For an already provisioned `pulse_sync_reader`:
-
-    GRANT SELECT ON public.extractor_worker_status, public.observation_failure TO pulse_sync_reader;
-
-This document is a manual provisioning requirement. Observatory does not apply grants
-or migrations to the monitor. `start-monitor-tunnel.sh` now requires the existing
+Observatory does not apply grants or migrations to the monitor; rerunning the
+monitor's `just grant-reader` re-applies the exact grants (the compatibility
+probe requires every listed relation, including `observation_failure`). `start-monitor-tunnel.sh` now requires the existing
 `PULSE_MONITOR_READER_PASSWORD` (URL-safe characters), `PULSE_DATASET_ID`,
 `PULSE_MONITOR_COMPOSE_PROJECT` (the operator’s monitor project name) and SSH
 configuration. It reads container metadata and starts only local Observatory services;

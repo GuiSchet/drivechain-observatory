@@ -1,23 +1,24 @@
-# Official-source candidate: projection 7
+# Official-source candidate: projection 8
 
-The source and image pins are in [RELEASE_OFFICIAL.json](RELEASE_OFFICIAL.json).
-The image is built from GPG-signed source
-`026d0c739c86eb4c18ba87be7de4ebbae25c91ad`; the release documentation commit can
-be newer without changing those binary inputs.
+The paired release record is [RELEASE_OFFICIAL.json](RELEASE_OFFICIAL.json),
+identical in the monitor repository. This projection requires a fresh monitor
+contract-9 / SQL-10 dataset, a fresh Observatory database and its explicit UUID.
+Capabilities determine compatibility; SHAs record provenance. See
+[SOURCE_CONTRACT.md](../SOURCE_CONTRACT.md).
 
-Use the `observatory.oci.tar` destination and digest as `PULSE_IMAGE` only after
-publication and registry verification. The source must be a fresh monitor
-contract-8 / SQL-9 dataset; use a fresh Observatory database and its explicit UUID.
-This candidate removes private rule replay. Capabilities determine compatibility;
-SHAs record provenance. See [SOURCE_CONTRACT.md](../SOURCE_CONTRACT.md).
+The contract-8 image (`026d0c7`) is superseded. Rebuild the Observatory image
+from the merged commit, record its digest in the release record and verify the
+published bytes before using it as `PULSE_IMAGE`.
 
-Local checks passed: 14 unit tests, Clippy, generated API types, production web
-build, real PostgreSQL importer/API, reorgs and immutable conflicts, independently
-advancing node, failed enforcer, invalid/changed snapshots, instance-specific CTIP,
-occurrence-time filters, exact u64 browser rendering and paired backup/restore.
+Validated from source: Rust units, Clippy, generated API types, production web
+build, and `PULSE_BROWSER_TESTS=1 scripts/verify-local.sh` against real
+PostgreSQL (importer, API, reorgs, immutable conflicts, a tip ahead of its node
+header, rows behind the import cursor, rewritten source rows, append-only sync
+privileges, snapshot deduplication, transition gaps, Chrome content checks and
+checksummed paired dump/restore).
 
-The four OCI archives are local and unpublished. The monitor release remains
-`preparing`. Review and merge the two consumer repositories, publish exact bytes
-with preserved digests and verify them before requesting HOSTKEY cutover approval.
-Preserve both old databases, their binaries/locks and the old enforcer directory;
-start official upstream in a separate directory. No remote changes were applied.
+The monitor release remains `preparing`. Review and merge the two consumer
+repositories together, publish exact bytes with preserved digests and verify
+them before requesting HOSTKEY cutover approval. Preserve both old databases,
+their binaries/locks and the old enforcer directory; start official upstream in
+a separate directory. No remote changes were applied.

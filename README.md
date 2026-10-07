@@ -6,8 +6,8 @@ database/role names and API fields such as `pulse_revision` remain compatible.
 The rename requires no database migration or evidence rewrite. Historical
 fixture labels are retained with their original hashes and protobuf envelopes.
 
-Public Betanet BIP300/301 observatory consuming a **fresh monitor contract 8 /
-SQL schema 9 dataset**, with projection 7. It uses unmodified official enforcer
+Public Betanet BIP300/301 observatory consuming a **fresh monitor contract 9 /
+SQL schema 10 dataset**, with projection 8. It uses unmodified official enforcer
 APIs and independent node evidence; unsupported protocol effects remain unknown.
 See [SOURCE_CONTRACT.md](SOURCE_CONTRACT.md). Deployment is operated separately.
 
@@ -54,22 +54,23 @@ Run the isolated fixture, migration and behavioral integration suite:
 
 Requires Docker Compose, Rust, Python 3 and curl; uses loopback ports
 55433/55434/18080/18081. It creates and removes only its own temporary Compose
-project. The default v8 fixture uses all nine actual monitor migrations and
-a separate Observatory database. The exact upstream files are included under
-`fixtures/v8`, with their commit, license and checksums;
-no sibling monitor checkout is needed. Older v5 suites remain historical references.
+project. The v9 fixture uses all ten actual monitor migrations and a separate
+Observatory database. The exact upstream files are included under `fixtures/v9`
+(and `fixtures/upstream`), with their license and checksums; no sibling monitor
+checkout is needed. Suites and fixtures for contracts 5–8 are archived under
+`scripts/archive` and `fixtures/archive`; nothing runs them.
 
 To include Chromium checks against that same fixture, run:
 
     PULSE_BROWSER_TESTS=1 sh scripts/verify-local.sh
 
-This also requires an installed Playwright package and Chromium, plus free
-loopback port 13000. One option is a separate temporary npm project:
+This also requires an installed Playwright package and Chromium or Chrome, plus
+free loopback port 13000. CI installs only the pinned library and uses the
+runner's Chrome; locally, for example:
 
     mkdir -p /tmp/observatory-browser-tools
-    npm --prefix /tmp/observatory-browser-tools install playwright@1.57.0
-    /tmp/observatory-browser-tools/node_modules/.bin/playwright install chromium
-    PULSE_PLAYWRIGHT_MODULE=/tmp/observatory-browser-tools/node_modules/playwright/index.mjs PULSE_BROWSER_TESTS=1 sh scripts/verify-local.sh
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm --prefix /tmp/observatory-browser-tools install playwright@1.56.1
+    PULSE_PLAYWRIGHT_MODULE=/tmp/observatory-browser-tools/node_modules/playwright/index.mjs PULSE_BROWSER_EXECUTABLE=/usr/bin/google-chrome PULSE_BROWSER_TESTS=1 sh scripts/verify-local.sh
 
 For an existing installation outside the project, set
 `PULSE_PLAYWRIGHT_MODULE` to its absolute module entrypoint and
@@ -89,12 +90,18 @@ See [deploy/README.md](deploy/README.md) for exact environment and upgrade rules
 - `/api/v1/coverage`, `/api/v1/bmm/auctions`
 - `/api/v1/blocks`, `/api/v1/blocks/{hash}`
 - `/api/v1/datasets/{dataset_id}/events/{event_id}` and `/raw`
-- `/api/v1/observatory`, `/api/v1/chain-info`, `/api/v1/sidechain-proposals`
-- `/api/v1/sidechain-instances`, `/api/v1/deposits`, `/api/v1/ctip/history`
-- `/api/v1/withdrawal-bundles`, `/api/v1/bundle-attempts/{id}`
+- `/api/v1/observatory`, `/api/v1/observations`, `/api/v1/chain-info`
+- `/api/v1/sidechains/{slot}` and its `/activity` and `/instances`
+- `/api/v1/sidechain-proposals` and `/{id}`, `/api/v1/sidechain-instances` and
+  `/{id}` and `/{id}/ctip`, `/api/v1/deposits`, `/api/v1/ctip/history`
+- `/api/v1/withdrawal-bundles` and `/{id}` (pending bundles and block outcomes),
+  `/api/v1/bundle-attempts` and `/{id}`
 - `/api/v1/bmm`, `/api/v1/bmm/history`, `/api/v1/bmm/commitments`, `/api/v1/bmm/confirmed`
-- `/api/v1/protocol-messages`, `/api/v1/activity`, `/api/v1/events`, `/api/v1/search`, `/api/v1/export`
-- `/api/v1/runs`, `/api/v1/snapshot-groups`, event `/occurrences` and entity details
+- `/api/v1/protocol-messages` (facts that could not be interpreted; the official
+  sources report no coinbase messages), `/api/v1/activity`, `/api/v1/events`,
+  `/api/v1/search`, `/api/v1/export`
+- `/api/v1/runs`, `/api/v1/snapshot-groups`, `/api/v1/observation-failures`,
+  event `/occurrences` and entity details
 - `/api/v1/stream`, `/openapi.json`, `/docs`
 
 Web routes include `/`, `/sidechains`, `/sidechains/{slot}`, instance/proposal/
@@ -108,14 +115,19 @@ retention and public-load checks remain operator work.
 
 ## Branches and observation quality
 
-Projection 7 follows the enforcer's observed tip while independently importing
-node headers and raw blocks. Alternatives and conflicting facts remain visible.
+Projection 8 follows the enforcer's observed tip while independently importing
+node headers and raw blocks. A tip reported before its node header keeps the
+selected branch until the header arrives. Alternatives and conflicting facts remain visible.
 Node/enforcer disagreement blocks joint certification. Chainwork is a lossless
 decimal string decoded from node little-endian uint256.
 
 State responses are separate unanchored observations. Matching read-window tips
 are not atomic state. Latest invalid/changed occurrences cannot borrow earlier
-quality. Charts show points by observation time, with exact values in tables.
+quality, and every list reports the quality and time of an item's latest read.
+An unchanged re-read extends its history row (occurrence count, last read).
+Subscription gaps of the global transition stream are listed in `/coverage`.
+Imported evidence is audited against the source; rows that appear behind the
+import cursor or change after import stop the sync as `incompatible`. Charts show points by observation time, with exact values in tables.
 There is no local protocol rules engine; voting, expiry and historical BMM
 eligibility are not inferred. Fees cover only previously observed matching bids.
 
