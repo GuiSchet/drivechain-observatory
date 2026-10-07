@@ -494,9 +494,9 @@ async fn history_page(
         "withdrawal-bundles" | "bundle-attempts" | "sidechain-proposals" | "sidechain-instances"
     );
     let mut qb = sqlx::QueryBuilder::new(if latest {
-        "WITH candidates AS (SELECT DISTINCT ON(p.kind,p.entity_key) p.*,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id),e.observed_at) AS observed_at,h.block_time FROM projection.observed_history p"
+        "WITH candidates AS (SELECT DISTINCT ON(p.kind,p.entity_key) p.*,(SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id) AS first_observed_at,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.last_observation_id),e.observed_at) AS observed_at,h.block_time FROM projection.observed_history p"
     } else {
-        "WITH candidates AS (SELECT p.*,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id),e.observed_at) AS observed_at,h.block_time FROM projection.observed_history p"
+        "WITH candidates AS (SELECT p.*,(SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id) AS first_observed_at,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.last_observation_id),e.observed_at) AS observed_at,h.block_time FROM projection.observed_history p"
     });
     qb.push(" LEFT JOIN ingest.source_events e ON e.dataset_id=p.dataset_id AND e.source_event_id=(p.evidence->0->>'event_id')::bigint LEFT JOIN projection.chain_headers h ON h.dataset_id=p.dataset_id AND h.generation=p.generation AND h.hash=p.hash WHERE p.dataset_id=").push_bind(c.meta.dataset_id).push(" AND p.generation=").push_bind(c.meta.projection_generation).push(" AND p.build_id<=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0));
     qb.push(" AND (p.observation_id IS NULL OR p.observation_id <= coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).push("),0))");
@@ -510,7 +510,7 @@ async fn history_page(
         c,
         "p",
         true,
-        "coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id),e.observed_at)",
+        "coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.last_observation_id),e.observed_at)",
     );
     if let Some(search) = q.q.as_deref().filter(|s| !s.is_empty()) {
         qb.push(" AND (p.entity_key=").push_bind(search).push(" OR coalesce(p.data->>'m6id',p.data#>>'{bundle,m6id}',p.data#>>'{proposal,description_hash}',p.data#>>'{sidechain,description_hash}')=").push_bind(search).push(" OR coalesce(p.data#>>'{outpoint,txid}',p.data#>>'{ctip,txid}',p.data#>>'{transition,txid}')=").push_bind(search).push(")");
@@ -522,7 +522,7 @@ async fn history_page(
         }
         qb.push("p.height DESC NULLS FIRST,p.observation_id DESC,p.ordinal DESC");
     }
-    qb.push("), listed AS (SELECT *,coalesce(height,-1)::text || ':' || coalesce(hash,lpad(observation_id::text,20,'0')) || ':' || build_id::text || ':' || ordinal::text AS page_id FROM candidates) SELECT page_id AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,block_time,quality,evidence,data,issue FROM listed WHERE true");
+    qb.push("), listed AS (SELECT *,coalesce(height,-1)::text || ':' || coalesce(hash,lpad(observation_id::text,20,'0')) || ':' || build_id::text || ':' || ordinal::text AS page_id FROM candidates) SELECT page_id AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,first_observed_at,block_time,quality,evidence,data || jsonb_build_object('occurrences',occurrences::text) AS data,issue FROM listed WHERE true");
     if let Some(p) = page {
         let observed = p
             .after

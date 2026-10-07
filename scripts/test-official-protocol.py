@@ -115,6 +115,16 @@ assert next(x for x in state["observations"] if x["kind"]=="ctip")["quality"]=="
 f=writer();f.observe(event,9);commit(f)
 assert get("/api/v1/observatory")["state"]["treasury"]["9"]["value_sats"]=="700"
 check("invalid latest response cannot resurrect prior state")
+# Re-reading an unchanged value adds occurrences, not history rows.
+before=get("/api/v1/ctip/history?slot=9")["items"]
+f=writer();f.observe(event,9);f.observe(event,9);commit(f)
+after=get("/api/v1/ctip/history?slot=9")["items"]
+assert len(after)==len(before),(before,after)
+assert int(after[0]["data"]["occurrences"])==int(before[0]["data"]["occurrences"])+2,(before[0],after[0])
+assert after[0]["observed_at"]>=before[0]["observed_at"] and after[0]["first_observed_at"]==before[0]["first_observed_at"]
+# The M6 identifier is the display-order bundle txid and is searchable as such.
+assert get("/api/v1/withdrawal-bundles?q="+fixture.BUNDLE_B)["items"],"bundle search"
+check("unchanged snapshots extend their history row; m6id searchable")
 if os.environ.get("PULSE_BROWSER_TESTS")=="1":
     subprocess.run(["node","scripts/test-official-browser.mjs"],cwd=ROOT,check=True)
 # Node observations do not promote the enforcer branch.

@@ -293,7 +293,7 @@ pub async fn advance(
 fn window(row: &sqlx::postgres::PgRow) -> Result<Value> {
     Ok(row.try_get("window")?)
 }
-const SNAPSHOT_ROWS: &str = "SELECT f.*,e.kind AS snapshot_kind,o.observation_id,s.consistency,
+const SNAPSHOT_ROWS: &str = "SELECT f.*,e.kind AS snapshot_kind,o.observation_id,o.run_id AS occurrence_run_id,s.consistency,
     jsonb_build_object('observation_id',o.observation_id::text,'run_id',o.run_id,'started_at',s.started_at,'finished_at',s.finished_at,
     'consistency',s.consistency,'sidechain_instance_id',e.sidechain_instance_id,'atomicity_proven',false,'reference_tip_hash',encode(s.tip_before_hash,'hex'),
     'reference_tip_height',s.tip_before_height,'tip_after_hash',encode(s.tip_after_hash,'hex'),'tip_after_height',s.tip_after_height) AS window,
@@ -339,19 +339,45 @@ async fn normalize_observations(
     let mut tx = conn.begin().await?;
     for row in rows {
         let r = record(&row)?;
+        // One stream per state kind, slot and run. A reading that repeats the
+        // previous fact with the same quality adds an occurrence to the
+        // existing history row; anything else starts a new row.
+        let kind: String = row.get("snapshot_kind");
+        let slot = r.entry.slot.map_or(-1, i16::from);
+        let run: Uuid = row.get("occurrence_run_id");
+        let event_id: i64 = row.get("event_id");
+        let observation_id: i64 = row.get("observation_id");
+        let usable = row.get::<Option<bool>, _>("usable").unwrap_or(false);
         if r.entry.error.is_some() {
+            sqlx::query("DELETE FROM projection.snapshot_streams WHERE dataset_id=$1 AND generation=$2 AND snapshot_kind=$3 AND slot=$4 AND run_id=$5")
+                .bind(d).bind(g).bind(&kind).bind(slot).bind(run).execute(&mut *tx).await?;
+            continue;
+        }
+        let prior: Option<(i64, bool, i64)> = sqlx::query_as("SELECT event_id,usable,first_observation_id FROM projection.snapshot_streams WHERE dataset_id=$1 AND generation=$2 AND snapshot_kind=$3 AND slot=$4 AND run_id=$5")
+            .bind(d).bind(g).bind(&kind).bind(slot).bind(run).fetch_optional(&mut *tx).await?;
+        if let Some((_, _, first)) =
+            prior.filter(|(event, was_usable, _)| *event == event_id && *was_usable == usable)
+        {
+            sqlx::query("UPDATE projection.snapshot_history SET last_observation_id=$4,occurrences=occurrences+1 WHERE dataset_id=$1 AND generation=$2 AND observation_id=$3")
+                .bind(d).bind(g).bind(first).bind(observation_id).execute(&mut *tx).await?;
+            sqlx::query("UPDATE projection.snapshot_streams SET last_observation_id=$6 WHERE dataset_id=$1 AND generation=$2 AND snapshot_kind=$3 AND slot=$4 AND run_id=$5")
+                .bind(d).bind(g).bind(&kind).bind(slot).bind(run).bind(observation_id).execute(&mut *tx).await?;
             continue;
         }
         let mut s = State::default();
         for (ordinal, mut c) in s.snapshot(&r)?.into_iter().enumerate() {
             c.data["observation_window"] = window(&row)?;
-            if !row.get::<Option<bool>, _>("usable").unwrap_or(false) {
+            if !usable {
                 c.quality = "unknown".into();
                 c.issue = Some("Tips changed or consistency is unknown during observation".into());
             }
-            sqlx::query("INSERT INTO projection.snapshot_history(dataset_id,generation,observation_id,ordinal,kind,entity_key,slot,data,quality,evidence,issue) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING")
-                .bind(d).bind(g).bind(row.get::<i64,_>("observation_id")).bind(i32::try_from(ordinal)?).bind(c.kind).bind(c.key).bind(c.slot.map(i16::from)).bind(c.data).bind(c.quality).bind(json!(c.evidence)).bind(c.issue).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO projection.snapshot_history(dataset_id,generation,observation_id,ordinal,kind,entity_key,slot,data,quality,evidence,issue,last_observation_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$3) ON CONFLICT DO NOTHING")
+                .bind(d).bind(g).bind(observation_id).bind(i32::try_from(ordinal)?).bind(c.kind).bind(c.key).bind(c.slot.map(i16::from)).bind(c.data).bind(c.quality).bind(json!(c.evidence)).bind(c.issue).execute(&mut *tx).await?;
         }
+        sqlx::query("INSERT INTO projection.snapshot_streams(dataset_id,generation,snapshot_kind,slot,run_id,event_id,usable,first_observation_id,last_observation_id)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8) ON CONFLICT(dataset_id,generation,snapshot_kind,slot,run_id) DO UPDATE SET
+            event_id=excluded.event_id,usable=excluded.usable,first_observation_id=excluded.first_observation_id,last_observation_id=excluded.last_observation_id")
+            .bind(d).bind(g).bind(&kind).bind(slot).bind(run).bind(event_id).bind(usable).bind(observation_id).execute(&mut *tx).await?;
     }
     sqlx::query(
         "UPDATE ops.protocol_jobs SET observation_cursor=$3 WHERE dataset_id=$1 AND generation=$2",
