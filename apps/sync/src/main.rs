@@ -327,7 +327,8 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         FROM dataset_manifest d CROSS JOIN extractor_run r CROSS JOIN event_observation o
         CROSS JOIN tip_observation t CROSS JOIN snapshot_group g CROSS JOIN sidechain_instance i
         CROSS JOIN current_sidechain_instance c CROSS JOIN history_coverage h
-        CROSS JOIN history_coverage_revision v CROSS JOIN extractor_status s LIMIT 0",
+        CROSS JOIN history_coverage_revision v CROSS JOIN extractor_status s
+        CROSS JOIN observation_failure f LIMIT 0",
     )
     .execute(source)
     .await
@@ -355,6 +356,35 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         return Err(incompatible(
             "current run must provide a supported contract and all required capabilities",
         ));
+    }
+    // Node evidence is a separate run; when present it must speak the same
+    // contract and provide what the chain projection depends on.
+    let node_run: Option<(i32, Value)> = sqlx::query_as(
+        "SELECT r.event_contract_version,r.capabilities FROM extractor_run r JOIN extractor_status s ON s.run_id=r.run_id
+         WHERE s.dataset_id=$1 AND s.source='node'",
+    )
+    .bind(run.dataset_id)
+    .fetch_optional(source)
+    .await?;
+    if let Some((contract, capabilities)) = node_run {
+        let has = |cap: &str| {
+            capabilities
+                .as_array()
+                .is_some_and(|caps| caps.iter().any(|v| v.as_str() == Some(cap)))
+        };
+        if contract != run.event_contract_version
+            || ![
+                "node_block_evidence",
+                "absolute_chain_work",
+                "resumable_node_history",
+            ]
+            .iter()
+            .all(|cap| has(cap))
+        {
+            return Err(incompatible(
+                "the current node run lacks the contract or node evidence capabilities",
+            ));
+        }
     }
     // Every official contract owns a fresh dataset; facts never mix versions.
     let old_identity: bool = sqlx::query_scalar(
@@ -458,7 +488,7 @@ async fn sync_datasets(source: &PgPool, destination: &PgPool, args: &Args) -> Re
                 .is_some_and(|caps| caps.iter().any(|v| v.as_str() == Some(cap)))
         }) {
             return Err(incompatible(
-                "fresh dataset manifest lacks required v7 capabilities",
+                "the dataset manifest lacks required capabilities",
             ));
         }
         if dataset.network_id != args.network_id
@@ -469,11 +499,14 @@ async fn sync_datasets(source: &PgPool, destination: &PgPool, args: &Args) -> Re
                 "dataset network/checkpoint does not match configured identity",
             ));
         }
-        let same: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM ingest.datasets WHERE dataset_id=$1 AND (network_id <> $2 OR activation_height <> $3 OR activation_block_hash <> $4))")
+        // The monitor writes a dataset manifest once; a changed one is not a
+        // newer version of the same evidence.
+        let same: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM ingest.datasets WHERE dataset_id=$1 AND (network_id <> $2 OR activation_height <> $3 OR activation_block_hash <> $4 OR capabilities <> $5 OR initial_enforcer_commit <> $6 OR initial_monitor_commit <> $7 OR initial_node_commit <> $8))")
             .bind(dataset.dataset_id).bind(&dataset.network_id).bind(dataset.activation_height).bind(&dataset.activation_block_hash)
+            .bind(&dataset.capabilities).bind(&dataset.initial_enforcer_commit).bind(&dataset.initial_monitor_commit).bind(&dataset.initial_node_commit)
             .fetch_one(&mut *transaction).await?;
         if !same {
-            return Err(incompatible("persisted dataset identity changed"));
+            return Err(incompatible("persisted dataset manifest changed"));
         }
         sqlx::query(
             "INSERT INTO ingest.datasets \
@@ -482,8 +515,7 @@ async fn sync_datasets(source: &PgPool, destination: &PgPool, args: &Args) -> Re
                  initial_event_contract_version, capabilities, creation_reason, \
                  source_created_at) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) \
-             ON CONFLICT (dataset_id) DO UPDATE SET \
-                 capabilities = EXCLUDED.capabilities",
+             ON CONFLICT (dataset_id) DO NOTHING",
         )
         .bind(dataset.dataset_id)
         .bind(&dataset.network_id)

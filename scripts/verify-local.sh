@@ -46,10 +46,11 @@ python3 scripts/test-official-protocol.py
 for service in monitor_fixture postgres; do
   if [ "$service" = monitor_fixture ]; then
     owner=monitor_owner; database=bip300_monitor
-    probe='SELECT (SELECT max(version) FROM schema_version),(SELECT count(*) FROM event),(SELECT count(*) FROM event_observation),(SELECT count(*) FROM history_coverage), (SELECT string_agg(dataset_id::text,chr(44) ORDER BY dataset_id) FROM dataset_manifest)'
+    # Content checksums, not only counts: a restore must reproduce the evidence.
+    probe='SELECT (SELECT max(version) FROM schema_version),(SELECT count(*)||chr(47)||md5(string_agg(id||encode(fact_sha256,chr(104)||chr(101)||chr(120)),chr(44) ORDER BY id)) FROM event),(SELECT count(*)||chr(47)||md5(string_agg(observation_id||chr(58)||event_id||chr(58)||capture_seq,chr(44) ORDER BY observation_id)) FROM event_observation),(SELECT md5(string_agg(row_data::text,chr(44) ORDER BY revision_id)) FROM history_coverage_revision),(SELECT string_agg(dataset_id::text,chr(44) ORDER BY dataset_id) FROM dataset_manifest)'
   else
     owner=pulse_admin; database=drivechain_pulse
-    probe='SELECT (SELECT count(*) FROM ingest.source_events),(SELECT count(*) FROM ingest.event_observations),(SELECT count(*) FROM projection.snapshot_history),(SELECT count(*) FROM ops.protocol_builds),(SELECT string_agg(dataset_id::text,chr(44) ORDER BY dataset_id) FROM ops.active_dataset)'
+    probe='SELECT (SELECT count(*)||chr(47)||md5(string_agg(source_event_id||encode(fact_sha256,chr(104)||chr(101)||chr(120)),chr(44) ORDER BY source_event_id)) FROM ingest.source_events),(SELECT count(*)||chr(47)||md5(string_agg(observation_id||chr(58)||source_event_id,chr(44) ORDER BY observation_id)) FROM ingest.event_observations),(SELECT count(*)||chr(47)||md5(string_agg(observation_id||chr(58)||ordinal||chr(58)||md5(data::text),chr(44) ORDER BY observation_id,ordinal)) FROM projection.snapshot_history),(SELECT count(*)||chr(47)||md5(string_agg(build_id||chr(58)||md5(state::text),chr(44) ORDER BY build_id)) FROM ops.protocol_builds),(SELECT string_agg(dataset_id::text,chr(44) ORDER BY dataset_id) FROM ops.active_dataset)'
   fi
   compose exec -T "$service" pg_dump -U "$owner" -d "$database" -Fc -f /tmp/paired-test.dump
   compose exec -T "$service" createdb -U "$owner" restore_probe

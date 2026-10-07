@@ -27,8 +27,10 @@ CREATE SCHEMA IF NOT EXISTS ops;
 GRANT CONNECT ON DATABASE drivechain_pulse TO pulse_sync, pulse_api;
 GRANT USAGE ON SCHEMA ingest, projection, ops TO pulse_sync, pulse_api;
 
+-- Imported evidence is append-only; migration 0012 grants UPDATE only on the
+-- ingest state tables the sync upserts.
 ALTER DEFAULT PRIVILEGES FOR ROLE pulse_admin IN SCHEMA ingest
-    GRANT SELECT, INSERT, UPDATE ON TABLES TO pulse_sync;
+    GRANT SELECT, INSERT ON TABLES TO pulse_sync;
 ALTER DEFAULT PRIVILEGES FOR ROLE pulse_admin IN SCHEMA projection
     GRANT SELECT, INSERT, UPDATE ON TABLES TO pulse_sync;
 ALTER DEFAULT PRIVILEGES FOR ROLE pulse_admin IN SCHEMA ops

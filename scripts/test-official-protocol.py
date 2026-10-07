@@ -169,6 +169,15 @@ assert get("/api/v1/blocks/"+fixture.HASHES[12])["block"]["membership"]!="select
 check("node evidence remains importable during enforcer outage")
 # Read-only source user cannot write.
 sql("monitor_fixture","DELETE FROM event",user="monitor_reader",fail=True)
+# The sync role appends evidence; it can annotate events but never rewrite them.
+sql("postgres","UPDATE ingest.event_observations SET capture_seq=capture_seq",user="pulse_sync",fail=True)
+sql("postgres","UPDATE ingest.source_events SET envelope=envelope",user="pulse_sync",fail=True)
+sql("postgres","UPDATE ingest.source_events SET interpretation_error=interpretation_error WHERE false",user="pulse_sync")
+# A rewritten dataset manifest is not silently adopted.
+caps=sql("monitor_fixture",f"SELECT capabilities FROM dataset_manifest WHERE dataset_id='{DATASET}'")
+sql("monitor_fixture",f"UPDATE dataset_manifest SET capabilities=capabilities||'[\"rewritten\"]' WHERE dataset_id='{DATASET}'")
+p=sync(fail=True);assert "manifest changed" in p.stdout+p.stderr,p.stdout+p.stderr
+sql("monitor_fixture",f"UPDATE dataset_manifest SET capabilities='{caps}' WHERE dataset_id='{DATASET}'");settle()
 check("source credentials remain read-only")
 # Restore source for reorg and conflict cases.
 sql('monitor_fixture',f"UPDATE extractor_run SET status='running',finished_at=NULL,finish_reason=NULL WHERE run_id='{RUN}'")
