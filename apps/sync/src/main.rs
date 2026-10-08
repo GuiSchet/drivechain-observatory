@@ -49,6 +49,12 @@ struct Args {
     #[arg(long, env = "PULSE_SYNC_BATCH_SIZE", default_value_t = 500)]
     batch_size: i64,
 
+    /// Upper bound on the stored bytes of one source event page. Node raw blocks
+    /// reach megabytes each, so a row-count page alone can exceed the reader's
+    /// statement timeout over a tunnel. A larger single event still imports alone.
+    #[arg(long, env = "PULSE_SYNC_EVENT_PAGE_BYTES", default_value_t = 16 * 1024 * 1024)]
+    event_page_bytes: i64,
+
     #[arg(long, env = "PULSE_SYNC_INTERVAL_MS", default_value_t = 1_000)]
     interval_ms: u64,
 
@@ -227,6 +233,9 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     if args.batch_size <= 0 {
         bail!("PULSE_SYNC_BATCH_SIZE must be positive");
+    }
+    if args.event_page_bytes <= 0 {
+        bail!("PULSE_SYNC_EVENT_PAGE_BYTES must be positive");
     }
     if args.max_pages_per_cycle == 0 {
         bail!("PULSE_SYNC_MAX_PAGES_PER_CYCLE must be positive");
@@ -422,6 +431,7 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
             .context("PULSE_DATASET_ID or --dataset-id is required")?,
         schema_version,
         args.batch_size,
+        args.event_page_bytes,
         args.max_pages_per_cycle,
     )
     .await
@@ -614,6 +624,7 @@ async fn sync_dataset(
     dataset_id: Uuid,
     schema_version: i32,
     batch_size: i64,
+    event_page_bytes: i64,
     max_pages_per_cycle: u32,
 ) -> Result<()> {
     let mut connection = destination.acquire().await?;
@@ -633,6 +644,7 @@ async fn sync_dataset(
         dataset_id,
         schema_version,
         batch_size,
+        event_page_bytes,
         max_pages_per_cycle,
     )
     .await;
@@ -653,6 +665,7 @@ async fn sync_dataset_locked(
     dataset_id: Uuid,
     schema_version: i32,
     batch_size: i64,
+    event_page_bytes: i64,
     max_pages_per_cycle: u32,
 ) -> Result<()> {
     let high_water = check_continuity(source, destination, dataset_id).await?;
@@ -666,8 +679,15 @@ async fn sync_dataset_locked(
     audit_imported_content(source, destination, dataset_id).await?;
     let mut catching_up = false;
     for page in 0..max_pages_per_cycle {
-        let count = sync_event_page(source, destination, dataset_id, batch_size).await?;
-        if count < batch_size {
+        let full = sync_event_page(
+            source,
+            destination,
+            dataset_id,
+            batch_size,
+            event_page_bytes,
+        )
+        .await?;
+        if !full {
             break;
         }
         catching_up = page + 1 == max_pages_per_cycle;
@@ -780,32 +800,55 @@ async fn sync_dataset_locked(
     Ok(())
 }
 
+/// Imports the next contiguous page of source events and reports whether it was
+/// full, i.e. limited by rows or bytes, so more may follow.
 async fn sync_event_page(
     source: &PgPool,
     destination: &mut PgConnection,
     dataset_id: Uuid,
     batch_size: i64,
-) -> Result<i64> {
+    page_bytes: i64,
+) -> Result<bool> {
     let cursor = cursor(destination, dataset_id, "source_events").await?;
+    // Sizes come from TOAST headers (no detoasting), so bounding the page is
+    // cheap. The first row is always taken, however large, to keep progressing.
+    let (upper, rows, bytes_limited): (Option<i64>, i64, bool) = sqlx::query_as(
+        "WITH page AS ( \
+             SELECT id, octet_length(envelope)::bigint + pg_column_size(payload)::bigint AS size \
+               FROM event WHERE dataset_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3), \
+         running AS (SELECT id, size, sum(size) OVER (ORDER BY id) AS total FROM page) \
+         SELECT max(id) FILTER (WHERE total <= $4 OR id = (SELECT min(id) FROM page)), \
+                count(*) FILTER (WHERE total <= $4 OR id = (SELECT min(id) FROM page)), \
+                coalesce(bool_or(total > $4), false) \
+           FROM running",
+    )
+    .bind(dataset_id)
+    .bind(cursor)
+    .bind(batch_size)
+    .bind(page_bytes)
+    .fetch_one(source)
+    .await?;
+    let Some(upper) = upper else {
+        return Ok(false);
+    };
     let events = sqlx::query_as::<_, SourceEvent>(
         "SELECT id, dataset_id, event_contract_version, observed_at, ingested_at, \
                 source, kind, sidechain, sidechain_instance_id, block_hash, height, \
                 envelope, envelope_sha256, fact_sha256, payload \
            FROM event \
-          WHERE dataset_id = $1 AND id > $2 \
-          ORDER BY id ASC \
-          LIMIT $3",
+          WHERE dataset_id = $1 AND id > $2 AND id <= $3 \
+          ORDER BY id ASC",
     )
     .bind(dataset_id)
     .bind(cursor)
-    .bind(batch_size)
+    .bind(upper)
     .fetch_all(source)
     .await?;
     if events.is_empty() {
-        return Ok(0);
+        return Ok(false);
     }
 
-    let count = i64::try_from(events.len()).context("event page length does not fit i64")?;
+    let full = rows == batch_size || bytes_limited;
     let next_cursor = events.last().map_or(cursor, |event| event.id);
     let mut transaction = destination.begin().await?;
     for event in &events {
@@ -844,7 +887,7 @@ async fn sync_event_page(
     )
     .await?;
     transaction.commit().await?;
-    Ok(count)
+    Ok(full)
 }
 
 async fn load_snapshot_groups(

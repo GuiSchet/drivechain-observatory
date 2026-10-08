@@ -53,6 +53,8 @@ services:
       PULSE_ACTIVATION_HASH: ${PULSE_ACTIVATION_HASH:-00000000000000030101ba5cfea54b22becc79f95dc6040beb76e01dd9d04042}
       PULSE_DATABASE_URL: postgres://pulse_sync:${PULSE_SYNC_DB_PASSWORD}@postgres:5432/drivechain_pulse
       PULSE_SYNC_BATCH_SIZE: "500"
+      # Node raw blocks are megabytes each; bound each event page by stored bytes.
+      PULSE_SYNC_EVENT_PAGE_BYTES: "16777216"
       PULSE_SYNC_MAX_PAGES_PER_CYCLE: "20"
       PULSE_SYNC_INTERVAL_MS: "1000"
       RUST_LOG: pulse_sync=info
