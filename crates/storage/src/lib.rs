@@ -102,14 +102,14 @@ pub(crate) async fn protocol_errors(
     conn: &mut sqlx::PgConnection,
     dataset: Uuid,
     generation: i64,
-) -> Result<Vec<(String, i64, bool)>, sqlx::Error> {
+) -> Result<Vec<(String, Option<i64>, Option<i64>)>, sqlx::Error> {
     sqlx::query_as("WITH head AS (
         SELECT b.state FROM projection.protocol_head h JOIN ops.protocol_builds b USING(build_id) WHERE h.dataset_id=$1 AND h.generation=$2
     ), errors AS (
         SELECT e.key AS family,e.value::bigint AS event_id,false AS observation FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'first_errors','{}'::jsonb)) e
         UNION ALL
         SELECT e.key,e.value::bigint,true FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'observation_errors','{}'::jsonb)) e
-    ) SELECT family,min(event_id),bool_and(observation) FROM errors GROUP BY family ORDER BY family")
+    ) SELECT family,min(event_id) FILTER (WHERE NOT observation),min(event_id) FILTER (WHERE observation) FROM errors GROUP BY family ORDER BY family")
         .bind(dataset).bind(generation).fetch_all(conn).await
 }
 
@@ -130,12 +130,7 @@ pub async fn projection_watermark(
         };
         let errors = protocol_errors(connection, dataset_id, generation).await?;
         let mut watermark = protocol.min(chain).min(materialized);
-        if let Some(first) = errors
-            .iter()
-            .filter(|(_, _, observation)| !observation)
-            .map(|(_, id, _)| id)
-            .min()
-        {
+        if let Some(first) = errors.iter().filter_map(|(_, fact, _)| *fact).min() {
             watermark = watermark.min(first - 1);
         }
         return Ok(Some(watermark));
@@ -298,10 +293,11 @@ async fn status_snapshot(
             .into_iter()
             .map(|name| {
                 let found = errors.iter().find(|(family, _, _)| family == name);
-                let error = found.map(|(_, id, _)| *id);
-                let fact_error = found
-                    .filter(|(_, _, observation)| !observation)
-                    .map(|(_, id, _)| *id);
+                let fact_error = found.and_then(|(_, fact, _)| *fact);
+                let error = found.and_then(|(_, fact, observation)| match (fact, observation) {
+                    (Some(f), Some(o)) => Some((*f).min(*o)),
+                    (f, o) => f.or(*o),
+                });
                 ProjectionProgress {
                     name: name.into(),
                     processed_event_id: through

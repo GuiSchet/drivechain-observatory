@@ -270,7 +270,7 @@ async fn select_path(conn: &mut PgConnection, d: Uuid, g: i64, tip: &str) -> Res
         WHERE NOT c.shared AND NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND c.block_work>0 AND p.chain_work+c.block_work=c.chain_work)
         SELECT * FROM walk")
         .bind(d).bind(g).bind(tip).execute(&mut *conn).await?;
-    sqlx::query("DELETE FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND height>coalesce((SELECT min(height) FROM pulse_path WHERE shared),-1) AND EXISTS(SELECT 1 FROM pulse_path)")
+    sqlx::query("DELETE FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND height>coalesce((SELECT min(height) FROM pulse_path WHERE shared),-1)")
         .bind(d).bind(g).execute(&mut *conn).await?;
     sqlx::query("INSERT INTO projection.chain_members SELECT $1,$2,height,hash FROM pulse_path ON CONFLICT(dataset_id,generation,height) DO UPDATE SET hash=excluded.hash")
         .bind(d).bind(g).execute(&mut *conn).await?;

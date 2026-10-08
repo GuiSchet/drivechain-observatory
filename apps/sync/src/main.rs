@@ -662,6 +662,8 @@ async fn sync_dataset_locked(
         .execute(&mut *destination)
         .await?;
     repair_fact_hashes(source, destination, dataset_id, batch_size).await?;
+    // After the repair: rows still waiting for a fact hash are not changes.
+    audit_imported_content(source, destination, dataset_id).await?;
     let mut catching_up = false;
     for page in 0..max_pages_per_cycle {
         let count = sync_event_page(source, destination, dataset_id, batch_size).await?;
@@ -1310,7 +1312,6 @@ async fn check_continuity(
         }
     }
     check_import_order(source, destination, dataset).await?;
-    audit_imported_content(source, destination, dataset).await?;
     let witness: Option<(i64,Vec<u8>)> = sqlx::query_as("SELECT source_event_id,envelope FROM ingest.source_events WHERE dataset_id=$1 ORDER BY source_event_id DESC LIMIT 1")
         .bind(dataset).fetch_optional(&mut *destination).await?;
     if let Some((id, envelope)) = witness {
@@ -1384,6 +1385,26 @@ async fn check_import_order(
     for (stream, table, id, imported, imported_id) in IMPORT_STREAMS {
         let cursor = cursor(destination, dataset, stream).await?;
         let low = (cursor - IMPORT_ORDER_WINDOW).max(0);
+        // Counts first; ids are transferred only when the window differs.
+        let expected: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {table} WHERE dataset_id=$1 AND {id}>$2 AND {id}<=$3"
+        ))
+        .bind(dataset)
+        .bind(low)
+        .bind(cursor)
+        .fetch_one(source)
+        .await?;
+        let imported_count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {imported} WHERE dataset_id=$1 AND {imported_id}>$2 AND {imported_id}<=$3"
+        ))
+        .bind(dataset)
+        .bind(low)
+        .bind(cursor)
+        .fetch_one(&mut *destination)
+        .await?;
+        if expected == imported_count {
+            continue;
+        }
         let present: Vec<i64> = sqlx::query_scalar(&format!(
             "SELECT {id} FROM {table} WHERE dataset_id=$1 AND {id}>$2 AND {id}<=$3 ORDER BY {id}"
         ))
@@ -1504,9 +1525,11 @@ async fn audit_imported_content(
             .await?;
         if expected != imported {
             let detail = format!("content differs from the imported copy (audit {index})");
+            // Re-auditing the same window every cycle records it once.
             sqlx::query(
                 "INSERT INTO ingest.import_conflicts(dataset_id,stream,first_source_id,last_source_id,detail)
-                 VALUES($1,$2,$3,$4,$5)",
+                 SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS(SELECT 1 FROM ingest.import_conflicts
+                   WHERE dataset_id=$1 AND stream=$2 AND first_source_id=$3 AND last_source_id=$4 AND detail=$5)",
             )
             .bind(dataset)
             .bind(audit.stream)

@@ -18,10 +18,13 @@ export function HistoryChart({ slot, entity, kind = "ctip", dataset, instanceId 
   const points:Point[]=[];
   const records=[...(data.data?.items??[])].reverse();
   for(const item of records) {
-    if(!item.observed_at)continue;
+    // A merged history row is plotted when its value was first read; later
+    // re-reads confirm it, they do not move the change.
+    const time=item.first_observed_at??item.observed_at;
+    if(!time)continue;
     const value=kind==="ctip" ? at(item.data,"ctip","value_sats") : at(item.data,kind,"vote_count");
     const usable=item.quality==="tip_matched" || item.quality==="observed";
-    points.push({time:item.observed_at,value:usable && (typeof value==="string"||typeof value==="number") ? String(value) : null,evidence:item.evidence[0]?.event_id,quality:item.quality,absent:usable && kind==="ctip" && object(item.data).ctip===null});
+    points.push({time,value:usable && (typeof value==="string"||typeof value==="number") ? String(value) : null,evidence:item.evidence[0]?.event_id,quality:item.quality,absent:usable && kind==="ctip" && object(item.data).ctip===null});
   }
   const signature=JSON.stringify(points);
   useEffect(()=>{

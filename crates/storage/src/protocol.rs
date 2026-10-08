@@ -90,11 +90,12 @@ pub(super) async fn context(
         "protocol",
     ] {
         let error = errors.iter().find(|(name, _, _)| name == family);
-        let first = error.map(|(_, id, _)| *id);
         // A stale reading's event id says nothing about how far facts go.
-        let fact_error = error
-            .filter(|(_, _, observation)| !observation)
-            .map(|(_, id, _)| *id);
+        let fact_error = error.and_then(|(_, fact, _)| *fact);
+        let first = error.and_then(|(_, fact, observation)| match (fact, observation) {
+            (Some(f), Some(o)) => Some((*f).min(*o)),
+            (f, o) => f.or(*o),
+        });
         families.push(FamilyProgress {
             family: family.into(),
             processed_event_id: (through > 0).then(|| {
@@ -614,7 +615,14 @@ async fn facts_page(
     if resource == "chain-info" {
         filters.scope = Some("all".into());
     }
-    apply_filters(&mut qb, &filters, c, "f", false, "lo.observed_at");
+    apply_filters(
+        &mut qb,
+        &filters,
+        c,
+        "f",
+        false,
+        "coalesce(lo.observed_at,e.observed_at)",
+    );
     if let Some(search) = q.q.as_deref().filter(|s| !s.is_empty()) {
         qb.push(" AND (f.search_terms @> ARRAY[")
             .push_bind(search)
@@ -663,7 +671,7 @@ async fn events_page(
     limit: u32,
 ) -> Result<Vec<ProtocolItem>, StorageError> {
     let mut qb = sqlx::QueryBuilder::new(
-        "SELECT e.source_event_id::text AS id,NULL::text AS entity_id,e.kind,e.sidechain AS slot,encode(e.block_hash,'hex') AS hash,e.height,e.observed_at,h.block_time,'observed' AS quality,jsonb_build_array(jsonb_build_object('event_id',e.source_event_id::text,'ordinal',0,'observation_id',NULL)) AS evidence,jsonb_build_object('event_contract_version',e.event_contract_version,'source',e.source,'fact_sha256',encode(e.fact_sha256,'hex'),'instance_id',e.sidechain_instance_id) AS data,coalesce(e.interpretation_error,(SELECT string_agg(pf.error,'; ' ORDER BY pf.ordinal) FROM projection.protocol_facts pf WHERE pf.dataset_id=e.dataset_id AND pf.generation=h.generation AND pf.event_id=e.source_event_id AND pf.error IS NOT NULL)) AS issue FROM ingest.source_events e LEFT JOIN projection.chain_headers h ON h.dataset_id=e.dataset_id AND h.generation=",
+        "SELECT e.source_event_id::text AS id,NULL::text AS entity_id,e.kind,e.sidechain AS slot,encode(e.block_hash,'hex') AS hash,e.height,e.observed_at,h.block_time,'observed' AS quality,jsonb_build_array(jsonb_build_object('event_id',e.source_event_id::text,'ordinal',0,'observation_id',NULL)) AS evidence,jsonb_build_object('event_contract_version',e.event_contract_version,'source',e.source,'fact_sha256',encode(e.fact_sha256,'hex'),'instance_id',e.sidechain_instance_id) AS data,coalesce(e.interpretation_error,(SELECT string_agg(pf.error,'; ' ORDER BY pf.ordinal) FROM projection.protocol_facts pf WHERE pf.dataset_id=e.dataset_id AND pf.generation=(SELECT projection_generation FROM ops.active_dataset WHERE dataset_id=e.dataset_id) AND pf.event_id=e.source_event_id AND pf.error IS NOT NULL)) AS issue FROM ingest.source_events e LEFT JOIN projection.chain_headers h ON h.dataset_id=e.dataset_id AND h.generation=",
     );
     qb.push_bind(c.meta.projection_generation)
         .push(" AND h.hash=encode(e.block_hash,'hex') WHERE e.dataset_id=")
