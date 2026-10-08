@@ -17,8 +17,8 @@ header, rows behind the import cursor, rewritten source rows, append-only sync
 privileges, snapshot deduplication, transition gaps, Chrome content checks and
 checksummed paired dump/restore).
 
-The monitor release remains `preparing`. Review and merge the two consumer
-repositories together, publish exact bytes with preserved digests and verify
-them before requesting HOSTKEY cutover approval. Preserve both old databases,
-their binaries/locks and the old enforcer directory; start official upstream in
-a separate directory. No remote changes were applied.
+The monitor release is `ready` (merge `13dfbf7`; enforcer, extractor and event
+logger digests verified in the registry). The Observatory image must still be
+rebuilt from its merged commit before a production deployment. Preserve both old
+databases, their binaries/locks and the old enforcer directory; start official
+upstream in a separate directory. No remote changes were applied.
