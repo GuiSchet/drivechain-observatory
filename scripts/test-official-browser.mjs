@@ -35,7 +35,8 @@ try {
   await page.goto(base+'/bmm');
   await page.getByRole('heading',{name:'BMM commitment history'}).waitFor();
   for(const stale of ['Rate / coverage','Uncovered','Inactive','M7 and slot'])assert(!(await body()).includes(stale),`/bmm still shows ${stale}`);
-  assert.equal(await page.locator('.network-label').textContent(),meta.dataset.network_id);
+  // The header fills from /status after hydration; wait for it rather than racing it.
+  await page.locator('.network-label',{hasText:meta.dataset.network_id}).waitFor();
   await page.goto(base+'/sidechains/9');
   await page.getByText(`700 ${meta.native_asset.symbol}`,{exact:false}).first().waitFor();
   const bundle=(await api('/api/v1/withdrawal-bundles?scope=all')).items.find(x=>x.kind==='bundle');
