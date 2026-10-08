@@ -33,9 +33,9 @@ check('1101-frame SSE replay, scoped resets and suppressed historical animation'
 raw='{"future_exact_integer":340282366920938463463374607431768211455}'
 identifier=int(sql('monitor_fixture','SELECT max(id)+1 FROM event'))
 digest=__import__('hashlib').sha256(b'future v6 fixture').hexdigest()
-sql('monitor_fixture',f"INSERT INTO event(id,observed_at,source,kind,envelope,payload,dataset_id,event_contract_version,envelope_sha256,fact_sha256) OVERRIDING SYSTEM VALUE VALUES({identifier},now(),'enforcer','future_kind',decode('1234','hex'),'{raw}','{DATASET}',6,decode('{__import__('hashlib').sha256(bytes.fromhex('1234')).hexdigest()}','hex'),decode('{digest}','hex'));")
+sql('monitor_fixture',f"INSERT INTO event(id,observed_at,source,kind,envelope,payload,dataset_id,event_contract_version,envelope_sha256,fact_sha256) OVERRIDING SYSTEM VALUE VALUES({identifier},now(),'enforcer','future_kind',decode('1234','hex'),'{raw}','{DATASET}',7,decode('{__import__('hashlib').sha256(bytes.fromhex('1234')).hexdigest()}','hex'),decode('{digest}','hex'));")
 sync()
 unknown=get(f'/api/v1/datasets/{DATASET}/events/{identifier}')
 assert '340282366920938463463374607431768211455' in unknown['payload_json']
 with urllib.request.urlopen(BASE+f'/api/v1/datasets/{DATASET}/events/{identifier}/raw') as response:assert b'340282366920938463463374607431768211455' in response.read()
-check('unknown v6 facts preserve arbitrary-precision raw JSON')
+check('unknown v7 facts preserve arbitrary-precision raw JSON')

@@ -1,4 +1,4 @@
-"""Regression cases for projection v5, in verify-local's disposable database.
+"""Regression cases for projection v6, in verify-local's disposable database.
 
 Corrupt JSON is injected before import to exercise interpretation failures; the
 ordinary fixture continues to supply wire envelopes and immutable source IDs.
@@ -11,14 +11,14 @@ def observation(event, n, *, run=RUN, snapshot=False, consistency="stable", old=
     h = fixture.HASHES[n]
     statements = []
     if snapshot:
-        statements.append(f"INSERT INTO snapshot_group(snapshot_group_id,dataset_id,run_id,capture_method,started_at,finished_at,tip_before_hash,tip_before_height,tip_after_hash,tip_after_height,consistency,attempts) VALUES('{group}','{DATASET}','{run}','poll',now(),now(),decode('{h}','hex'),{fixture.ACTIVATION+n},decode('{h}','hex'),{fixture.ACTIVATION+n},'{consistency}',1);")
+        statements.append(f"INSERT INTO snapshot_group(snapshot_group_id,dataset_id,run_id,capture_method,started_at,finished_at,tip_before_hash,tip_before_height,tip_after_hash,tip_after_height,consistency,attempts,revision_before,revision_after) VALUES('{group}','{DATASET}','{run}','poll',now(),now(),decode('{h}','hex'),{fixture.ACTIVATION+n},decode('{h}','hex'),{fixture.ACTIVATION+n},'{consistency}',1,'fixture:1','fixture:1');")
     when = "now()-interval '1 hour'" if old else "now()"
     statements.append(f"UPDATE extractor_run SET last_capture_seq={seq} WHERE run_id='{run}'; INSERT INTO event_observation(dataset_id,run_id,capture_seq,capture_method,event_id,snapshot_group_id,observed_at) VALUES('{DATASET}','{run}',{seq},'poll',{event},{fixture.lit(group) if snapshot else 'NULL'},{when});")
     sql("monitor_fixture", "\n".join(statements))
 
 
 def extra_run(identifier, commit):
-    sql("monitor_fixture", f"INSERT INTO extractor_run(run_id,dataset_id,source,node_commit,enforcer_commit,monitor_commit,event_contract_version,capabilities,status,last_capture_seq,started_at,finished_at,finish_reason) SELECT '{identifier}',dataset_id,source,node_commit,'{commit}',monitor_commit,6,capabilities,'completed',0,now(),now(),'correction fixture' FROM extractor_run WHERE run_id='{RUN}';")
+    sql("monitor_fixture", f"INSERT INTO extractor_run(run_id,dataset_id,source,node_commit,enforcer_commit,monitor_commit,event_contract_version,capabilities,status,last_capture_seq,started_at,finished_at,finish_reason) SELECT '{identifier}',dataset_id,source,node_commit,'{commit}',monitor_commit,7,capabilities,'completed',0,now(),now(),'correction fixture' FROM extractor_run WHERE run_id='{RUN}';")
 
 
 def imported_state():
@@ -35,7 +35,7 @@ def assert_watermark_at_cut():
 def rebuild_local(*, fail=False, fresh=False):
     env = dict(os.environ)
     env.pop("MONITOR_DATABASE_URL", None)
-    result = subprocess.run([str(ROOT/"target/debug/pulse-sync"),"rebuild","--dataset-id",DATASET,*(["--fresh"] if fresh else [])],env=env,capture_output=True,text=True)
+    result = subprocess.run([str(Path(os.environ.get("CARGO_TARGET_DIR", ROOT/"target"))/"debug/pulse-sync"),"rebuild","--dataset-id",DATASET,*(["--fresh"] if fresh else [])],env=env,capture_output=True,text=True)
     assert (result.returncode != 0) == fail, result.stdout + result.stderr
     return result
 

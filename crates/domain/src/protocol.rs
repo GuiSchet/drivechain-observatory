@@ -37,9 +37,12 @@ pub struct ProtocolItem {
     pub slot: Option<i16>,
     pub hash: Option<String>,
     pub height: Option<i32>,
+    /// The latest occurrence of this item (when it was last read).
     pub observed_at: Option<DateTime<Utc>>,
+    /// When the immutable fact was first recorded, if the list reports it.
+    pub first_observed_at: Option<DateTime<Utc>>,
     pub block_time: Option<DateTime<Utc>>,
-    /// observed, reconstructed, unknown. Raw evidence is available separately.
+    /// observed, tip_matched, unknown. Raw evidence is available separately.
     pub quality: String,
     /// selected, alternative, unknown, or not_applicable.
     pub membership: String,
@@ -59,7 +62,7 @@ pub struct ProtocolPage {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ObservatoryResponse {
     pub context: ProtocolContext,
-    /// Current branch reconstruction. Completeness flags qualify every set;
+    /// Separate latest official responses. These are not atomic state at the selected block;
     /// absence from an incomplete map does not mean zero or inactive.
     pub state: Value,
     /// Latest occurrence for each snapshot kind/slot in the current run, including

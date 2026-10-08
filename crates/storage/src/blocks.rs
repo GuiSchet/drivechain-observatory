@@ -74,6 +74,7 @@ fn summary(r: sqlx::postgres::PgRow) -> Result<BlockSummary, sqlx::Error> {
         parent_hash: r.try_get("parent")?,
         height: r.try_get("height")?,
         chain_work: r.try_get("work")?,
+        block_work: r.try_get("per_block_work")?,
         block_time: r.try_get("block_time")?,
         first_observed_at: r.try_get("first_observed_at")?,
         last_observed_at: r.try_get("last_observed_at")?,
@@ -163,10 +164,10 @@ pub async fn blocks(pool: &PgPool, q: BlocksQuery) -> Result<BlocksResponse, Sto
         })
         .push_bind(i64::from(limit) + 1);
     if selected {
-        query.push(") SELECT h.*,h.chain_work::text AS work,'selected'::text AS membership FROM page p JOIN LATERAL(SELECT * FROM projection.chain_headers h WHERE h.dataset_id=")
+        query.push(") SELECT h.*,h.chain_work::text AS work,h.block_work::text AS per_block_work,'selected'::text AS membership FROM page p JOIN LATERAL(SELECT * FROM projection.chain_headers h WHERE h.dataset_id=")
             .push_bind(data.dataset_id).push(" AND h.generation=").push_bind(meta.projection_generation).push(" AND h.hash=p.hash LIMIT 1) h ON true ORDER BY p.height DESC");
     } else {
-        query.push(") SELECT h.*,h.chain_work::text AS work,CASE WHEN m.selected THEN 'selected' WHEN ").push_bind(branch.tip_hash.is_some())
+        query.push(") SELECT h.*,h.chain_work::text AS work,h.block_work::text AS per_block_work,CASE WHEN m.selected THEN 'selected' WHEN ").push_bind(branch.tip_hash.is_some())
             .push(" THEN 'alternative' ELSE 'unknown' END AS membership FROM page h LEFT JOIN LATERAL(SELECT true AS selected FROM projection.chain_members m WHERE (m.dataset_id,m.generation,m.hash)=(h.dataset_id,h.generation,h.hash) LIMIT 1) m ON true ORDER BY h.height DESC,h.hash DESC");
     }
     let mut blocks = query
@@ -226,7 +227,7 @@ pub async fn block(
         .parse::<i64>()
         .ok()
         .filter(|n| *n > 0);
-    let row=sqlx::query("SELECT h.*,h.chain_work::text AS work,CASE WHEN m.hash IS NOT NULL THEN 'selected' WHEN $4 THEN 'alternative' ELSE 'unknown' END AS membership FROM projection.chain_headers h LEFT JOIN projection.chain_members m ON (m.dataset_id,m.generation,m.hash)=(h.dataset_id,h.generation,h.hash) WHERE h.dataset_id=$1 AND h.generation=$2 AND h.hash=$3")
+    let row=sqlx::query("SELECT h.*,h.chain_work::text AS work,h.block_work::text AS per_block_work,CASE WHEN m.hash IS NOT NULL THEN 'selected' WHEN $4 THEN 'alternative' ELSE 'unknown' END AS membership FROM projection.chain_headers h LEFT JOIN projection.chain_members m ON (m.dataset_id,m.generation,m.hash)=(h.dataset_id,h.generation,h.hash) WHERE h.dataset_id=$1 AND h.generation=$2 AND h.hash=$3")
         .bind(data.dataset_id).bind(meta.projection_generation).bind(&hash).bind(branch.tip_hash.is_some()).fetch_optional(&mut *tx).await?.ok_or(StorageError::NotFound)?;
     let block = summary(row)?;
     let mut facts=sqlx::query("SELECT f.*,e.observed_at,e.source_ingested_at FROM projection.chain_facts f JOIN ingest.source_events e ON (e.dataset_id,e.source_event_id)=(f.dataset_id,f.event_id) WHERE f.dataset_id=$1 AND f.generation=$2 AND f.hash=$3 ORDER BY f.event_id DESC LIMIT 201")

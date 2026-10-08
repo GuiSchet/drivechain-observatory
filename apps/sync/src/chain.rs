@@ -2,7 +2,7 @@
 use super::{SourceEvent, append_update, cursor};
 use anyhow::{Context, Result, bail, ensure};
 use chrono::{DateTime, Utc};
-use pulse_domain::{BranchCoverage, BranchState};
+use pulse_domain::{BranchCoverage, BranchState, MONITOR_EVENT_CONTRACT_VERSIONS};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Connection, PgConnection, Row};
@@ -23,6 +23,7 @@ struct Header {
     parent: String,
     height: i32,
     work: String,
+    block_work: String,
     time: DateTime<Utc>,
     event: i64,
     observed: DateTime<Utc>,
@@ -66,16 +67,22 @@ fn validate_slot(event: &SourceEvent, body: &Value) -> Result<()> {
 }
 fn header(event: &SourceEvent) -> Result<Header> {
     ensure!(
-        matches!(event.event_contract_version, 4..=6),
+        MONITOR_EVENT_CONTRACT_VERSIONS.contains(&event.event_contract_version),
         "unsupported header contract"
     );
     let name = match event.kind.as_str() {
         "chain_tip" => "ChainTip",
+        "mainchain_transition" => "MainchainTransition",
         "block_connected" => "BlockConnected",
-        "bip300_block_delta" => "Bip300BlockDelta",
+        "mainchain_block" => "MainchainBlock",
         _ => bail!("not a header fact"),
     };
-    let body = &event.payload["monitor_event"]["Enforcer"]["event"][name];
+    let source = if event.source == "node" {
+        "Node"
+    } else {
+        "Enforcer"
+    };
+    let body = &event.payload["monitor_event"][source]["event"][name];
     if event.kind == "block_connected" {
         validate_slot(event, body)?;
     }
@@ -99,7 +106,16 @@ fn header(event: &SourceEvent) -> Result<Header> {
         hash,
         parent,
         height,
-        work: work(&h["chain_work"])?,
+        work: if event.source == "node" {
+            work(&h["cumulative_work"])?
+        } else {
+            ensure!(
+                h["cumulative_work"].as_str() == Some(""),
+                "official enforcer must not claim cumulative work"
+            );
+            "0".into()
+        },
+        block_work: work(&h["block_work"])?,
         time: DateTime::from_timestamp(
             i64::try_from(h["timestamp"].as_u64().context("invalid block timestamp")?)?,
             0,
@@ -143,20 +159,38 @@ pub async fn normalize(
     };
     let mut headers = Vec::new();
     let mut facts = Vec::new();
+    let mut reports = Vec::new();
     for event in events {
         if !matches!(
             event.kind.as_str(),
-            "chain_tip" | "block_connected" | "bip300_block_delta" | "block_disconnected"
+            "chain_tip"
+                | "block_connected"
+                | "mainchain_block"
+                | "block_disconnected"
+                | "mainchain_transition"
         ) {
             continue;
         }
-        let result = if event.kind == "block_disconnected" {
+        if event.kind == "mainchain_transition" && event.block_hash.is_none() {
+            continue; // Unanchored subscription boundary, retained in protocol evidence.
+        }
+        let result = if event.kind == "mainchain_transition"
+            && event.payload["monitor_event"]["Enforcer"]["event"]["MainchainTransition"]["action"]
+                == 2
+        {
+            event
+                .block_hash
+                .as_ref()
+                .filter(|h| h.len() == 32)
+                .context("invalid disconnected hash")
+                .map(|_| None)
+        } else if event.kind == "block_disconnected" {
             let h = hash(
                 &event.payload["monitor_event"]["Enforcer"]["event"]["BlockDisconnected"]["block_hash"],
             );
             h.and_then(|h| {
                 ensure!(
-                    matches!(event.event_contract_version, 4..=6),
+                    MONITOR_EVENT_CONTRACT_VERSIONS.contains(&event.event_contract_version),
                     "unsupported disconnect contract"
                 );
                 validate_slot(
@@ -177,7 +211,11 @@ pub async fn normalize(
         };
         let error = match result {
             Ok(Some(h)) => {
-                headers.push(h);
+                if event.source == "node" {
+                    headers.push(h);
+                } else {
+                    reports.push(h);
+                }
                 None
             }
             Ok(None) => None,
@@ -186,19 +224,31 @@ pub async fn normalize(
         facts.push(json!({"event":event.id,"hash":event.block_hash.as_ref().map(hex::encode).unwrap_or_default(),"kind":event.kind,"slot":event.sidechain,"instance":event.sidechain_instance_id,"contract":event.event_contract_version,"error":error}));
     }
     let mut tx = conn.begin().await?;
-    sqlx::query("WITH input AS (SELECT * FROM jsonb_to_recordset($3) AS x(hash text,parent text,height integer,work numeric,time timestamptz,event bigint,observed timestamptz)),
+    sqlx::query("WITH input AS (SELECT * FROM jsonb_to_recordset($3) AS x(hash text,parent text,height integer,work numeric,block_work numeric,time timestamptz,event bigint,observed timestamptz)),
         first AS (SELECT DISTINCT ON(hash) * FROM input ORDER BY hash,event),
-        conflicts AS (SELECT hash,count(DISTINCT (parent,height,work,time))>1 AS bad,max(observed) AS latest FROM input GROUP BY hash)
-        INSERT INTO projection.chain_headers AS h(dataset_id,generation,hash,parent,height,chain_work,block_time,first_event_id,first_observed_at,last_observed_at,conflicted)
-        SELECT $1,$2,f.hash,f.parent,f.height,f.work,f.time,f.event,f.observed,c.latest,c.bad FROM first f JOIN conflicts c USING(hash)
+        conflicts AS (SELECT hash,count(DISTINCT (parent,height,work,block_work,time))>1 AS bad,max(observed) AS latest FROM input GROUP BY hash)
+        INSERT INTO projection.chain_headers AS h(dataset_id,generation,hash,parent,height,chain_work,block_work,block_time,first_event_id,first_observed_at,last_observed_at,conflicted)
+        SELECT $1,$2,f.hash,f.parent,f.height,f.work,f.block_work,f.time,f.event,f.observed,c.latest,c.bad FROM first f JOIN conflicts c USING(hash)
         ON CONFLICT(dataset_id,generation,hash) DO UPDATE SET last_observed_at=greatest(h.last_observed_at,excluded.last_observed_at),
-        conflicted=h.conflicted OR excluded.conflicted OR (h.parent,h.height,h.chain_work,h.block_time) IS DISTINCT FROM (excluded.parent,excluded.height,excluded.chain_work,excluded.block_time)")
+        conflicted=h.conflicted OR excluded.conflicted OR (h.parent,h.height,h.chain_work,h.block_work,h.block_time) IS DISTINCT FROM (excluded.parent,excluded.height,excluded.chain_work,excluded.block_work,excluded.block_time)")
         .bind(dataset).bind(generation).bind(json!(headers)).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO projection.reported_headers SELECT $1,$2,r.event,r.hash,r.parent,r.height,r.block_work,r.time FROM jsonb_to_recordset($3) AS r(event bigint,hash text,parent text,height integer,block_work numeric,time timestamptz) ON CONFLICT DO NOTHING")
+        .bind(dataset).bind(generation).bind(json!(reports)).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO projection.chain_facts(dataset_id,generation,event_id,hash,kind,slot,instance_id,contract,error)
         SELECT $1,$2,f.event,f.hash,f.kind,f.slot,f.instance,f.contract,coalesce(f.error,CASE WHEN h.conflicted THEN 'conflicting headers for this hash' END)
         FROM jsonb_to_recordset($3) AS f(event bigint,hash text,kind text,slot smallint,instance text,contract integer,error text)
         LEFT JOIN projection.chain_headers h ON h.dataset_id=$1 AND h.generation=$2 AND h.hash=f.hash ON CONFLICT DO NOTHING")
         .bind(dataset).bind(generation).bind(json!(facts)).execute(&mut *tx).await?;
+    // Equal headers do not excuse contradictory block contents. Preserve both
+    // facts and stop certifying any branch containing that identity.
+    sqlx::query("UPDATE projection.chain_headers h SET conflicted=true WHERE h.dataset_id=$1 AND h.generation=$2
+        AND h.hash IN (SELECT encode(block_hash,'hex') FROM ingest.source_events WHERE dataset_id=$1 AND source_event_id>$3 AND source_event_id<=$4)
+        AND EXISTS(SELECT 1 FROM ingest.source_events e WHERE e.dataset_id=$1 AND e.block_hash=decode(h.hash,'hex')
+            AND e.source_event_id<=$4 AND e.kind IN ('block_connected','mainchain_block')
+            GROUP BY e.event_contract_version,e.source,e.kind,e.sidechain,e.sidechain_instance_id,e.block_hash HAVING count(DISTINCT e.fact_sha256)>1)")
+        .bind(dataset).bind(generation).bind(after).bind(next).execute(&mut *tx).await?;
+    sqlx::query("UPDATE projection.chain_headers h SET conflicted=true WHERE h.dataset_id=$1 AND h.generation=$2 AND EXISTS(SELECT 1 FROM projection.chain_facts f WHERE f.dataset_id=$1 AND f.generation=$2 AND f.hash=h.hash AND f.event_id>$3 AND f.event_id<=$4) AND EXISTS(SELECT 1 FROM projection.reported_headers r WHERE r.dataset_id=h.dataset_id AND r.generation=h.generation AND r.hash=h.hash AND (r.parent,r.height,r.block_work,r.block_time) IS DISTINCT FROM (h.parent,h.height,h.block_work,h.block_time))")
+        .bind(dataset).bind(generation).bind(after).bind(next).execute(&mut *tx).await?;
     sqlx::query("UPDATE ops.chain_jobs SET event_cursor=$3 WHERE dataset_id=$1 AND generation=$2")
         .bind(dataset)
         .bind(generation)
@@ -217,7 +267,7 @@ async fn select_path(conn: &mut PgConnection, d: Uuid, g: i64, tip: &str) -> Res
         FROM projection.chain_headers h WHERE h.dataset_id=$1 AND h.generation=$2 AND h.hash=$3
         UNION ALL SELECT p.*,EXISTS(SELECT 1 FROM projection.chain_members m WHERE m.dataset_id=$1 AND m.generation=$2 AND m.hash=p.hash)
         FROM walk c JOIN projection.chain_headers p ON p.dataset_id=$1 AND p.generation=$2 AND p.hash=c.parent
-        WHERE NOT c.shared AND NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND p.chain_work<c.chain_work)
+        WHERE NOT c.shared AND NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND c.block_work>0 AND p.chain_work+c.block_work=c.chain_work)
         SELECT * FROM walk")
         .bind(d).bind(g).bind(tip).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND height>coalesce((SELECT min(height) FROM pulse_path WHERE shared),-1)")
@@ -230,7 +280,7 @@ async fn select_path(conn: &mut PgConnection, d: Uuid, g: i64, tip: &str) -> Res
     sqlx::query("WITH RECURSIVE lower AS (
         SELECT h.* FROM projection.chain_headers h JOIN (SELECT hash FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 ORDER BY height LIMIT 1) m USING(hash) WHERE h.dataset_id=$1 AND h.generation=$2
         UNION ALL SELECT p.* FROM lower c JOIN projection.chain_headers p ON p.dataset_id=$1 AND p.generation=$2 AND p.hash=c.parent
-        WHERE NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND p.chain_work<c.chain_work)
+        WHERE NOT c.conflicted AND NOT p.conflicted AND p.height=c.height-1 AND c.block_work>0 AND p.chain_work+c.block_work=c.chain_work)
         INSERT INTO projection.chain_members SELECT $1,$2,height,hash FROM lower ON CONFLICT DO NOTHING")
         .bind(d).bind(g).execute(&mut *conn).await?;
     Ok(())
@@ -241,6 +291,17 @@ async fn assess(conn: &mut PgConnection, d: Uuid, g: i64, state: &mut BranchStat
     };
     if state.basis != "conflicting_live_observation" {
         state.status = "provisional".into();
+    }
+    // The enforcer reports a tip as soon as it connects a block; the node
+    // header arrives with the next node poll. Until then keep the selected
+    // branch: walking from an unknown tip would select nothing and wipe it.
+    let tip_known: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection.chain_headers WHERE dataset_id=$1 AND generation=$2 AND hash=$3)")
+        .bind(d).bind(g).bind(&tip).fetch_one(&mut *conn).await?;
+    if !tip_known {
+        if state.status != "ambiguous" {
+            state.basis = "tip_header_missing".into();
+        }
+        return Ok(());
     }
     select_path(conn, d, g, &tip).await?;
     let boundary=sqlx::query("SELECT h.*,d.activation_height,d.activation_block_hash FROM projection.chain_members m JOIN projection.chain_headers h ON h.dataset_id=m.dataset_id AND h.generation=m.generation AND h.hash=m.hash JOIN ingest.datasets d ON d.dataset_id=m.dataset_id WHERE m.dataset_id=$1 AND m.generation=$2 ORDER BY m.height LIMIT 1")
@@ -265,7 +326,7 @@ async fn assess(conn: &mut PgConnection, d: Uuid, g: i64, state: &mut BranchStat
         None => "unobserved",
     }
     .into();
-    let lower:i32=sqlx::query_scalar("SELECT coalesce(min((row_data->>'coverage_start_height')::integer),$3) FROM (SELECT DISTINCT ON(event_contract_version,source,stream,sidechain,sidechain_instance_id) * FROM ingest.coverage_revisions WHERE dataset_id=$1 AND revision_id<=$2 ORDER BY event_contract_version,source,stream,sidechain,sidechain_instance_id,revision_id DESC) c WHERE stream='bip300_delta' AND lower(operation)<>'delete'")
+    let lower:i32=sqlx::query_scalar("SELECT coalesce(min((row_data->>'coverage_start_height')::integer),$3) FROM (SELECT DISTINCT ON(event_contract_version,source,stream,sidechain,sidechain_instance_id) * FROM ingest.coverage_revisions WHERE dataset_id=$1 AND revision_id<=$2 ORDER BY event_contract_version,source,stream,sidechain,sidechain_instance_id,revision_id DESC) c WHERE stream='mainchain_block' AND source='node' AND lower(operation)<>'delete'")
         .bind(d).bind(state.processed_coverage.parse::<i64>()?).bind(checkpoint).fetch_one(&mut *conn).await?;
     let conflicted:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection.chain_headers h JOIN projection.chain_members m USING(dataset_id,generation,hash) WHERE h.dataset_id=$1 AND h.generation=$2 AND h.conflicted)")
         .bind(d).bind(g).fetch_one(&mut *conn).await?;
@@ -368,10 +429,10 @@ pub async fn apply(
     }
     let seq = next.capture_seq.parse::<i64>()?;
     let rows=sqlx::query("SELECT * FROM (
-        SELECT t.capture_seq,'tip' AS kind,encode(t.tip_hash,'hex') AS hash,t.tip_height AS height,t.observed_at,t.tip_observation_id AS id,t.capture_method,NULL::text AS parent,NULL::text AS error
+        SELECT t.capture_seq,'tip' AS kind,encode(t.tip_hash,'hex') AS hash,t.tip_height AS height,t.observed_at,t.tip_observation_id AS id,t.capture_method,NULL::text AS parent,NULL::text AS error,NULL::boolean AS header_known
         FROM (SELECT * FROM ingest.tip_observations WHERE dataset_id=$1 AND run_id=$3 AND tip_observation_id<=$5 AND capture_seq>$6 ORDER BY capture_seq LIMIT $7) t
         UNION ALL
-        SELECT o.capture_seq,coalesce(f.kind,'other'),f.hash,h.height,o.observed_at,o.observation_id,o.capture_method,h.parent,f.error
+        SELECT o.capture_seq,coalesce(f.kind,'other'),f.hash,h.height,o.observed_at,o.observation_id,o.capture_method,h.parent,f.error,h.hash IS NOT NULL
         FROM (SELECT * FROM ingest.event_observations WHERE dataset_id=$1 AND run_id=$3 AND observation_id<=$4 AND capture_seq>$6 ORDER BY capture_seq LIMIT $7) o LEFT JOIN projection.chain_facts f ON f.dataset_id=o.dataset_id AND f.generation=$2 AND f.event_id=o.source_event_id
         LEFT JOIN projection.chain_headers h ON h.dataset_id=f.dataset_id AND h.generation=f.generation AND h.hash=f.hash
 
@@ -399,6 +460,20 @@ pub async fn apply(
             && matches!(kind.as_str(), "block_connected" | "block_disconnected")
             && next.tip_hash.is_some()
         {
+            // A live connect seen before its node header is not yet evidence
+            // for or against the branch; the following tip read reassesses it.
+            if kind == "block_connected"
+                && r.try_get::<Option<bool>, _>("header_known")? == Some(false)
+            {
+                if next.status != "ambiguous" {
+                    next.status = "provisional".into();
+                    next.basis = "awaiting_header".into();
+                }
+                next.evidence_type = Some("event_observation".into());
+                next.evidence_id = Some(r.try_get::<i64, _>("id")?.to_string());
+                save_revision(&mut tx, d, g, &mut next, &mut recorded).await?;
+                continue;
+            }
             let member:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND hash=$3)")
                 .bind(d).bind(g).bind(&hash).fetch_one(&mut *tx).await?;
             if kind == "block_connected" && hash == next.tip_hash {
@@ -437,6 +512,18 @@ pub async fn apply(
         next.processed_tips = cut.tips.to_string();
         next.processed_coverage = cut.coverage.to_string();
         assess(&mut tx, d, g, &mut next).await?;
+        let node:Option<(String,i32)>=sqlx::query_as("SELECT encode(t.tip_hash,'hex'),t.tip_height FROM ingest.tip_observations t JOIN ingest.extractor_runs r USING(run_id) WHERE t.dataset_id=$1 AND r.source='node' AND t.tip_observation_id<=$2 ORDER BY t.tip_observation_id DESC LIMIT 1")
+            .bind(d).bind(cut.tips).fetch_optional(&mut *tx).await?;
+        next.node_tip_hash = node.as_ref().map(|n| n.0.clone());
+        next.node_tip_height = node.map(|n| n.1);
+        next.joint_source_status = if next.tip_hash.is_none() || next.node_tip_hash.is_none() {
+            "unknown"
+        } else if next.tip_hash == next.node_tip_hash && next.tip_height == next.node_tip_height {
+            "matched"
+        } else {
+            "different_tips"
+        }
+        .into();
         // Malformed redundant facts remain diagnostics. Only unresolved header
         // evidence on the selected path (including its missing boundary) blocks
         // its completeness; independent valid headers can repair missing ones.
@@ -512,7 +599,7 @@ async fn certify(
             .and_then(|x| i32::try_from(x).ok());
         let stream: String = r.try_get("stream")?;
         let kind = match stream.as_str() {
-            "bip300_delta" => Some("bip300_block_delta"),
+            "mainchain_block" => Some("mainchain_block"),
             "block" => Some("block_connected"),
             _ => None,
         };
@@ -529,7 +616,9 @@ async fn certify(
                 .as_str()
                 .map(|s| s.trim_start_matches("\\x").to_lowercase());
             let compatible:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND height=$3 AND hash=$4)").bind(d).bind(g).bind(end).bind(&target).fetch_one(&mut *conn).await?;
-            if state.status == "ambiguous" {
+            if state.joint_source_status != "matched" {
+                result.status = "sources_not_matched".into();
+            } else if state.status == "ambiguous" {
                 result.status = "branch_ambiguous".into();
             } else if !compatible {
                 result.status = "branch_mismatch".into();
@@ -753,72 +842,5 @@ mod tests {
             "115792089237316195423570985008687907853269984665640564039457584007913129639935"
         );
         assert!(work(&json!("ff")).is_err());
-    }
-}
-
-#[cfg(test)]
-mod scale_tests {
-    use super::*;
-    #[tokio::test]
-    #[ignore = "requires verify-local's disposable million-event fixture"]
-    async fn scale_incremental() -> Result<()> {
-        ensure!(
-            std::env::var("PULSE_TEST_COMPOSE_PROJECT")?.starts_with("drivechain-observatory-e2e-"),
-            "isolated test project required"
-        );
-        let d: Uuid = std::env::var("PULSE_SCALE_DATASET")?.parse()?;
-        ensure!(
-            d.to_string() == "44444444-4444-4444-8444-444444444444",
-            "scale fixture required"
-        );
-        let pool = sqlx::PgPool::connect(&std::env::var("PULSE_DATABASE_URL")?).await?;
-        let mut conn = pool.acquire().await?;
-        let before = state(&mut conn, d, 5).await?;
-        let hash = format!("{:064x}", 10001);
-        let parent = format!("{:064x}", 10000);
-        let mut work = [0u8; 32];
-        work[..8].copy_from_slice(&10001u64.to_le_bytes());
-        let payload = json!({"monitor_event":{"Enforcer":{"event":{"Bip300BlockDelta":{"header":{"hash":hash,"previous_hash":parent,"height":10001,"chain_work":hex::encode(work),"timestamp":1790200000},"coinbase_txid":"aa".repeat(32),"coinbase_messages":[],"treasury_transitions":[],"confirmed_bmm_requests":[]}}}}});
-        sqlx::query("INSERT INTO ingest.source_events(dataset_id,source_event_id,event_contract_version,observed_at,source_ingested_at,source,kind,block_hash,height,envelope,payload) VALUES($1,1000001,6,now(),now(),'enforcer','bip300_block_delta',decode($2,'hex'),10001,decode('00','hex'),$3)").bind(d).bind(&hash).bind(payload).execute(&mut *conn).await?;
-        sqlx::query("INSERT INTO ingest.tip_observations(dataset_id,tip_observation_id,run_id,capture_seq,capture_method,tip_hash,tip_height,observed_at,source_ingested_at) VALUES($1,2,$2,10004,'poll',decode($3,'hex'),10001,now(),now())").bind(d).bind(before.run_id).bind(&hash).execute(&mut *conn).await?;
-        sqlx::query("INSERT INTO ingest.event_observations(dataset_id,observation_id,run_id,capture_seq,capture_method,source_event_id,observed_at,source_ingested_at) VALUES($1,10002,$2,10003,'live',1000001,now(),now())").bind(d).bind(before.run_id).execute(&mut *conn).await?;
-        let cut = Cut {
-            events: 1000001,
-            observations: 10002,
-            tips: 2,
-            coverage: 0,
-            run: before.run_id.context("fixture run")?,
-        };
-        let start = std::time::Instant::now();
-        ensure!(
-            advance(&mut conn, d, 5, &cut, 500, 20, true).await?,
-            "incremental projection completes"
-        );
-        ensure!(
-            super::super::protocol::advance(&mut conn, d, 5, &cut, 500, 20, true).await?,
-            "incremental protocol reconstruction completes"
-        );
-        let elapsed = start.elapsed();
-        ensure!(
-            elapsed.as_secs() < 5,
-            "incremental processing exceeded bounded budget"
-        );
-        let after = state(&mut conn, d, 5).await?;
-        ensure!(
-            after.tip_hash == Some(hash) && after.status == "resolved",
-            "incremental tip resolved"
-        );
-        let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM projection.chain_members WHERE dataset_id=$1 AND generation=5",
-        )
-        .bind(d)
-        .fetch_one(&mut *conn)
-        .await?;
-        ensure!(count == 10001, "shared prefix preserved");
-        println!(
-            "Incremental extension on 1,000,000-event fixture: {} ms",
-            elapsed.as_millis()
-        );
-        Ok(())
     }
 }

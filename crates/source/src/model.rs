@@ -38,7 +38,8 @@ pub struct Header {
     pub hash: String,
     pub previous_hash: String,
     pub height: u32,
-    pub chain_work: String,
+    pub block_work: String,
+    pub cumulative_work: String,
     #[serde(with = "exact")]
     pub timestamp: u64,
 }
@@ -187,96 +188,6 @@ pub struct BundleSnapshot {
     pub proposals: Vec<BundleProposal>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Delta {
-    pub header: Header,
-    pub coinbase_txid: String,
-    pub coinbase_messages: Vec<Value>,
-    pub treasury_transitions: Vec<Value>,
-    pub confirmed_bmm_requests: Vec<Value>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoinbaseMessage {
-    pub vout: u32,
-    pub raw_script_pubkey: String,
-    pub accepted: bool,
-    pub message: Option<Message>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Message {
-    M1(M1),
-    M2(M2),
-    M3(M3),
-    M4(M4),
-    M7(M7),
-    #[serde(other)]
-    Unknown,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct M1 {
-    pub sidechain_number: u8,
-    pub description: String,
-    pub description_hash: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct M2 {
-    pub sidechain_number: u8,
-    pub description_hash: String,
-    pub effect: i32,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct M3 {
-    pub sidechain_number: u8,
-    pub m6id: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct M4 {
-    pub mode: i32,
-    pub raw_votes: Vec<u32>,
-    pub effects: Vec<M4Effect>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct M4Effect {
-    pub sidechain_number: u8,
-    pub action: i32,
-    pub upvoted_m6id: Option<String>,
-    pub downvoted_m6ids: Vec<String>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct M7 {
-    pub sidechain_number: u8,
-    pub hstar: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Transition {
-    pub kind: i32,
-    pub sidechain_number: u8,
-    pub previous_ctip: Option<Ctip>,
-    pub new_ctip: Option<Ctip>,
-    #[serde(default, with = "optional_exact")]
-    pub sequence_number: Option<u64>,
-    #[serde(default, with = "optional_exact")]
-    pub delta_sats: Option<u64>,
-    #[serde(default, with = "optional_exact")]
-    pub payout_sats: Option<u64>,
-    #[serde(default, with = "optional_exact")]
-    pub fee_sats: Option<u64>,
-    pub m6id: Option<String>,
-    pub sidechain_address: Option<String>,
-    pub transaction: Option<String>,
-    pub proposal_height: Option<u32>,
-    pub terminal_height: Option<u32>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfirmedBmm {
-    pub sidechain_number: u8,
-    pub txid: String,
-    pub transaction: String,
-    pub hstar: String,
-    pub previous_mainchain_block_hash: String,
-    #[serde(default, with = "optional_exact")]
-    pub fee_sats: Option<u64>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bid {
     pub sidechain_number: u8,
     pub txid: String,
@@ -301,4 +212,33 @@ impl<'de> Deserialize<'de> for DeclarationVersion {
             Ok(Self::Unknown)
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MainchainTransition {
+    /// 1 = connected, 2 = disconnected, 3 = subscription boundary.
+    pub action: i32,
+    pub header: Option<Header>,
+    /// Boundary only: the last tip known before transitions became unknown.
+    #[serde(default)]
+    pub gap_start: Option<BlockRef>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockRef {
+    pub hash: String,
+    pub height: u32,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfirmedFees {
+    pub header: Header,
+    pub fees: Vec<ConfirmedFee>,
+    pub source: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfirmedFee {
+    pub sidechain_number: u8,
+    pub txid: String,
+    #[serde(default, with = "optional_exact")]
+    pub fee_sats: Option<u64>,
+    pub unavailable_reason: String,
 }

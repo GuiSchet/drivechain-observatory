@@ -93,18 +93,23 @@ async fn response_meta(
 /// Errors affecting the published interpretation, with exactly the same cut and
 /// provenance for REST, status and outbox. Raw diagnostics remain independently
 /// accessible even when they are ineligible for this reconstruction.
+///
+/// Fact errors (`first_errors`) bound how far a family's facts were usable.
+/// An unusable latest state reading (`observation_errors`) makes the family
+/// partial, but its event id can be an old fact read again, so it never
+/// moves the processed watermark backwards.
 pub(crate) async fn protocol_errors(
     conn: &mut sqlx::PgConnection,
     dataset: Uuid,
     generation: i64,
-) -> Result<Vec<(String, i64)>, sqlx::Error> {
+) -> Result<Vec<(String, Option<i64>, Option<i64>)>, sqlx::Error> {
     sqlx::query_as("WITH head AS (
         SELECT b.state FROM projection.protocol_head h JOIN ops.protocol_builds b USING(build_id) WHERE h.dataset_id=$1 AND h.generation=$2
     ), errors AS (
-        SELECT e.key AS family,e.value::bigint AS event_id FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'first_errors','{}'::jsonb)) e
+        SELECT e.key AS family,e.value::bigint AS event_id,false AS observation FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'first_errors','{}'::jsonb)) e
         UNION ALL
-        SELECT e.key,e.value::bigint FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'observation_errors','{}'::jsonb)) e
-    ) SELECT family,min(event_id) FROM errors GROUP BY family ORDER BY family")
+        SELECT e.key,e.value::bigint,true FROM head h CROSS JOIN LATERAL jsonb_each_text(coalesce(h.state->'observation_errors','{}'::jsonb)) e
+    ) SELECT family,min(event_id) FILTER (WHERE NOT observation),min(event_id) FILTER (WHERE observation) FROM errors GROUP BY family ORDER BY family")
         .bind(dataset).bind(generation).fetch_all(conn).await
 }
 
@@ -125,7 +130,7 @@ pub async fn projection_watermark(
         };
         let errors = protocol_errors(connection, dataset_id, generation).await?;
         let mut watermark = protocol.min(chain).min(materialized);
-        if let Some(first) = errors.iter().map(|(_, id)| id).min() {
+        if let Some(first) = errors.iter().filter_map(|(_, fact, _)| *fact).min() {
             watermark = watermark.min(first - 1);
         }
         return Ok(Some(watermark));
@@ -287,14 +292,16 @@ async fn status_snapshot(
         progress = ["blocks", "bmm"]
             .into_iter()
             .map(|name| {
-                let error = errors
-                    .iter()
-                    .find(|(family, _)| family == name)
-                    .map(|(_, id)| *id);
+                let found = errors.iter().find(|(family, _, _)| family == name);
+                let fact_error = found.and_then(|(_, fact, _)| *fact);
+                let error = found.and_then(|(_, fact, observation)| match (fact, observation) {
+                    (Some(f), Some(o)) => Some((*f).min(*o)),
+                    (f, o) => f.or(*o),
+                });
                 ProjectionProgress {
                     name: name.into(),
                     processed_event_id: through
-                        .map(|n| error.map_or(n, |e| n.min(e - 1)).to_string()),
+                        .map(|n| fact_error.map_or(n, |e| n.min(e - 1)).to_string()),
                     error_event_id: error.map(|e| e.to_string()),
                 }
             })
@@ -463,12 +470,33 @@ pub async fn coverage(pool: &PgPool, stale: i64) -> Result<CoverageResponse, Sto
             "imported_branch_unverified"
         }
     };
+    let observation_quality: Value = sqlx::query_scalar("SELECT jsonb_build_object(
+        'window_hours',24,
+        'snapshot_groups',(SELECT count(*)::text FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours'),
+        'changed_groups',(SELECT count(*)::text FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours' AND consistency='changed'),
+        'untrusted_groups',(SELECT count(*)::text FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours' AND consistency<>'tip_matched'),
+        'consistency',(SELECT coalesce(jsonb_object_agg(consistency,n),'{}'::jsonb) FROM (SELECT consistency,count(*)::text AS n FROM ingest.snapshot_groups WHERE dataset_id=$1 AND started_at>now()-interval '24 hours' GROUP BY consistency) c),
+        'import_conflicts',(SELECT count(*)::text FROM ingest.import_conflicts WHERE dataset_id=$1),
+        'failures',(SELECT count(*)::text FROM ingest.observation_failures WHERE dataset_id=$1 AND observed_at>now()-interval '24 hours'),
+        'failure_import_cursor',(SELECT cursor_value::text FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='observation_failures'),
+        'conflicted_blocks',(SELECT count(*)::text FROM projection.chain_headers WHERE dataset_id=$1 AND generation=$2 AND conflicted))")
+        .bind(status.meta.dataset_id).bind(status.meta.projection_generation).fetch_one(&mut *tx).await?;
+    let transition_gaps: Value = sqlx::query_scalar("SELECT coalesce(jsonb_agg(g ORDER BY (g->>'event_id')::bigint DESC),'[]'::jsonb) FROM (
+        SELECT jsonb_build_object('event_id',f.event_id::text,'observed_at',e.observed_at,
+            'gap_start_hash',f.data#>>'{gap_start,hash}','gap_start_height',f.data#>'{gap_start,height}',
+            'gap_end_hash',f.data#>>'{header,hash}','gap_end_height',f.data#>'{header,height}') AS g
+          FROM projection.protocol_facts f JOIN ingest.source_events e ON e.dataset_id=f.dataset_id AND e.source_event_id=f.event_id
+         WHERE f.dataset_id=$1 AND f.generation=$2 AND f.kind='mainchain_transition' AND f.error IS NULL AND f.data->>'action'='3'
+         ORDER BY f.event_id DESC LIMIT 50) gaps")
+        .bind(status.meta.dataset_id).bind(status.meta.projection_generation).fetch_one(&mut *tx).await?;
     let response = CoverageResponse {
         branch: status.branch,
         meta: status.meta,
         streams,
         local_status: local.to_owned(),
         snapshot_history: "observations_only".to_owned(),
+        observation_quality,
+        transition_gaps,
     };
     tx.commit().await?;
     Ok(response)
@@ -482,15 +510,15 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
             && r.status == "running"
             && r.capabilities
                 .as_array()
-                .is_some_and(|caps| caps.iter().any(|c| c == "mempool_backed_bmm_bid_snapshots"))
+                .is_some_and(|caps| caps.iter().any(|c| c == "live_bmm_bid_snapshots"))
     });
     let row=sqlx::query("SELECT o.observation_id,o.observed_at,o.run_id,e.source_event_id,e.interpretation_error,
         b.parent_hash,b.requests,
-        (e.event_contract_version=$4 AND (e.event_contract_version=5 OR COALESCE(
-            g.run_id=o.run_id AND g.consistency='stable'
+        (e.event_contract_version=$4 AND COALESCE(
+            g.run_id=o.run_id AND g.consistency='tip_matched' AND g.revision_before IS NULL AND g.revision_after IS NULL
             AND g.tip_before_hash=e.block_hash AND g.tip_after_hash=e.block_hash
             AND g.tip_before_height=e.height AND g.tip_after_height=e.height,
-            false))) AS consistent
+            false)) AS consistent
         FROM ingest.event_observations o JOIN ingest.source_events e
         ON e.dataset_id=o.dataset_id AND e.source_event_id=o.source_event_id
         LEFT JOIN projection.bmm_snapshots b ON b.dataset_id=e.dataset_id AND b.source_event_id=e.source_event_id
@@ -500,6 +528,8 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
         .bind(status.meta.dataset_id).bind(run.as_ref().map(|r|r.run_id)).bind(MONITOR_EVENT_CONTRACT_VERSIONS)
         .bind(run.as_ref().map(|r|r.event_contract_version)).fetch_optional(&mut *tx).await?;
     let mut response = BmmAuctionsResponse {
+        mempool_readiness: "unknown".into(),
+        bid_coverage: "observed_only".into(),
         meta: status.meta,
         state: if capable {
             "awaiting_observation"
@@ -540,7 +570,7 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
         } else if raw.is_none() {
             "awaiting_observation"
         } else if response.requests.is_empty() {
-            "empty"
+            "no_observed_bids"
         } else {
             "available"
         }
@@ -553,7 +583,7 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
         }
         if let (Some(tip), Some(parent)) = (&status.latest_observed_block, &response.parent_hash)
             && tip.hash != *parent
-            && matches!(response.state.as_str(), "available" | "empty")
+            && matches!(response.state.as_str(), "available" | "no_observed_bids")
         {
             response.state = "awaiting_current_parent".to_owned();
         }
@@ -566,7 +596,7 @@ pub async fn auctions(pool: &PgPool, stale: i64) -> Result<BmmAuctionsResponse, 
     if status.branch.status == "ambiguous"
         && matches!(
             response.state.as_str(),
-            "available" | "empty" | "awaiting_current_parent"
+            "available" | "no_observed_bids" | "awaiting_current_parent"
         )
     {
         response.state = "branch_unresolved".into();
@@ -621,7 +651,10 @@ pub async fn evidence(
         envelope_hex: row.try_get("envelope_hex")?,
         payload_json: row.try_get("payload_json")?,
         interpretation_error: match row.try_get::<Option<String>,_>("interpretation_error")? {
-            Some(e)=>Some(e),None=>sqlx::query_scalar("SELECT error FROM projection.chain_facts WHERE dataset_id=$1 AND generation=(SELECT projection_generation FROM ops.active_dataset WHERE dataset_id=$1) AND event_id=$2").bind(dataset_id).bind(event_id).fetch_optional(&mut *tx).await?.flatten()
+            // The importer's error, then the chain's, then the protocol facts'.
+            Some(e)=>Some(e),None=>sqlx::query_scalar("SELECT coalesce(
+                (SELECT error FROM projection.chain_facts WHERE dataset_id=$1 AND generation=(SELECT projection_generation FROM ops.active_dataset WHERE dataset_id=$1) AND event_id=$2),
+                (SELECT string_agg(error,'; ' ORDER BY ordinal) FROM projection.protocol_facts WHERE dataset_id=$1 AND generation=(SELECT projection_generation FROM ops.active_dataset WHERE dataset_id=$1) AND event_id=$2 AND error IS NOT NULL))").bind(dataset_id).bind(event_id).fetch_one(&mut *tx).await?
         },
         occurrences,
         occurrences_truncated: truncated,

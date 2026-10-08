@@ -18,7 +18,7 @@ export function SiteHeader() {
         {[["/", "Live"], ["/bmm", "BMM auctions"], ["/sidechains", "Sidechains"], ["/pegs", "Pegs"], ["/blocks", "Blocks"], ["/explorer", "Explorer"], ["/learn", "Learn"], ["/about/data", "Data"]].map(([href, title]) =>
           <Link key={href} href={href} className={path === href ? "active" : ""} aria-current={path === href ? "page" : undefined}>{title}</Link>)}
       </nav>
-      <div className="network-state"><span className="network-label">{status.data?.meta.network_id ?? "Betanet"}</span>
+      <div className="network-state"><span className="network-label">{status.data?.meta.network_id ?? "Network unknown"}</span>
         <span className={"stream-state " + stream}><span className="status-dot"/>Stream {stream}</span></div>
     </header>
     <div className="sync-strip" role="status"><span>Sync: {mode}</span><span>Source: {status.isError || !status.data ? "unknown" : status.data.source_reachable ? "reachable" : "unavailable or stale"}</span>

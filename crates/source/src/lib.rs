@@ -1,14 +1,14 @@
-//! Reviewed monitor-v6 JSON adapter. Unknown fields remain in the immutable
+//! Reviewed monitor-v7 JSON adapter. Unknown fields remain in the immutable
 //! source envelope; typed values are an interpretation, never its replacement.
 pub mod model;
 pub mod normalize;
-pub mod replay;
+pub mod observations;
 pub use model::*;
 
-pub const MONITOR_COMMIT: &str = "88da099049bb469aeee3dec3cc5d86a056970382";
-pub const ENFORCER_COMMIT: &str = "0740a39380b39885fe8655f79f78150001d8a15b";
-pub const SEMANTICS_VERSION: &str = "enforcer-0740a393-v2";
+pub const SEMANTICS_VERSION: &str = "official-observations-v9";
 pub const KINDS: &[(&str, &str)] = &[
+    ("mainchain_transition", "MainchainTransition"),
+    ("confirmed_bmm_fees", "ConfirmedBmmFees"),
     ("chain_info", "ChainInfo"),
     ("chain_tip", "ChainTip"),
     ("sidechain_proposals", "SidechainProposals"),
@@ -17,7 +17,7 @@ pub const KINDS: &[(&str, &str)] = &[
     ("block_connected", "BlockConnected"),
     ("block_disconnected", "BlockDisconnected"),
     ("withdrawal_bundle_proposals", "WithdrawalBundleProposals"),
-    ("bip300_block_delta", "Bip300BlockDelta"),
+    ("mainchain_block", "MainchainBlock"),
     ("bmm_requests", "BmmRequests"),
 ];
 
@@ -32,6 +32,7 @@ pub fn body<'a>(
     Ok(Some(
         payload
             .pointer(&format!("/monitor_event/Enforcer/event/{name}"))
+            .or_else(|| payload.pointer(&format!("/monitor_event/Node/event/{name}")))
             .context("event kind differs from payload variant")?,
     ))
 }

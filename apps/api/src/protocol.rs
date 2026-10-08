@@ -33,6 +33,7 @@ pub fn extend_openapi(mut doc: Value) -> Value {
         "deposits",
         "withdrawal-bundles",
         "withdrawal-bundles/{id}",
+        "bundle-attempts",
         "bundle-attempts/{id}",
         "ctip/history",
         "protocol-messages",
@@ -45,6 +46,7 @@ pub fn extend_openapi(mut doc: Value) -> Value {
         "runs",
         "runs/{id}",
         "snapshot-groups",
+        "observation-failures",
         "snapshot-groups/{id}",
         "datasets/{dataset}/events/{id}/occurrences",
         "sidechains/{slot}",
@@ -93,6 +95,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/deposits", get(list))
         .route("/api/v1/withdrawal-bundles", get(list))
         .route("/api/v1/withdrawal-bundles/{id}", get(bundle))
+        .route("/api/v1/bundle-attempts", get(list))
         .route("/api/v1/bundle-attempts/{id}", get(detail))
         .route("/api/v1/ctip/history", get(list))
         .route("/api/v1/protocol-messages", get(list))
@@ -106,6 +109,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/search", get(list))
         .route("/api/v1/export", get(export))
         .route("/api/v1/runs", get(provenance))
+        .route("/api/v1/observation-failures", get(provenance))
         .route("/api/v1/runs/{id}", get(provenance_detail))
         .route("/api/v1/snapshot-groups", get(provenance))
         .route("/api/v1/snapshot-groups/{id}", get(provenance_detail))
@@ -257,7 +261,7 @@ async fn instance_ctip(
         "sidechain-instances",
         ProtocolQuery {
             dataset: q.dataset,
-            key: Some(id),
+            key: Some(id.clone()),
             scope: Some("selected".into()),
             ..Default::default()
         },
@@ -267,26 +271,9 @@ async fn instance_ctip(
     q.slot = instance.slot;
     q.dataset = Some(found.context.meta.dataset_id);
     q.scope = Some("selected".into());
-    let start = instance
-        .data
-        .pointer("/sidechain/activation_height")
-        .and_then(Value::as_i64)
-        .and_then(|n| i32::try_from(n).ok())
-        .ok_or(StorageError::InvalidProjection)?;
-    q.from_height = Some(q.from_height.unwrap_or(start).max(start));
-    if let Some(end) = instance.data["ended_height"]
-        .as_i64()
-        .and_then(|n| i32::try_from(n).ok())
-    {
-        q.to_height = Some(q.to_height.unwrap_or(end - 1).min(end - 1));
-    }
-    if instance.is_current != Some(true) && instance.data.get("ended_height").is_none() {
-        let last = instance.data["last_active_height"]
-            .as_i64()
-            .and_then(|h| i32::try_from(h).ok())
-            .unwrap_or(start);
-        q.to_height = Some(q.to_height.unwrap_or(last).min(last));
-    }
+    // Official snapshots are unanchored. The capture-time instance identity is
+    // evidence; an inferred activation/ending height interval is not.
+    q.instance_id = Some(id);
     let result = pulse_storage::protocol::list(&s.pool, "ctip/history", q).await?;
     if result.context.build_id != found.context.build_id
         || result.context.branch.revision != found.context.branch.revision

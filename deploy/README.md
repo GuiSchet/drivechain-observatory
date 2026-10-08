@@ -1,3 +1,8 @@
+> Official-source cutover: provision fresh monitor and Observatory databases;
+> preserve the paired old databases, enforcer directory and image locks.
+> See [SOURCE_CONTRACT.md](../SOURCE_CONTRACT.md). The branding advice below
+> does not authorize reusing a pre-contract-8 database.
+
 # Deployment topology
 
 New installations use the Compose project `drivechain-observatory` and image
@@ -28,8 +33,10 @@ Docker-published database port is private.
 
 ## Monitor role
 
-Provision a dedicated pulse_sync_reader role with CONNECT and USAGE plus SELECT
-only on:
+The monitor deployment provisions this role with `just grant-reader`
+(`bip300-monitor` `deployments/ecash/scripts/grant-reader.sh`), which keeps the
+password in its secrets directory and verifies every grant. It is a dedicated
+`pulse_sync_reader` role with CONNECT and USAGE plus SELECT only on:
 
 - schema_version
 - dataset_manifest
@@ -44,6 +51,7 @@ only on:
 - history_coverage_revision
 - extractor_status
 - extractor_worker_status
+- observation_failure
 
 Set default_transaction_read_only, a connection limit of two, statement
 timeout, idle transaction timeout, and SCRAM authentication. Permit its network
@@ -53,9 +61,9 @@ connection only from the Observatory VM private address.
 ## Betanet source configuration and upgrade
 
 The source must provide a current running enforcer with the required
-capabilities: published contract v6 with SQL schema 7 and a fresh v6 dataset.
+capabilities: official contract 9 with SQL schema 10 and a fresh dataset.
 Use the local fixtures while the operator promotes the monitor separately.
-See [the compatibility review](../SOURCE_CONTRACT.md) for the v6 boundary.
+See [the compatibility review](../SOURCE_CONTRACT.md) for the contract-9 boundary.
 
 Set `PULSE_DATASET_ID` to the source manifest UUID. Defaults for network identity
 are `betanet`, activation height `967680`, hash
@@ -64,14 +72,15 @@ A mismatching source, incompatible contract or loss of continuity stops import
 with `incompatible`; existing local evidence remains available. Dataset changes
 require an explicit local reconciliation; the API never selects the newest row.
 
-Observatory rejects every pre-v6 dataset, including those without sidechain rows.
+Observatory rejects every dataset created by another event contract, including
+those without sidechain rows.
 For a replacement monitor dataset, provision a fresh Observatory destination database
 and explicitly configure its UUID; retain the previous destination/backup for
 historical evidence. This release does not automate dataset replacement.
 The reconstruction command below changes a projection generation within one
 dataset; it does not migrate identities between datasets.
 
-Apply all Observatory migrations, including 0005, with the admin role on the fresh
+Apply all Observatory migrations, including 0012, with the admin role on the fresh
 destination before starting sync/API. Allow catch-up to
 finish before treating freshness as established. Use an Observatory database backup
 before upgrades; restore it to a separate database for rollback.
@@ -79,19 +88,15 @@ before upgrades; restore it to a separate database for rollback.
 `PULSE_STALE_AFTER_SECONDS` defaults to 30. Worker freshness is based on the last
 successful poll, not block cadence. BMM shows the latest occurrence from the
 current run. A new run does not inherit the previous run’s current auction.
-For v6, the latest occurrence must also have a stable snapshot group in the
-same run with both tips matching its anchor. Missing or contradictory metadata
-produces `inconsistent_snapshot`, preserving the sampled bids and evidence.
+Matching before/after tips qualify only a `tip_matched` observation.
+Revisions stay null; readiness and exhaustive bid coverage remain unknown.
+Missing or contradictory metadata preserves evidence with unknown quality.
 Monetary defaults are `PULSE_NATIVE_SYMBOL=sats`, `PULSE_NATIVE_DECIMALS=0`.
 `bid_sats` always remains the original integer regardless of presentation config.
 
-The operator must additionally grant `SELECT` on `extractor_worker_status` to
-the existing monitor reader. For an already provisioned `pulse_sync_reader`:
-
-    GRANT SELECT ON public.extractor_worker_status TO pulse_sync_reader;
-
-This document is a manual provisioning requirement. Observatory does not apply grants
-or migrations to the monitor. `start-monitor-tunnel.sh` now requires the existing
+Observatory does not apply grants or migrations to the monitor; rerunning the
+monitor's `just grant-reader` re-applies the exact grants (the compatibility
+probe requires every listed relation, including `observation_failure`). `start-monitor-tunnel.sh` now requires the existing
 `PULSE_MONITOR_READER_PASSWORD` (URL-safe characters), `PULSE_DATASET_ID`,
 `PULSE_MONITOR_COMPOSE_PROJECT` (the operator’s monitor project name) and SSH
 configuration. It reads container metadata and starts only local Observatory services;
@@ -103,7 +108,7 @@ pruning is a later operational step; when introduced, it must move the local
 `ops.active_dataset.replay_floor` in the same transaction as pruning. Never
 advance a generation without rebuilding/validating its projections.
 
-## Projection maintenance within a fresh v6 dataset
+## Projection maintenance within a fresh contract-8 dataset
 
 This operation only changes the local Observatory database. Keep the monitor running normally. Stop the
 Observatory sync/API processes for the maintenance window; the rebuild is resumable,
@@ -140,7 +145,7 @@ Compose installation with the updated Observatory images already available:
 
     docker compose --env-file .env -f deploy/compose.yaml up -d sync api
 
-Check `/api/v1/meta` for projection version 5 and the new generation, `/status`
+Check `/api/v1/meta` for projection version 7 and the new generation, `/status`
 for coherent branch progress, and `/coverage` for per-scope verification.
 A legitimate coverage gap can remain provisional after a successful rebuild.
 An ambiguous selected branch must be reconciled before promotion. SSE and paginated clients must discard
@@ -148,14 +153,25 @@ old generation cursors. For binary/schema rollback, restore the pre-upgrade
 backup to a separate local database and point the compatible previous Observatory
 binaries at it; retaining old projection rows alone is not a schema downgrade.
 
-### Projection version 5
+### Projection version 7
 
-For an existing **v6 dataset**, apply migrations with `pulse-api migrate-only`
+For an existing **contract-8 dataset**, apply migrations with `pulse-api migrate-only`
 using the migration role, stop Observatory sync, and run
 `pulse-sync rebuild --dataset-id <uuid>` with Observatory destination credentials.
 The command needs no monitor connection. It retains the old generation until
-validation and atomic promotion, and can resume interrupted version 5 staging
+validation and atomic promotion, and can resume interrupted version 7 staging
 work. Use `--fresh` to select a new cut after repairing evidence from an earlier
-failed attempt. Restart sync after promotion. Version 4 staging checkpoints are
+failed attempt. Restart sync after promotion. Older projection staging checkpoints are
 not reused. This procedure does not change the monitor deployment or migrate an
 older source dataset.
+
+## PostgreSQL18 data directory
+
+The official-source Compose configuration explicitly sets `PGDATA` to
+`/var/lib/postgresql/data/pgdata`, inside the named `pulse_postgres` mount.
+PostgreSQL18 otherwise defaults to `/var/lib/postgresql/18/docker`, outside the
+older mount path. New contract-8 destinations must start with a fresh volume. For an
+existing installation, inspect `SHOW data_directory` and container mounts,
+back up and restore into the new destination; do not silently reuse or relocate
+an old volume with this setting. Keep its paired old Compose configuration for
+archive access and rollback.

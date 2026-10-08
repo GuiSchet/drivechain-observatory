@@ -1,70 +1,60 @@
-# Reviewed source contract
+# Official source contract
 
-Review: 2026-09-25. Published monitor main:
-`f8badd49b81cb00ff1c711885afd744bbde43e7e`.
-Monitor image build: `88da099049bb469aeee3dec3cc5d86a056970382`.
-Reviewed enforcer runtime: `0740a39380b39885fe8655f79f78150001d8a15b`.
-These identify the reviewed source; they do not attest a live deployment.
-The operator promotes the monitor manually.
+Reviewed official enforcer: LayerTwo-Labs `1753fc0c23863bcb39c681e1cfaea2705613516f`.
+Source SHAs and immutable image digests identify provenance, not compatibility.
+The consumer requires **fresh contract 9 / monitor SQL 10 / projection 8** and the
+capabilities in `crates/domain/src/lib.rs`. A compatible official update does
+not require changing a SHA allowlist. Old databases remain separate archives.
 
-Observatory requires **a fresh contract-6 dataset, SQL schema 7**, and all 17 published
-capabilities in both the dataset manifest and current running extractor. Earlier
-datasets are rejected even when they contain no sidechain rows. Observatory does not
-migrate old dataset identities. Use a new Observatory database with the explicitly
-configured v6 dataset UUID. Old databases remain separate archives.
+| Source | Available information | Limits |
+|---|---|---|
+| Node mainchain_block | Verified raw bytes, headers, parent links, absolute work | Does not select the enforcer branch |
+| Official GetBlockInfo | Per-slot deposits, BMM commitments, bundle outcomes | No resolved historical protocol effects |
+| Official SubscribeEvents(0) | Global live connects/disconnects, even with no active slots; a boundary per (re)subscription bounding each gap | No durable server sequence/baseline or offline replay |
+| Official state RPCs | Active instances, proposals, CTIP, pending bundles, read on every tip change | Unanchored read windows; no atomic snapshot |
+| GetSeenBmmRequests | Observed bids, including every empty sample | Readiness and exhaustive coverage unknown; samples right after start are `unknown` |
+| Node fee enrichment | Exact confirmed fees for previously observed matching bids | Partial coverage; absent prevouts remain unknown |
 
-Reviewed protobuf SHA-256:
+`crates/source` normalizes observations. It does not implement BIP300 voting,
+expiry, activation or treasury transition rules. No votes or terminal outcomes
+are inferred between reads. Historical eligibility ratios remain null.
+Raw protobuf and exact source JSON remain available separately. Monetary u64
+values and identifiers are decimal strings. Description identity is SHA256d of
+the decoded description bytes, excluding CompactSize, in display order. Every
+hash and txid is in display order, including the M6 identifier (bundle txid).
 
-- `event.proto`: `02f7fa9e75ecc965fe46a0fdb4a9757274f6e29e33b741d5108f954f15574b3e`
-- `enforcer_extractor.proto`: `65f42692a82d962e22e81ac6c3afbd8be2ba79b58f5729174287586e35ef65ad`
+State snapshots have null block anchors. Their occurrence windows contain
+before/after tips and `tip_matched`, `changed` or `unknown` consistency. Equal
+tips never prove atomicity or exclude A → B → A. Revisions remain null. The
+latest current-run occurrence is selected before validation; invalid or changed
+new evidence cannot silently borrow an earlier good response. CTIP by instance
+uses the identity recorded at capture, not inferred activation-height intervals.
+History time filters default to occurrence time; block-time filters exclude
+unanchored state. Charts show separate observations, not interpolated state.
+Every list reports the quality and `observed_at` of an item's latest read and
+`first_observed_at`; snapshot quality is `tip_matched` only when that read was.
+The monitor records every reading, so an unchanged value re-read at a later tip
+extends its history row (occurrences) and shows when it was last confirmed.
 
-| Source kind | Observatory interpretation |
-|---|---|
-| `chain_info` | Raw network enums, activation and voting constants |
-| `chain_tip` | Header, parent, height, exact accumulated work |
-| `active_sidechains` | Stable observations of instances and declarations |
-| `sidechain_proposals` | Proposal observations and reconstruction reconciliation |
-| `ctip` | Treasury output, explicit absence, provenance and discrepancies |
-| `block_connected` | Per-slot BMM presence/absence, deposits and bundle outcomes |
-| `block_disconnected` | Retained branch/disconnection evidence |
-| `withdrawal_bundle_proposals` | Pending attempts, vote counts, proposal heights |
-| `bip300_block_delta` | M1/M2/M3/M4/M7, resolved effects, treasury transitions, M8 |
-| `bmm_requests` | Exact sampled bids and every occurrence, including empty polls |
+Enforcer tip observations select the branch. Node cumulative work must satisfy
+parent work + child work = child cumulative work, with positive block work.
+Contradictory immutable facts stop certification. Reorgs preserve alternatives
+and shared ancestors. Node and enforcer disagreement is visible and prevents
+joint certification. A failed enforcer run does not prevent importing node data.
 
-`crates/source` implements the typed adapter and deterministic replay. Raw
-protobuf and exact source JSON remain separate evidence. Integers representing
-money, sequence numbers or 64-bit IDs are decimal strings in the public view.
-Unknown facts remain readable. Invalid children produce family-specific errors;
-an unrelated BMM error does not erase proposal votes.
+Confirmed fee records carry `coverage=observed_bids_only`; bid amounts are never
+substituted for paid fees. Unknown prior samples cannot establish a complete M8
+history. Empty BMM responses are not evidence of mempool readiness.
 
-Description identity is SHA256d over the decoded description vector, excluding
-its CompactSize prefix, in display byte order. V0 declarations may be decoded
-from that vector; future versions retain their identity and raw evidence without
-inventing a title.
+Subscription boundaries bound the intervals whose global transitions are
+unknown; `/coverage` lists them as transition gaps.
 
-The reviewed rules use M1=0 and M3=1 initial votes, strict thresholds, resolved
-M2/M4 effects, saturating decreasing votes, proposal early failure and bundle
-expiry at age greater than the limit. Coinbase effects precede expiration and
-non-coinbase treasury effects. Repeated m6ids have separate attempts. Missing
-snapshots never imply terminal failure. A gap invalidates dependent current
-state; later stable observations or complete backfill can establish it again.
+The monitor commits rows in id order (schema 10), so the importer pages by id.
+A row that appears behind a cursor, or an imported row whose source content
+changes, stops the sync as `incompatible` and is recorded in
+`ingest.import_conflicts`; it is never imported silently.
 
-Global and slot deposits are merged only when their economic identity and
-values agree. Conflicting effects are quarantined together. M6 treasury delta
-is payout plus fee. M8 confirmed fees remain unknown when absent; sampled bids
-are never substituted. BMM coverage uses covered eligible blocks, with null
-ratios for unknown/zero denominators and explicit missing heights.
-
-Semantic reconstruction uses only occurrences from the reviewed enforcer.
-Unreviewed current builds, missing parameters or conflicting constants disable
-verified rule calculations. Snapshot validation binds dataset, run, capture,
-both tip hashes/heights and selected branch. Latest current-run observations
-remain visible even if inconsistent; they cannot borrow an older occurrence's
-validity. Historical reconstruction can use compatible prior runs in the same
-fresh dataset, with their original evidence retained.
-
-The SQL writer is serialized and migration 7 fences running extractors per
-source/dataset. Observatory reads PostgreSQL only; it neither depends on NATS delivery
-nor writes to the monitor. Integration fixtures use the seven actual source SQL
-migrations and generated protobuf envelopes. The scale fixture is explicitly
-synthetic and is not evidence of wire-level conformance.
+The importer uses a dedicated read-only source role. Tests use all ten actual
+monitor migrations and generated envelopes in `fixtures/v9`; synthetic block
+bytes test projection behavior, not cryptographic validation. The monitor tests
+raw block decoding separately. Contract 5–8 fixtures are archived references.

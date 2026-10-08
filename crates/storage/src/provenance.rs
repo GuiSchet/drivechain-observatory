@@ -35,6 +35,13 @@ pub async fn list(
         None
     };
     let (table, id, time, data, kind) = match resource {
+        "observation-failures" => (
+            "ingest.observation_failures",
+            "failure_id",
+            "observed_at",
+            "to_jsonb(r) || jsonb_build_object('failure_id',r.failure_id::text)",
+            "observation_failure",
+        ),
         "runs" => (
             "ingest.extractor_runs",
             "run_id",
@@ -63,13 +70,18 @@ pub async fn list(
     ));
     qb.push_bind(d.dataset_id);
     if let Some(key) = &q.key {
-        if resource == "event-occurrences" {
+        if matches!(resource, "event-occurrences" | "observation-failures") {
             let key = key
                 .parse::<i64>()
                 .ok()
                 .filter(|n| *n > 0)
                 .ok_or(StorageError::InvalidQuery)?;
-            qb.push(" AND source_event_id=").push_bind(key);
+            qb.push(if resource == "event-occurrences" {
+                " AND source_event_id="
+            } else {
+                " AND failure_id="
+            })
+            .push_bind(key);
         } else {
             let key = key
                 .parse::<Uuid>()
@@ -81,7 +93,7 @@ pub async fn list(
         qb.push(format!(" AND (r.{time},r.{id})<("))
             .push_bind(p.time)
             .push(",");
-        if resource == "event-occurrences" {
+        if matches!(resource, "event-occurrences" | "observation-failures") {
             qb.push_bind(
                 p.id.parse::<i64>()
                     .map_err(|_| StorageError::InvalidQuery)?,
@@ -116,6 +128,7 @@ pub async fn list(
             hash: None,
             height: None,
             observed_at: Some(r.try_get("observed_at")?),
+            first_observed_at: None,
             block_time: None,
             quality: "observed".into(),
             membership: "not_applicable".into(),

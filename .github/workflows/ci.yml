@@ -1,0 +1,49 @@
+name: Observatory quality
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: observatory-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_BUILD_JOBS: '2'
+  CARGO_TERM_COLOR: always
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install protobuf tools
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends protobuf-compiler
+      - name: Select locked Rust toolchain
+        run: rustup show active-toolchain
+      - name: Rust formatting, lint and units
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
+      - name: Web dependencies and production build
+        run: |
+          npm --prefix apps/web ci
+          npm --prefix apps/web run typecheck
+          npm --prefix apps/web run build
+      # The runner image ships Google Chrome; only the pinned Playwright
+      # library is installed, outside the web app's dependencies.
+      - name: Browser driver
+        run: |
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --prefix "$RUNNER_TEMP/playwright" --no-audit --no-fund playwright@1.56.1
+          google-chrome --version
+      - name: Real PostgreSQL source, importer, API, browser and volume persistence
+        env:
+          PULSE_BROWSER_TESTS: '1'
+          PULSE_BROWSER_EXECUTABLE: /usr/bin/google-chrome
+          PULSE_BROWSER_ARTIFACTS: ${{ runner.temp }}/browser
+        run: |
+          export PULSE_PLAYWRIGHT_MODULE="$RUNNER_TEMP/playwright/node_modules/playwright/index.mjs"
+          sh scripts/verify-local.sh

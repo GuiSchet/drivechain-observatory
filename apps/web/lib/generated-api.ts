@@ -131,6 +131,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bundle-attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read bundle-attempts from the local Observatory dataset */
+        get: operations["bundleattempts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bundle-attempts/{id}": {
         parameters: {
             query?: never;
@@ -305,6 +322,23 @@ export interface paths {
             cookie?: never;
         };
         get: operations["meta"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/observation-failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read observation-failures from the local Observatory dataset */
+        get: operations["observationfailures"];
         put?: never;
         post?: never;
         delete?: never;
@@ -746,6 +780,7 @@ export interface components {
         BlockSummary: {
             /** Format: date-time */
             block_time: string;
+            block_work?: string | null;
             chain_work: string;
             conflicted: boolean;
             /** Format: date-time */
@@ -765,7 +800,10 @@ export interface components {
             next_cursor?: string | null;
         };
         BmmAuctionsResponse: {
+            bid_coverage: string;
             evidence_url?: string | null;
+            /** @description Official GetSeenBmmRequests exposes neither readiness nor total mempool coverage. */
+            mempool_readiness: string;
             meta: components["schemas"]["ResponseMeta"];
             observation_id?: string | null;
             /** Format: date-time */
@@ -776,7 +814,7 @@ export interface components {
             run_id?: string | null;
             source_event_id?: string | null;
             /**
-             * @description available, empty, stale, unavailable, awaiting_observation, rpc_error,
+             * @description available, no_observed_bids, stale, unavailable, awaiting_observation, rpc_error,
              *     interpretation_error, or awaiting_current_parent.
              */
             state: string;
@@ -840,7 +878,12 @@ export interface components {
             checkpoint_status: string;
             evidence_id?: string | null;
             evidence_type?: string | null;
+            /** @description matched, different_tips, or unknown. Does not change the selected enforcer branch. */
+            joint_source_status?: string;
             missing_parent?: string | null;
+            node_tip_hash?: string | null;
+            /** Format: int32 */
+            node_tip_height?: number | null;
             /** Format: date-time */
             observed_at?: string | null;
             processed_coverage: string;
@@ -862,8 +905,14 @@ export interface components {
             branch: components["schemas"]["BranchState"];
             local_status: string;
             meta: components["schemas"]["ResponseMeta"];
+            observation_quality: unknown;
             snapshot_history: string;
             streams: components["schemas"]["CoverageScope"][];
+            /**
+             * @description Subscription boundaries of the global transition stream, newest first:
+             *     each bounds an interval whose connects and disconnects are unknown.
+             */
+            transition_gaps: unknown;
         };
         CoverageScope: {
             /** Format: date-time */
@@ -958,7 +1007,7 @@ export interface components {
              */
             observations: components["schemas"]["ProtocolItem"][];
             /**
-             * @description Current branch reconstruction. Completeness flags qualify every set;
+             * @description Separate latest official responses. These are not atomic state at the selected block;
              *     absence from an incomplete map does not mean zero or inactive.
              */
             state: unknown;
@@ -1019,6 +1068,11 @@ export interface components {
             data: unknown;
             entity_id?: string | null;
             evidence: components["schemas"]["ProtocolEvidence"][];
+            /**
+             * Format: date-time
+             * @description When the immutable fact was first recorded, if the list reports it.
+             */
+            first_observed_at?: string | null;
             hash?: string | null;
             /** Format: int32 */
             height?: number | null;
@@ -1029,9 +1083,12 @@ export interface components {
             kind: string;
             /** @description selected, alternative, unknown, or not_applicable. */
             membership: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The latest occurrence of this item (when it was last read).
+             */
             observed_at?: string | null;
-            /** @description observed, reconstructed, unknown. Raw evidence is available separately. */
+            /** @description observed, tip_matched, unknown. Raw evidence is available separately. */
             quality: string;
             /** Format: int32 */
             slot?: number | null;
@@ -1137,11 +1194,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1330,11 +1389,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1381,11 +1442,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1432,11 +1495,66 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
+                time_basis?: string;
+                q?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtocolPage"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    bundleattempts: {
+        parameters: {
+            query?: {
+                dataset?: string;
+                scope?: string;
+                slot?: number;
+                kind?: string;
+                hash?: string;
+                key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
+                from_height?: number;
+                to_height?: number;
+                from_time?: string;
+                to_time?: string;
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1483,11 +1601,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1536,11 +1656,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1614,11 +1736,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1725,11 +1849,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1779,11 +1905,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1830,11 +1958,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1881,11 +2011,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -1957,6 +2089,59 @@ export interface operations {
             };
         };
     };
+    observationfailures: {
+        parameters: {
+            query?: {
+                dataset?: string;
+                scope?: string;
+                slot?: number;
+                kind?: string;
+                hash?: string;
+                key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
+                from_height?: number;
+                to_height?: number;
+                from_time?: string;
+                to_time?: string;
+                /** @description observation (history default), block (facts default), or ingestion. */
+                time_basis?: string;
+                q?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtocolPage"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     observations: {
         parameters: {
             query?: {
@@ -1966,11 +2151,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2017,11 +2204,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2087,11 +2276,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2138,11 +2329,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2189,11 +2382,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2242,11 +2437,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2293,11 +2490,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2344,11 +2543,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2397,11 +2598,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2450,11 +2653,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2501,11 +2706,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2581,11 +2788,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2626,11 +2835,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2679,11 +2890,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2732,11 +2945,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2783,11 +2998,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2863,11 +3080,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;
@@ -2914,11 +3133,13 @@ export interface operations {
                 kind?: string;
                 hash?: string;
                 key?: string;
+                /** @description Exact instance identity recorded when capturing an observation. */
+                instance_id?: string;
                 from_height?: number;
                 to_height?: number;
                 from_time?: string;
                 to_time?: string;
-                /** @description block (default), observation, or ingestion. */
+                /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
                 limit?: number;

@@ -150,6 +150,8 @@ struct SourceSnapshotGroup {
     tip_after_height: i32,
     consistency: String,
     attempts: i32,
+    revision_before: Option<String>,
+    revision_after: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -313,7 +315,7 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
             .context("reading monitor schema version")?;
     if schema_version != REQUIRED_MONITOR_SCHEMA_VERSION {
         return Err(incompatible(format!(
-            "monitor SQL schema {schema_version}; reviewed schema 7 is required"
+            "monitor SQL schema {schema_version}; reviewed schema {REQUIRED_MONITOR_SCHEMA_VERSION} is required"
         )));
     }
     // Probe the actual required columns, including additive v5/v6 migrations.
@@ -325,7 +327,8 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         FROM dataset_manifest d CROSS JOIN extractor_run r CROSS JOIN event_observation o
         CROSS JOIN tip_observation t CROSS JOIN snapshot_group g CROSS JOIN sidechain_instance i
         CROSS JOIN current_sidechain_instance c CROSS JOIN history_coverage h
-        CROSS JOIN history_coverage_revision v CROSS JOIN extractor_status s LIMIT 0",
+        CROSS JOIN history_coverage_revision v CROSS JOIN extractor_status s
+        CROSS JOIN observation_failure f LIMIT 0",
     )
     .execute(source)
     .await
@@ -344,7 +347,6 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
     .await?
     .ok_or_else(|| incompatible("configured dataset has no current enforcer run"))?;
     if !MONITOR_EVENT_CONTRACT_VERSIONS.contains(&run.event_contract_version)
-        || run.status != "running"
         || !REQUIRED_CAPABILITIES.iter().all(|cap| {
             run.capabilities
                 .as_array()
@@ -352,24 +354,50 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         })
     {
         return Err(incompatible(
-            "current run must provide contract v6 and all required capabilities",
+            "current run must provide a supported contract and all required capabilities",
         ));
     }
-    if run.event_contract_version == 6 {
-        if schema_version < 7 {
-            return Err(incompatible("monitor contract v6 requires SQL schema 7"));
-        }
-        let old_identity: bool = sqlx::query_scalar(
-            "SELECT d.initial_event_contract_version <> 6 FROM dataset_manifest d WHERE d.dataset_id=$1",
-        )
-        .bind(run.dataset_id)
-        .fetch_one(source)
-        .await?;
-        if old_identity {
+    // Node evidence is a separate run; when present it must speak the same
+    // contract and provide what the chain projection depends on.
+    let node_run: Option<(i32, Value)> = sqlx::query_as(
+        "SELECT r.event_contract_version,r.capabilities FROM extractor_run r JOIN extractor_status s ON s.run_id=r.run_id
+         WHERE s.dataset_id=$1 AND s.source='node'",
+    )
+    .bind(run.dataset_id)
+    .fetch_optional(source)
+    .await?;
+    if let Some((contract, capabilities)) = node_run {
+        let has = |cap: &str| {
+            capabilities
+                .as_array()
+                .is_some_and(|caps| caps.iter().any(|v| v.as_str() == Some(cap)))
+        };
+        if contract != run.event_contract_version
+            || ![
+                "node_block_evidence",
+                "absolute_chain_work",
+                "resumable_node_history",
+            ]
+            .iter()
+            .all(|cap| has(cap))
+        {
             return Err(incompatible(
-                "a fresh v6 dataset is required; pre-v6 datasets cannot be reused",
+                "the current node run lacks the contract or node evidence capabilities",
             ));
         }
+    }
+    // Every official contract owns a fresh dataset; facts never mix versions.
+    let old_identity: bool = sqlx::query_scalar(
+        "SELECT d.initial_event_contract_version <> $2 FROM dataset_manifest d WHERE d.dataset_id=$1",
+    )
+    .bind(run.dataset_id)
+    .bind(run.event_contract_version)
+    .fetch_one(source)
+    .await?;
+    if old_identity {
+        return Err(incompatible(
+            "the dataset was created by another event contract; a fresh dataset is required",
+        ));
     }
     sync_datasets(source, destination, args).await?;
     sync_runs(
@@ -377,6 +405,14 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         destination,
         args.dataset_id
             .context("PULSE_DATASET_ID or --dataset-id is required")?,
+    )
+    .await?;
+    sync_failures(
+        source,
+        destination,
+        run.dataset_id,
+        args.batch_size,
+        args.max_pages_per_cycle,
     )
     .await?;
     sync_dataset(
@@ -389,6 +425,41 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
         args.max_pages_per_cycle,
     )
     .await
+}
+
+async fn sync_failures(
+    source: &PgPool,
+    destination: &PgPool,
+    dataset: Uuid,
+    limit: i64,
+    pages: u32,
+) -> Result<()> {
+    #[derive(sqlx::FromRow)]
+    struct Failure {
+        failure_id: i64,
+        run_id: Uuid,
+        worker: String,
+        observed_at: DateTime<Utc>,
+        error: String,
+    }
+    for _ in 0..pages {
+        let mut tx = destination.begin().await?;
+        let after = cursor(&mut tx, dataset, "observation_failures").await?;
+        let rows = sqlx::query_as::<_, Failure>("SELECT failure_id,run_id,worker,observed_at,error FROM observation_failure WHERE dataset_id=$1 AND failure_id>$2 ORDER BY failure_id LIMIT $3")
+            .bind(dataset).bind(after).bind(limit).fetch_all(source).await?;
+        for row in &rows {
+            sqlx::query("INSERT INTO ingest.observation_failures VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING")
+                .bind(dataset).bind(row.failure_id).bind(row.run_id).bind(&row.worker).bind(row.observed_at).bind(&row.error).execute(&mut *tx).await?;
+        }
+        if let Some(last) = rows.last() {
+            advance_cursor(&mut tx, dataset, "observation_failures", last.failure_id).await?;
+        }
+        tx.commit().await?;
+        if rows.len() < usize::try_from(limit)? {
+            break;
+        }
+    }
+    Ok(())
 }
 
 async fn sync_datasets(source: &PgPool, destination: &PgPool, args: &Args) -> Result<()> {
@@ -417,7 +488,7 @@ async fn sync_datasets(source: &PgPool, destination: &PgPool, args: &Args) -> Re
                 .is_some_and(|caps| caps.iter().any(|v| v.as_str() == Some(cap)))
         }) {
             return Err(incompatible(
-                "fresh dataset manifest lacks required v6 capabilities",
+                "the dataset manifest lacks required capabilities",
             ));
         }
         if dataset.network_id != args.network_id
@@ -428,11 +499,14 @@ async fn sync_datasets(source: &PgPool, destination: &PgPool, args: &Args) -> Re
                 "dataset network/checkpoint does not match configured identity",
             ));
         }
-        let same: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM ingest.datasets WHERE dataset_id=$1 AND (network_id <> $2 OR activation_height <> $3 OR activation_block_hash <> $4))")
+        // The monitor writes a dataset manifest once; a changed one is not a
+        // newer version of the same evidence.
+        let same: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM ingest.datasets WHERE dataset_id=$1 AND (network_id <> $2 OR activation_height <> $3 OR activation_block_hash <> $4 OR capabilities <> $5 OR initial_enforcer_commit <> $6 OR initial_monitor_commit <> $7 OR initial_node_commit <> $8))")
             .bind(dataset.dataset_id).bind(&dataset.network_id).bind(dataset.activation_height).bind(&dataset.activation_block_hash)
+            .bind(&dataset.capabilities).bind(&dataset.initial_enforcer_commit).bind(&dataset.initial_monitor_commit).bind(&dataset.initial_node_commit)
             .fetch_one(&mut *transaction).await?;
         if !same {
-            return Err(incompatible("persisted dataset identity changed"));
+            return Err(incompatible("persisted dataset manifest changed"));
         }
         sqlx::query(
             "INSERT INTO ingest.datasets \
@@ -441,8 +515,7 @@ async fn sync_datasets(source: &PgPool, destination: &PgPool, args: &Args) -> Re
                  initial_event_contract_version, capabilities, creation_reason, \
                  source_created_at) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) \
-             ON CONFLICT (dataset_id) DO UPDATE SET \
-                 capabilities = EXCLUDED.capabilities",
+             ON CONFLICT (dataset_id) DO NOTHING",
         )
         .bind(dataset.dataset_id)
         .bind(&dataset.network_id)
@@ -589,6 +662,8 @@ async fn sync_dataset_locked(
         .execute(&mut *destination)
         .await?;
     repair_fact_hashes(source, destination, dataset_id, batch_size).await?;
+    // After the repair: rows still waiting for a fact hash are not changes.
+    audit_imported_content(source, destination, dataset_id).await?;
     let mut catching_up = false;
     for page in 0..max_pages_per_cycle {
         let count = sync_event_page(source, destination, dataset_id, batch_size).await?;
@@ -772,41 +847,6 @@ async fn sync_event_page(
     Ok(count)
 }
 
-async fn project_block(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &SourceEvent,
-) -> Result<()> {
-    if !matches!(
-        event.kind.as_str(),
-        "bip300_block_delta" | "block_connected" | "chain_tip"
-    ) {
-        return Ok(());
-    }
-    let (Some(block_hash), Some(height)) = (&event.block_hash, event.height) else {
-        return Ok(());
-    };
-    sqlx::query(
-        "INSERT INTO projection.blocks \
-            (dataset_id, block_hash, height, first_observed_at, last_observed_at, \
-             projection_version) \
-         VALUES ($1,$2,$3,$4,$4,$5) \
-         ON CONFLICT (dataset_id, block_hash) DO UPDATE SET \
-             height = EXCLUDED.height, \
-             last_observed_at = GREATEST( \
-                 projection.blocks.last_observed_at, EXCLUDED.last_observed_at \
-             ), \
-             projection_version = EXCLUDED.projection_version",
-    )
-    .bind(event.dataset_id)
-    .bind(block_hash)
-    .bind(height)
-    .bind(event.observed_at)
-    .bind(PROJECTION_VERSION)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
 async fn load_snapshot_groups(
     source: &PgPool,
     snapshot_group_ids: &[Uuid],
@@ -817,7 +857,7 @@ async fn load_snapshot_groups(
     sqlx::query_as::<_, SourceSnapshotGroup>(
         "SELECT snapshot_group_id, dataset_id, run_id, capture_method, started_at, \
                 finished_at, tip_before_hash, tip_before_height, tip_after_hash, \
-                tip_after_height, consistency, attempts \
+                tip_after_height, consistency, attempts, revision_before, revision_after \
            FROM snapshot_group \
           WHERE snapshot_group_id = ANY($1)",
     )
@@ -834,7 +874,6 @@ async fn sync_event_observation_page(
     batch_size: i64,
 ) -> Result<i64> {
     let observation_cursor = cursor(destination, dataset_id, "event_observations").await?;
-    let imported_event_id = cursor(destination, dataset_id, "source_events").await?;
     let observations = sqlx::query_as::<_, SourceEventObservation>(
         "SELECT observation_id, dataset_id, run_id, capture_seq, capture_method, \
                 event_id, snapshot_group_id, observed_at, ingested_at \
@@ -848,10 +887,24 @@ async fn sync_event_observation_page(
     .bind(batch_size)
     .fetch_all(source)
     .await?;
-    // Never filter out a blocked earlier occurrence and jump to a later replay.
+    // An occurrence waits for its event. Never filter out a blocked earlier
+    // occurrence and jump to a later one.
+    let referenced = observations
+        .iter()
+        .map(|row| row.event_id)
+        .collect::<Vec<_>>();
+    let imported: std::collections::HashSet<i64> = sqlx::query_scalar(
+        "SELECT source_event_id FROM ingest.source_events WHERE dataset_id=$1 AND source_event_id=ANY($2)",
+    )
+    .bind(dataset_id)
+    .bind(&referenced)
+    .fetch_all(&mut *destination)
+    .await?
+    .into_iter()
+    .collect();
     let observations = observations
         .into_iter()
-        .take_while(|row| row.event_id <= imported_event_id)
+        .take_while(|row| imported.contains(&row.event_id))
         .collect::<Vec<_>>();
     if observations.is_empty() {
         return Ok(0);
@@ -871,8 +924,8 @@ async fn sync_event_observation_page(
             "INSERT INTO ingest.snapshot_groups \
                 (snapshot_group_id, dataset_id, run_id, capture_method, started_at, \
                  finished_at, tip_before_hash, tip_before_height, tip_after_hash, \
-                 tip_after_height, consistency, attempts) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) \
+                 tip_after_height, consistency, attempts, revision_before, revision_after) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) \
              ON CONFLICT (snapshot_group_id) DO NOTHING",
         )
         .bind(group.snapshot_group_id)
@@ -887,6 +940,8 @@ async fn sync_event_observation_page(
         .bind(group.tip_after_height)
         .bind(&group.consistency)
         .bind(group.attempts)
+        .bind(group.revision_before)
+        .bind(group.revision_after)
         .execute(&mut *transaction)
         .await?;
     }
@@ -1256,6 +1311,7 @@ async fn check_continuity(
             )));
         }
     }
+    check_import_order(source, destination, dataset).await?;
     let witness: Option<(i64,Vec<u8>)> = sqlx::query_as("SELECT source_event_id,envelope FROM ingest.source_events WHERE dataset_id=$1 ORDER BY source_event_id DESC LIMIT 1")
         .bind(dataset).fetch_optional(&mut *destination).await?;
     if let Some((id, envelope)) = witness {
@@ -1272,6 +1328,229 @@ async fn check_continuity(
         }
     }
     Ok(high)
+}
+
+/// Import streams paged by `id > cursor`: cursor name, source table and id,
+/// destination table and id.
+const IMPORT_STREAMS: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "source_events",
+        "event",
+        "id",
+        "ingest.source_events",
+        "source_event_id",
+    ),
+    (
+        "event_observations",
+        "event_observation",
+        "observation_id",
+        "ingest.event_observations",
+        "observation_id",
+    ),
+    (
+        "tip_observations",
+        "tip_observation",
+        "tip_observation_id",
+        "ingest.tip_observations",
+        "tip_observation_id",
+    ),
+    (
+        "coverage_revisions",
+        "history_coverage_revision",
+        "revision_id",
+        "ingest.coverage_revisions",
+        "revision_id",
+    ),
+    (
+        "observation_failures",
+        "observation_failure",
+        "failure_id",
+        "ingest.observation_failures",
+        "failure_id",
+    ),
+];
+
+/// How far below each cursor the importer looks for rows it never saw.
+const IMPORT_ORDER_WINDOW: i64 = 5_000;
+
+/// Paging by `id > cursor` is complete only if the monitor commits rows in id
+/// order, which schema 10 guarantees. A row that appears behind a cursor
+/// anyway was skipped, and every projection paging the imported ids would
+/// skip it too: stop loudly instead of importing an incomplete history.
+async fn check_import_order(
+    source: &PgPool,
+    destination: &mut PgConnection,
+    dataset: Uuid,
+) -> Result<()> {
+    for (stream, table, id, imported, imported_id) in IMPORT_STREAMS {
+        let cursor = cursor(destination, dataset, stream).await?;
+        let low = (cursor - IMPORT_ORDER_WINDOW).max(0);
+        // Counts first; ids are transferred only when the window differs.
+        let expected: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {table} WHERE dataset_id=$1 AND {id}>$2 AND {id}<=$3"
+        ))
+        .bind(dataset)
+        .bind(low)
+        .bind(cursor)
+        .fetch_one(source)
+        .await?;
+        let imported_count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {imported} WHERE dataset_id=$1 AND {imported_id}>$2 AND {imported_id}<=$3"
+        ))
+        .bind(dataset)
+        .bind(low)
+        .bind(cursor)
+        .fetch_one(&mut *destination)
+        .await?;
+        if expected == imported_count {
+            continue;
+        }
+        let present: Vec<i64> = sqlx::query_scalar(&format!(
+            "SELECT {id} FROM {table} WHERE dataset_id=$1 AND {id}>$2 AND {id}<=$3 ORDER BY {id}"
+        ))
+        .bind(dataset)
+        .bind(low)
+        .bind(cursor)
+        .fetch_all(source)
+        .await?;
+        let seen: std::collections::HashSet<i64> = sqlx::query_scalar(&format!(
+            "SELECT {imported_id} FROM {imported} WHERE dataset_id=$1 AND {imported_id}>$2 AND {imported_id}<=$3"
+        ))
+        .bind(dataset)
+        .bind(low)
+        .bind(cursor)
+        .fetch_all(&mut *destination)
+        .await?
+        .into_iter()
+        .collect();
+        if let Some(late) = present.iter().find(|row| !seen.contains(row)) {
+            return Err(incompatible(format!(
+                "{stream} row {late} was committed behind the import cursor {cursor}; \
+                 the monitor must commit in id order (schema 10); rebuild this dataset"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Ids compared per stream and cycle by the rotating content audit.
+const AUDIT_WINDOW: i64 = 2_000;
+
+/// One audited stream: the cursor it follows, and the same row text computed
+/// from the monitor table and from its imported copy, keyed by id range.
+struct Audit {
+    stream: &'static str,
+    source: &'static str,
+    imported: &'static str,
+}
+
+const AUDITS: &[Audit] = &[
+    Audit {
+        stream: "source_events",
+        source: "SELECT md5(string_agg(id::text||':'||encode(fact_sha256,'hex')||':'||coalesce(encode(envelope_sha256,'hex'),''),'|' ORDER BY id))
+                   FROM event WHERE dataset_id=$1 AND id BETWEEN $2 AND $3",
+        imported: "SELECT md5(string_agg(source_event_id::text||':'||encode(fact_sha256,'hex')||':'||coalesce(encode(envelope_sha256,'hex'),''),'|' ORDER BY source_event_id))
+                   FROM ingest.source_events WHERE dataset_id=$1 AND source_event_id BETWEEN $2 AND $3",
+    },
+    Audit {
+        stream: "event_observations",
+        source: "SELECT md5(string_agg(observation_id::text||':'||event_id||':'||run_id||':'||capture_seq||':'||capture_method||':'||coalesce(snapshot_group_id::text,''),'|' ORDER BY observation_id))
+                   FROM event_observation WHERE dataset_id=$1 AND observation_id BETWEEN $2 AND $3",
+        imported: "SELECT md5(string_agg(observation_id::text||':'||source_event_id||':'||run_id||':'||capture_seq||':'||capture_method||':'||coalesce(snapshot_group_id::text,''),'|' ORDER BY observation_id))
+                   FROM ingest.event_observations WHERE dataset_id=$1 AND observation_id BETWEEN $2 AND $3",
+    },
+    Audit {
+        // Groups are audited through the occurrences that reference them.
+        stream: "event_observations",
+        source: "SELECT md5(string_agg(g.snapshot_group_id||':'||g.consistency||':'||encode(g.tip_before_hash,'hex')||':'||g.tip_before_height||':'||encode(g.tip_after_hash,'hex')||':'||g.tip_after_height,'|' ORDER BY g.snapshot_group_id))
+                   FROM snapshot_group g WHERE g.snapshot_group_id IN
+                   (SELECT snapshot_group_id FROM event_observation WHERE dataset_id=$1 AND observation_id BETWEEN $2 AND $3)",
+        imported: "SELECT md5(string_agg(g.snapshot_group_id||':'||g.consistency||':'||encode(g.tip_before_hash,'hex')||':'||g.tip_before_height||':'||encode(g.tip_after_hash,'hex')||':'||g.tip_after_height,'|' ORDER BY g.snapshot_group_id))
+                   FROM ingest.snapshot_groups g WHERE g.snapshot_group_id IN
+                   (SELECT snapshot_group_id FROM ingest.event_observations WHERE dataset_id=$1 AND observation_id BETWEEN $2 AND $3)",
+    },
+    Audit {
+        stream: "tip_observations",
+        source: "SELECT md5(string_agg(tip_observation_id::text||':'||run_id||':'||capture_seq||':'||encode(tip_hash,'hex')||':'||tip_height,'|' ORDER BY tip_observation_id))
+                   FROM tip_observation WHERE dataset_id=$1 AND tip_observation_id BETWEEN $2 AND $3",
+        imported: "SELECT md5(string_agg(tip_observation_id::text||':'||run_id||':'||capture_seq||':'||encode(tip_hash,'hex')||':'||tip_height,'|' ORDER BY tip_observation_id))
+                   FROM ingest.tip_observations WHERE dataset_id=$1 AND tip_observation_id BETWEEN $2 AND $3",
+    },
+    Audit {
+        stream: "coverage_revisions",
+        source: "SELECT md5(string_agg(revision_id::text||':'||operation||':'||md5(row_data::text),'|' ORDER BY revision_id))
+                   FROM history_coverage_revision WHERE dataset_id=$1 AND revision_id BETWEEN $2 AND $3",
+        imported: "SELECT md5(string_agg(revision_id::text||':'||operation||':'||md5(row_data::text),'|' ORDER BY revision_id))
+                   FROM ingest.coverage_revisions WHERE dataset_id=$1 AND revision_id BETWEEN $2 AND $3",
+    },
+];
+
+/// Imported rows are copies of immutable monitor rows. A monitor row rewritten
+/// after import would otherwise keep serving its old value without notice.
+/// Each cycle compares one id window per stream, rotating over the imported
+/// range; a mismatch is recorded and stops the sync.
+async fn audit_imported_content(
+    source: &PgPool,
+    destination: &mut PgConnection,
+    dataset: Uuid,
+) -> Result<()> {
+    for (index, audit) in AUDITS.iter().enumerate() {
+        let key = format!("{}#{index}", audit.stream);
+        let imported_through = cursor(destination, dataset, audit.stream).await?;
+        if imported_through == 0 {
+            continue;
+        }
+        let next: i64 = sqlx::query_scalar(
+            "INSERT INTO ops.import_audit(dataset_id,stream) VALUES($1,$2)
+             ON CONFLICT(dataset_id,stream) DO UPDATE SET next_id=ops.import_audit.next_id
+             RETURNING next_id",
+        )
+        .bind(dataset)
+        .bind(&key)
+        .fetch_one(&mut *destination)
+        .await?;
+        let first = if next > imported_through { 1 } else { next };
+        let last = (first + AUDIT_WINDOW - 1).min(imported_through);
+        let expected: Option<String> = sqlx::query_scalar(audit.source)
+            .bind(dataset)
+            .bind(first)
+            .bind(last)
+            .fetch_one(source)
+            .await?;
+        let imported: Option<String> = sqlx::query_scalar(audit.imported)
+            .bind(dataset)
+            .bind(first)
+            .bind(last)
+            .fetch_one(&mut *destination)
+            .await?;
+        if expected != imported {
+            let detail = format!("content differs from the imported copy (audit {index})");
+            // Re-auditing the same window every cycle records it once.
+            sqlx::query(
+                "INSERT INTO ingest.import_conflicts(dataset_id,stream,first_source_id,last_source_id,detail)
+                 SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS(SELECT 1 FROM ingest.import_conflicts
+                   WHERE dataset_id=$1 AND stream=$2 AND first_source_id=$3 AND last_source_id=$4 AND detail=$5)",
+            )
+            .bind(dataset)
+            .bind(audit.stream)
+            .bind(first.to_string())
+            .bind(last.to_string())
+            .bind(&detail)
+            .execute(&mut *destination)
+            .await?;
+            return Err(incompatible(format!(
+                "{} ids {first}..={last}: {detail}; reconcile the dataset",
+                audit.stream
+            )));
+        }
+        sqlx::query("UPDATE ops.import_audit SET next_id=$3 WHERE dataset_id=$1 AND stream=$2")
+            .bind(dataset)
+            .bind(&key)
+            .bind(last + 1)
+            .execute(&mut *destination)
+            .await?;
+    }
+    Ok(())
 }
 
 async fn repair_fact_hashes(

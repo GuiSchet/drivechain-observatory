@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package event;
+
+import "enforcer_extractor.proto";
+
+// The mainchain block an observation is anchored to.
+//
+// For a block event this is the block it describes. State snapshots (since
+// contract 8) are unanchored; their tip reads belong to snapshot_group's observation window.
+// BMM requests retain their explicit previous-mainchain-block parent anchor.
+message ObservedBlock {
+  // 32-byte block hash in conventional display order.
+  bytes hash = 1;
+  // Absent when the source did not report one. A disconnect event names only
+  // the block being disconnected, so its height has to be recovered from the
+  // connect event that preceded it.
+  optional uint32 height = 2;
+}
+
+// Stable envelope shared by monitor extractors and consumers.
+message Event {
+  // Milliseconds since the Unix epoch when the monitor constructed the event.
+  uint64 timestamp = 10;
+
+  // Absent only for an event that no block anchors.
+  optional ObservedBlock observed_at_block = 11;
+
+  oneof monitor_event {
+    enforcer_extractor.EnforcerEvent enforcer = 1;
+    NodeEvent node = 2;
+  }
+}
+
+// Evidence from the official node RPC. No BIP300 acceptance is inferred.
+message NodeEvent {
+  oneof event {
+    MainchainBlock mainchain_block = 1;
+    enforcer_extractor.ChainTip chain_tip = 2;
+    enforcer_extractor.ConfirmedBmmFees confirmed_bmm_fees = 3;
+  }
+}
+
+message MainchainBlock {
+  enforcer_extractor.BlockHeader header = 1;
+  // Exact getblock(hash, 0) bytes. Mutable confirmations are not part of a fact.
+  bytes raw_block = 2;
+}

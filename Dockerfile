@@ -1,5 +1,8 @@
 FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS builder
 
+ARG CARGO_BUILD_JOBS=2
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+
 WORKDIR /src
 COPY Cargo.toml Cargo.lock* rust-toolchain.toml rustfmt.toml ./
 COPY apps/api ./apps/api
@@ -9,6 +12,9 @@ COPY migrations ./migrations
 RUN cargo build --locked --release --workspace
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime
+
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.revision="${VCS_REF}"
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
