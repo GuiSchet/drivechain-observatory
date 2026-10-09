@@ -79,16 +79,17 @@ export function TreasuryDiagram() {
 
 export function BmmDiagram() {
   return <figure className="diagram">
-    <svg viewBox="0 0 640 220" role="img" aria-labelledby="bd-title bd-desc">
+    <svg viewBox="0 0 680 250" role="img" aria-labelledby="bd-title bd-desc">
       <title id="bd-title">Blind merged mining</title>
       <desc id="bd-desc">A sidechain user builds a sidechain block and sends a bid on L1. The miner puts that block's hash in the L1 coinbase and collects the bid.</desc>
       <defs><marker id="bd-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="currentColor"/></marker></defs>
-      <g className="bd-actor"><rect x="20" y="20" width="200" height="76" rx="12"/><text x="120" y="50" textAnchor="middle" className="dd-strong">Sidechain user</text><text x="120" y="72" textAnchor="middle" className="dd-small">builds side block h*</text></g>
-      <g className="bd-actor"><rect x="420" y="20" width="200" height="76" rx="12"/><text x="520" y="50" textAnchor="middle" className="dd-strong">L1 miner</text><text x="520" y="72" textAnchor="middle" className="dd-small">runs only L1 software</text></g>
-      <path className="bd-flow" d="M220 46 H 416" markerEnd="url(#bd-arrow)"/><text x="318" y="38" textAnchor="middle" className="dd-small">1 · BMM Request: "pay X if you include h*"</text>
-      <g className="bd-block"><rect x="220" y="130" width="200" height="72" rx="12"/><text x="320" y="158" textAnchor="middle" className="dd-strong">L1 block</text><text x="320" y="180" textAnchor="middle" className="dd-small">coinbase: BMM Accept h*</text></g>
-      <path className="bd-flow" d="M520 96 C 520 140, 470 166, 424 166" markerEnd="url(#bd-arrow)"/><text x="560" y="140" className="dd-small">2 · commits to one h*</text>
-      <path className="bd-flow" d="M216 166 C 150 166, 120 140, 120 100" markerEnd="url(#bd-arrow)"/><text x="20" y="140" className="dd-small">3 · side block is found</text>
+      <text x="340" y="24" textAnchor="middle" className="dd-small">1 · BMM Request: "I pay X if your block includes h*"</text>
+      <g className="bd-actor"><rect x="20" y="40" width="200" height="76" rx="12"/><text x="120" y="70" textAnchor="middle" className="dd-strong">Sidechain user</text><text x="120" y="92" textAnchor="middle" className="dd-small">builds side block h*</text></g>
+      <g className="bd-actor"><rect x="460" y="40" width="200" height="76" rx="12"/><text x="560" y="70" textAnchor="middle" className="dd-strong">L1 miner</text><text x="560" y="92" textAnchor="middle" className="dd-small">runs only L1 software</text></g>
+      <path className="bd-flow" d="M220 66 H 454" markerEnd="url(#bd-arrow)"/>
+      <g className="bd-block"><rect x="240" y="160" width="200" height="72" rx="12"/><text x="340" y="188" textAnchor="middle" className="dd-strong">L1 block</text><text x="340" y="210" textAnchor="middle" className="dd-small">coinbase: BMM Accept h*</text></g>
+      <path className="bd-flow" d="M560 116 C 560 170, 500 196, 444 196" markerEnd="url(#bd-arrow)"/><text x="572" y="160" className="dd-small">2 · commits to</text><text x="572" y="176" className="dd-small">one h* and takes X</text>
+      <path className="bd-flow" d="M236 196 C 160 196, 120 170, 120 122" markerEnd="url(#bd-arrow)"/><text x="20" y="160" className="dd-small">3 · side block</text><text x="20" y="176" className="dd-small">is "found"</text>
     </svg>
     <figcaption>The miner never looks inside the sidechain block; that is why it is called "blind".</figcaption>
   </figure>;

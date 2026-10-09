@@ -40,10 +40,37 @@ Status: ✅ verified · ⚠️ verified with a caveat stated in the lesson.
 | Observatory instance identity = slot + proposal height + activation height + description hash | API `entity_id` format, e.g. `9:967989:968998:3a7d…` | ✅ |
 | `mainchain_transition` records do not say whether a block was connected or disconnected in the API | `enforcer_extractor.proto` `MainchainTransition.action`; API `data` has no action field | ✅ described as "a change of the chain" |
 
+| M1 is a coinbase `OP_RETURN` with header `D5E0C4AF` (slot, version, title, description, hash1, hash2); M2 has header `D6E1C5BF` + 32-byte declaration hash; at most one M1 and one M2 per block | BIP300 M1, M2 | ✅ |
+| A new proposal starts with 0 votes; an M2 only counts from the block after the proposal | BIP300 M1 ("age=0, fails=0"); enforcer `handle_m2_ack_sidechain` comment L249-252 | ✅ |
+| Proposals are dropped when too old or when they can no longer reach the threshold | Enforcer `handle_failed_sidechain_proposals` | ✅ lesson says "dropped" when it "runs out of time" |
+| Only miners write coinbase transactions | Bitcoin consensus | ✅ |
+| Treasury: one `OP_DRIVECHAIN` output per sidechain (CTIP); deposits and withdrawals replace it with exactly one new one | BIP300 M5 ("the old UTXO is spent and a single new UTXO is created"), D1 fields 9-10 | ✅ |
+| M5 valid if exactly one `OP_DRIVECHAIN` output with more coins than before; no vote | BIP300 M5 | ✅ |
+| The output after the treasury output records the sidechain address | Enforcer `validator/task/mod.rs` L862-873 | ✅ |
+| Treasury script is `OP_DRIVECHAIN <slot> OP_TRUE`; anyone may spend it under M5/M6 rules | BIP300 "OP_DRIVECHAIN"; enforcer `OpDrivechain::script` | ✅ |
+| Crediting a deposit on L2 is the sidechain's job; L1 and the Observatory don't see it | BIP300 Abstract (partitioning); `SOURCE_CONTRACT.md` | ✅ |
+| CTIP `sequence_number` counts treasury outputs | Enforcer `treasury_utxo_count`; API FreeBank deposits at 971,479 (seq 4) and 971,481 (seq 5) match CTIP seq 5 | ✅ |
+| Bundles pay all or nothing; many withdrawals per L1 transaction | BIP300 "Withdrawing in bundles", D2 | ✅ |
+| M3 proposes a bundle and counts as the first vote | BIP300 M3 ("initial ACK score = 1"); enforcer test `handle_m3_propose_starts_vote_count_at_one` | ✅ |
+| M4 per block: upvote one bundle per sidechain (others with votes lose one), abstain (no change), alarm (all lose one); no M4 = abstain; votes never below 0 | BIP300 M4; enforcer `handle_m4_votes`, `downvoted_others_for_upvote`, `positive_votes_proposals_for_alarm` (only bundles with `vote_count > 0`); RepeatPrevious handling L506-534 | ✅ |
+| Miners vote on the M6 id, a "blinded" txid without inputs and with the treasury output replaced by a fee `OP_RETURN` | BIP300 D2 field 2, "Withdrawing in bundles"; L2L spec `m6_to_id` | ✅ |
+| M6 returns the remainder to a new treasury output | BIP300 M6 (first output is `OP_DRIVECHAIN`) | ✅ |
+| Bundles expire when older than the max age | Enforcer `handle_failed_m6ids` (`age > withdrawal_bundle_max_age`) | ⚠️ BIP300 also removes bundles that cannot succeed; lesson says "dropped once it can no longer pass in time", true for both |
+| "ACK the bundle's hash over 3-6 months" | BIP300 "Withdrawing in bundles" (quoted) | ✅ |
+| Bundle amounts are not visible on L1 until paid | BIP300: miners ACK the hash, "not the M6 itself" | ✅ |
+| BMM: user builds side block h*, bids with a BMM Request naming the previous L1 block; miner commits one h* per sidechain in the coinbase (BMM Accept) and collects the matching request in the same block; one request per sidechain per block | BIP301 Specification, BMM Accept, BMM Request | ✅ |
+| BIP301 names BMM Accept/Request; L2L spec numbers them M7/M8 | BIP301; L2L spec `bip301.md` headings | ✅ |
+| A commitment does not establish the validity of the sidechain block | BIP301 ("blind"); previous Observatory copy | ✅ |
+| Bid samples: empty sample ≠ no bids; a vanished bid ≠ paid; fees only for observed bids matching a commitment with readable prevouts | `SOURCE_CONTRACT.md` (GetSeenBmmRequests, node fee enrichment) | ✅ |
+| "Show of hands that lasts for weeks" (activation) | Betanet unused-slot max age 2,016 blocks ≈ 2 weeks | ✅ |
+| "Votes for months" (withdrawals) | Betanet withdrawal threshold 13,150 blocks ≈ 3 months at 10 min/block | ✅ |
+
 ## Cross-checks with live data
 
 | Observation | Consistent with | Status |
 |---|---|---|
 | Thunder (#9) proposed at 967,989, active at 968,998, with `vote_count` 1,009 | 1,009 > 1,008 within 1,009 ≤ 2,016 blocks | ✅ |
 | Seven instances (#2, #4, #9, #13, #98, #99, #255) share proposal 967,989 → activation 968,998; FreeBank 968,020 → 969,029; Elements 969,706 → 970,715; Solana 969,851 → 970,860 | Each activates 1,009 blocks after its proposal: the first block where a proposal acked every block can exceed 1,008 | ✅ |
+| Thunder's pending bundle `d4ceb030…` proposed at 970,438 (outcome `Submitted` in that block) with 555–558 votes at ages 1,080–1,083 | Starts at 1, ≤ 1 vote per block; well below 13,150 | ✅ |
+| Commitment grid: 5 of 10 sidechains (#2, #9, #13, #130, #255) commit in most blocks and match the slots bidding in `/bmm/auctions` | BIP301 request/accept pairing | ✅ |
 | Treasury of FreeBank rose with a 1,000,000,000-sat deposit at sequence 5 | Deposit `value_sats` = new CTIP − old CTIP (enforcer `validator/task/mod.rs` L879-884) | ✅ |

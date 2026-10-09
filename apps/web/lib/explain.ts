@@ -35,7 +35,7 @@ export function formatSats(value: unknown, unit = "sats"): string {
 export function formatCoins(value: unknown, approx = false): string {
   const v = sats(value);
   if (v === undefined) return "Unknown";
-  if (approx && v % BigInt(1_000_000) !== BigInt(0)) {
+  if (approx && v >= SATS_PER_COIN && v % BigInt(1_000_000) !== BigInt(0)) {
     const hundredths = (v + BigInt(500_000)) / BigInt(1_000_000);
     return `≈ ${(hundredths / BigInt(100)).toLocaleString("en-US")}.${(hundredths % BigInt(100)).toString().padStart(2, "0")} coins`;
   }

@@ -252,3 +252,60 @@
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 20px; }
 .filter-chips a { padding: 7px 14px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; color: var(--muted); }
 .filter-chips a.active { border-color: var(--orange); color: var(--text); background: var(--orange-soft); }
+
+/* ---------- Money and mining widgets ---------- */
+.lesson code, .spec-body code, .go-deeper code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 6px; border-radius: 5px; background: #221d16; color: #ffd8a8; }
+.vote-cards { display: grid; gap: 12px; }
+.vote-card { padding: 18px; border-radius: 12px; background: var(--panel-raised); }
+.vote-card h4 { margin: 0; font-size: 18px; }
+.vote-sub { margin: 4px 0 14px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.vote-row { display: flex; align-items: baseline; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.vote-row strong { color: var(--text); font-size: 18px; }
+.vote-row span:last-child { margin-left: auto; }
+.meter { height: 10px; margin-top: 6px; border-radius: 999px; background: #2a241c; overflow: hidden; }
+.meter > div { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #b8650c, var(--orange)); }
+.vote-note { margin: 14px 0 0; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.vote-note a { color: var(--orange-strong); text-decoration: underline; }
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.timeline li { display: grid; grid-template-columns: 130px minmax(0, 1fr) 160px; align-items: center; gap: 12px; font-size: 13px; }
+.tl-name a { color: var(--text); font-weight: 600; }
+.tl-name small { margin-left: 6px; color: var(--muted); }
+.tl-track { position: relative; height: 12px; border-radius: 999px; background: #23201c; }
+.tl-bar { position: absolute; top: 0; bottom: 0; border-radius: 999px; background: var(--orange); }
+.tl-info { color: var(--muted); text-align: right; }
+.bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.bars li { display: grid; grid-template-columns: 150px minmax(0, 1fr) minmax(180px, 230px); align-items: center; gap: 12px; font-size: 13px; }
+.bar-name a { color: var(--text); font-weight: 600; }
+.bar-track { height: 14px; border-radius: 4px; background: #23201c; overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: linear-gradient(90deg, #b8650c, var(--orange)); }
+.bar-value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; color: var(--muted); }
+.bar-value strong { color: var(--text); }
+.bar-value small { flex-basis: 100%; font-size: 11px; }
+.bar-proof, .treasury-steps a { font-size: 11px; color: var(--orange-strong); text-decoration: underline; }
+.picker { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 12px; color: var(--muted); font-size: 14px; }
+.picker select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-raised); color: var(--text); }
+.treasury-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.treasury-steps li { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-radius: 10px; background: var(--panel-raised); }
+.treasury-steps .seq { flex-shrink: 0; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--orange); color: var(--orange); font-weight: 700; }
+.treasury-steps li > span:nth-child(2) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.treasury-steps small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.friendly-table td, .friendly-table th { padding: 10px 12px; }
+.friendly-table a { color: var(--text); text-decoration: underline; text-decoration-color: var(--line); }
+.commit-grid { display: grid; gap: 6px; overflow-x: auto; }
+.commit-row { display: grid; grid-template-columns: 150px minmax(320px, 1fr); align-items: center; gap: 12px; }
+.commit-name { display: flex; flex-direction: column; font-size: 13px; }
+.commit-name a { color: var(--text); font-weight: 600; }
+.commit-name small { color: var(--muted); font-size: 11px; }
+.commit-cells { display: grid; grid-template-columns: repeat(24, minmax(8px, 1fr)); gap: 3px; }
+.cell { display: inline-block; height: 18px; min-width: 8px; border-radius: 3px; background: #2c2925; }
+.cell.present { background: var(--orange); }
+.cell.observed_absent { background: #3d4248; }
+.cell.unknown_eligibility { background: transparent; border: 1px dashed #6b5f73; }
+.legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.legend .cell { width: 12px; height: 12px; min-width: 0; vertical-align: middle; }
+.plain-list { margin: 0; padding-left: 18px; line-height: 1.8; color: var(--reading); }
+@media (max-width: 700px) {
+  .timeline li { grid-template-columns: 1fr; gap: 4px; }
+  .tl-info { text-align: left; }
+  .bars li { grid-template-columns: 1fr; gap: 4px; }
+}

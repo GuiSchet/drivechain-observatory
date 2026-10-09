@@ -19,8 +19,8 @@ export function useObservatory() {
   return useQuery({ queryKey: ["protocol", "observatory", ""], queryFn: () => getJson<Observatory>("/api/v1/observatory") });
 }
 
-export function useProtocolPage(resource: string, query = "") {
-  return useQuery({ queryKey: ["protocol", resource, query], queryFn: () => getJson<ProtocolPage>(`/api/v1/${resource}${query ? "?" + query : ""}`) });
+export function useProtocolPage(resource: string, query = "", enabled = true) {
+  return useQuery({ queryKey: ["protocol", resource, query], queryFn: () => getJson<ProtocolPage>(`/api/v1/${resource}${query ? "?" + query : ""}`), enabled });
 }
 
 export type ActiveSidechain = { slot: number; title?: string; description?: string; proposalHeight?: number; activationHeight?: number; voteCount?: number; descriptionHash?: string };
@@ -62,7 +62,7 @@ export function useNetworkParams() {
   return { ...result, params };
 }
 
-export function n(value: number | undefined): string {
+export function n(value: number | null | undefined): string {
   return value == null ? "unknown" : value.toLocaleString("en-US");
 }
 
