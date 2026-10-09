@@ -6,5 +6,7 @@ RUN apt-get update \
     && groupadd --gid 1000 tunnel \
     && useradd --uid 1000 --gid 1000 --create-home tunnel
 
+COPY --chmod=0755 tunnel.sh /usr/local/bin/tunnel.sh
+
 USER tunnel
-ENTRYPOINT ["ssh"]
+ENTRYPOINT ["/usr/local/bin/tunnel.sh"]
