@@ -1209,6 +1209,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1404,6 +1415,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1457,6 +1479,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1510,6 +1543,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1563,6 +1607,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1616,6 +1671,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1671,6 +1737,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1751,6 +1828,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1864,6 +1952,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1920,6 +2019,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -1973,6 +2083,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2026,6 +2147,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
                 resource: string;
@@ -2113,6 +2245,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2166,6 +2309,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2219,6 +2373,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2291,6 +2456,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2344,6 +2520,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2397,6 +2584,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2452,6 +2650,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2505,6 +2714,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2558,6 +2778,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2613,6 +2844,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2668,6 +2910,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2721,6 +2974,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2803,6 +3067,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2850,6 +3125,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2905,6 +3191,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -2960,6 +3257,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -3013,6 +3321,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -3095,6 +3414,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -3148,6 +3478,17 @@ export interface operations {
                 /** @description observation (history default), block (facts default), or ingestion. */
                 time_basis?: string;
                 q?: string;
+                /**
+                 * @description History order: `observed` (latest occurrence first) or `block` (block
+                 *     height first; unanchored state uses the tip of its first read). Deposits
+                 *     default to `block`, other histories to `observed`.
+                 */
+                order?: string;
+                /**
+                 * @description History only: omit a reading whose content equals the previous reading
+                 *     of the same entity, such as a re-read after a monitor restart.
+                 */
+                changes?: boolean;
                 limit?: number;
                 cursor?: string;
             };

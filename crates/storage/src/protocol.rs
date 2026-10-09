@@ -21,6 +21,13 @@ pub struct ProtocolQuery {
     /// observation (history default), block (facts default), or ingestion.
     pub time_basis: Option<String>,
     pub q: Option<String>,
+    /// History order: `observed` (latest occurrence first) or `block` (block
+    /// height first; unanchored state uses the tip of its first read). Deposits
+    /// default to `block`, other histories to `observed`.
+    pub order: Option<String>,
+    /// History only: omit a reading whose content equals the previous reading
+    /// of the same entity, such as a re-read after a monitor restart.
+    pub changes: Option<bool>,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
 }
@@ -157,6 +164,11 @@ fn validate(q: &ProtocolQuery, max: u32) -> Result<(), StorageError> {
         || q.hash
             .as_ref()
             .is_some_and(|h| h.len() != 64 || hex::decode(h).is_err())
+        || !matches!(
+            q.order.as_deref().unwrap_or("observed"),
+            "observed" | "block"
+        )
+        || q.kind.as_ref().is_some_and(|v| v.len() > 256)
         || q.q.as_ref().is_some_and(|v| v.len() > 256)
         || q.key.as_ref().is_some_and(|v| v.len() > 1024)
     {
@@ -391,7 +403,9 @@ async fn list_bounded(
                 resource,
                 &c,
                 vec![
-                    if history {
+                    if history && block_order(resource, &q) {
+                        order_height(i).to_string()
+                    } else if history {
                         i.observed_at.map(|t| t.to_rfc3339()).unwrap_or_default()
                     } else {
                         i.height.unwrap_or(-1).to_string()
@@ -447,7 +461,11 @@ fn apply_filters<'a>(
         qb.push(format!(" AND {alias}.height<=")).push_bind(h);
     }
     if let Some(kind) = &q.kind {
-        qb.push(format!(" AND {alias}.kind=")).push_bind(kind);
+        // One kind, or several separated by commas.
+        let kinds: Vec<&str> = kind.split(',').collect();
+        qb.push(format!(" AND {alias}.kind=ANY("))
+            .push_bind(kinds)
+            .push(")");
     }
     if q.scope.as_deref().unwrap_or("selected") == "selected" {
         qb.push(format!(" AND ({alias}.hash IS NULL OR EXISTS(SELECT 1 FROM projection.chain_members m WHERE m.dataset_id={alias}.dataset_id AND m.generation={alias}.generation AND m.hash={alias}.hash))"));
@@ -473,6 +491,20 @@ fn apply_filters<'a>(
     if let Some(t) = q.to_time {
         qb.push(format!(" AND {time}<=")).push_bind(t);
     }
+}
+/// A history's sort: by block height, or by the latest occurrence.
+fn block_order(resource: &str, q: &ProtocolQuery) -> bool {
+    q.order
+        .as_deref()
+        .map_or(resource == "deposits", |o| o == "block")
+}
+/// The height a history row sorts by in block order; mirrors `order_height`
+/// in `history_page`.
+fn order_height(i: &ProtocolItem) -> i64 {
+    i.height
+        .map(i64::from)
+        .or_else(|| i.data["observation_window"]["reference_tip_height"].as_i64())
+        .unwrap_or(-1)
 }
 async fn history_page(
     tx: &mut Transaction<'_, Postgres>,
@@ -500,11 +532,19 @@ async fn history_page(
         resource,
         "withdrawal-bundles" | "bundle-attempts" | "sidechain-proposals" | "sidechain-instances"
     );
+    let block = block_order(resource, q);
+    // Readings that repeat their predecessor are dropped after filtering, so
+    // the comparison sees each entity's whole filtered history.
+    let changes = q.changes == Some(true) && !latest;
     let mut qb = sqlx::QueryBuilder::new(if latest {
-        "WITH candidates AS (SELECT DISTINCT ON(p.kind,p.entity_key) p.*,(SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id) AS first_observed_at,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.last_observation_id),e.observed_at) AS observed_at,h.block_time FROM projection.observed_history p"
+        "WITH candidates AS (SELECT DISTINCT ON(p.kind,p.entity_key) p.*,(SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id) AS first_observed_at,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.last_observation_id),e.observed_at) AS observed_at,h.block_time,coalesce(p.height,(p.data#>>'{observation_window,reference_tip_height}')::int,-1) AS order_height"
     } else {
-        "WITH candidates AS (SELECT p.*,(SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id) AS first_observed_at,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.last_observation_id),e.observed_at) AS observed_at,h.block_time FROM projection.observed_history p"
+        "WITH candidates AS (SELECT p.*,(SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.observation_id) AS first_observed_at,coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.last_observation_id),e.observed_at) AS observed_at,h.block_time,coalesce(p.height,(p.data#>>'{observation_window,reference_tip_height}')::int,-1) AS order_height"
     });
+    if changes {
+        qb.push(",(p.data-'observation_window') IS DISTINCT FROM lag(p.data-'observation_window') OVER (PARTITION BY p.kind,p.entity_key ORDER BY p.observation_id NULLS FIRST,p.height NULLS FIRST,p.ordinal) AS changed");
+    }
+    qb.push(" FROM projection.observed_history p");
     qb.push(" LEFT JOIN ingest.source_events e ON e.dataset_id=p.dataset_id AND e.source_event_id=(p.evidence->0->>'event_id')::bigint LEFT JOIN projection.chain_headers h ON h.dataset_id=p.dataset_id AND h.generation=p.generation AND h.hash=p.hash WHERE p.dataset_id=").push_bind(c.meta.dataset_id).push(" AND p.generation=").push_bind(c.meta.projection_generation).push(" AND p.build_id<=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0));
     qb.push(" AND (p.observation_id IS NULL OR p.observation_id <= coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=").push_bind(c.build_id.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).push("),0))");
     if let Some(k) = kinds {
@@ -529,8 +569,30 @@ async fn history_page(
         }
         qb.push("p.height DESC NULLS FIRST,p.observation_id DESC,p.ordinal DESC");
     }
-    qb.push("), listed AS (SELECT *,coalesce(height,-1)::text || ':' || coalesce(hash,lpad(observation_id::text,20,'0')) || ':' || build_id::text || ':' || ordinal::text AS page_id FROM candidates) SELECT page_id AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,first_observed_at,block_time,quality,evidence,data || jsonb_build_object('occurrences',occurrences::text) AS data,issue FROM listed WHERE true");
-    if let Some(p) = page {
+    if changes {
+        // A kept reading stands for the identical readings after it until the
+        // next change: it reports their latest read, its quality and their
+        // total occurrences, so dropping repeats never makes a value look stale.
+        qb.push("), runs AS (SELECT *,sum(changed::int) OVER (PARTITION BY kind,entity_key ORDER BY observation_id NULLS FIRST,height NULLS FIRST,ordinal) AS change_group FROM candidates), merged AS (SELECT entity_key,kind,slot,hash,height,observation_id,build_id,ordinal,first_observed_at,block_time,evidence,data,issue,order_height,changed,max(observed_at) OVER w AS observed_at,last_value(quality) OVER (w ORDER BY observation_id NULLS FIRST,height NULLS FIRST,ordinal ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS quality,sum(occurrences) OVER w AS occurrences FROM runs WINDOW w AS (PARTITION BY kind,entity_key,change_group)");
+    }
+    qb.push(if changes { "), listed AS (SELECT *,coalesce(height,-1)::text || ':' || coalesce(hash,lpad(observation_id::text,20,'0')) || ':' || build_id::text || ':' || ordinal::text AS page_id FROM merged) SELECT" } else { "), listed AS (SELECT *,coalesce(height,-1)::text || ':' || coalesce(hash,lpad(observation_id::text,20,'0')) || ':' || build_id::text || ':' || ordinal::text AS page_id FROM candidates) SELECT" });
+    qb.push(" page_id AS id,entity_key AS entity_id,kind,slot,hash,height,observed_at,first_observed_at,block_time,quality,evidence,data || jsonb_build_object('occurrences',occurrences::text) AS data,issue FROM listed WHERE true");
+    if changes {
+        qb.push(" AND changed");
+    }
+    if let (Some(p), true) = (page, block) {
+        let height: i64 = p
+            .after
+            .first()
+            .and_then(|v| v.parse().ok())
+            .ok_or(StorageError::InvalidQuery)?;
+        let id = p.after.get(1).ok_or(StorageError::InvalidQuery)?;
+        qb.push(" AND (order_height,page_id)<(")
+            .push_bind(height)
+            .push(",")
+            .push_bind(id)
+            .push(")");
+    } else if let Some(p) = page {
         let observed = p
             .after
             .first()
@@ -543,8 +605,12 @@ async fn history_page(
             .push_bind(id)
             .push(")");
     }
-    qb.push(" ORDER BY observed_at DESC,page_id DESC LIMIT ")
-        .push_bind(i64::from(limit) + 1);
+    qb.push(if block {
+        " ORDER BY order_height DESC,page_id DESC LIMIT "
+    } else {
+        " ORDER BY observed_at DESC,page_id DESC LIMIT "
+    })
+    .push_bind(i64::from(limit) + 1);
     qb.build()
         .fetch_all(&mut **tx)
         .await?

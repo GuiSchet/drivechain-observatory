@@ -30,7 +30,8 @@ export function title(item: ProtocolItem, unit = "sats"): string {
 }
 export function detailHref(item: ProtocolItem): string | undefined {
   const id = encodeURIComponent(item.entity_id ?? item.id);
-  return ({ instance: `/sidechain-instances/${id}`, proposal: `/proposals/${id}`, bundle: `/bundle-attempts/${id}`, run: `/about/data/runs/${id}`, snapshot_group: `/about/data/snapshots/${id}` } as Record<string,string>)[item.kind];
+  const slot = item.slot != null ? `/sidechains/${item.slot}` : undefined;
+  return ({ instance: slot, proposal: slot, bundle: slot, run: `/about/data/runs/${id}`, snapshot_group: `/about/data/snapshots/${id}` } as Record<string,string|undefined>)[item.kind];
 }
 export function apiQuery(query: Record<string, string | number | undefined>): string {
   const params = new URLSearchParams();

@@ -1,3 +1,3 @@
-import { ObservatoryView } from "@/components/observatory-view";
-import { notFound } from "next/navigation";
-export default function Page() {return <ObservatoryView/>;}
+import { SidechainGallery } from "@/components/sidechains";
+export const metadata = { title: "Sidechains · Drivechain Observatory", description: "Every active sidechain on eCash Betanet, in plain words." };
+export default function Page() { return <SidechainGallery/>; }

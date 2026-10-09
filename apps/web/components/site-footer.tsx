@@ -1,4 +1,6 @@
 import Image from "next/image";
+import Link from "next/link";
+import { project } from "@/content/project";
 
 export function SiteFooter() {
   return (
@@ -7,6 +9,11 @@ export function SiteFooter() {
         <h2 id="supporters-heading">Made possible by</h2>
         <p>
           This project is only possible thanks to Librería de Satoshi and B4OS.
+        </p>
+        <p className="footer-links">
+          <Link href="/about">About the project</Link>
+          <Link href="/about#support">Support the project</Link>
+          <a href={project.repos.observatory} target="_blank" rel="noopener noreferrer">Source code</a>
         </p>
       </div>
       <div className="supporter-links">

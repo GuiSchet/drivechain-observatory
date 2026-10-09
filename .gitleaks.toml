@@ -4,13 +4,15 @@ title = "Drivechain Observatory secret scanning"
 useDefault = true
 
 # These are deterministic blockchain transaction IDs, not Coinbase API tokens.
-# Keep the exception limited to this field in the two generated SQL fixtures.
+# Keep the exception limited to this field in the generated SQL fixtures. The
+# files were removed with the contract 5-8 archives but remain in history, so
+# full-history scans still need it.
 [[rules]]
 id = "coinbase-access-token"
 
 [[rules.allowlists]]
 description = "Synthetic coinbase transaction IDs in generated fixtures"
 condition = "AND"
-paths = ['''(^|/)fixtures/(0005_source_fixture|0009_v6_fixture)\.sql$''']
+paths = ['''(^|/)fixtures/(archive/)?(0005_source_fixture|0009_v6_fixture|0010_v7_fixture)\.sql$''']
 regexTarget = "match"
 regexes = ['''coinbase_txid"\s*:\s*"[0-9a-f]{64}"''']
