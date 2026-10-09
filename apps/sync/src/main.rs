@@ -437,6 +437,33 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
     .await
 }
 
+/// Runs already imported. `sync_runs` reads runs once per cycle, so a run the
+/// monitor starts mid-cycle is unknown until the next one; its rows must wait
+/// rather than fail the `run_id` foreign key.
+async fn known_runs(
+    destination: &mut PgConnection,
+    runs: impl IntoIterator<Item = Uuid>,
+) -> Result<std::collections::HashSet<Uuid>> {
+    let runs = runs.into_iter().collect::<Vec<_>>();
+    if runs.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    Ok(
+        sqlx::query_scalar("SELECT run_id FROM ingest.extractor_runs WHERE run_id=ANY($1)")
+            .bind(&runs)
+            .fetch_all(&mut *destination)
+            .await?
+            .into_iter()
+            .collect(),
+    )
+}
+
+/// The longest prefix of an id-ordered page whose rows are importable. A blocked
+/// row is never skipped: everything after it waits with it.
+fn importable_prefix<T>(rows: Vec<T>, importable: impl Fn(&T) -> bool) -> Vec<T> {
+    rows.into_iter().take_while(|row| importable(row)).collect()
+}
+
 async fn sync_failures(
     source: &PgPool,
     destination: &PgPool,
@@ -455,8 +482,13 @@ async fn sync_failures(
     for _ in 0..pages {
         let mut tx = destination.begin().await?;
         let after = cursor(&mut tx, dataset, "observation_failures").await?;
-        let rows = sqlx::query_as::<_, Failure>("SELECT failure_id,run_id,worker,observed_at,error FROM observation_failure WHERE dataset_id=$1 AND failure_id>$2 ORDER BY failure_id LIMIT $3")
+        let fetched = sqlx::query_as::<_, Failure>("SELECT failure_id,run_id,worker,observed_at,error FROM observation_failure WHERE dataset_id=$1 AND failure_id>$2 ORDER BY failure_id LIMIT $3")
             .bind(dataset).bind(after).bind(limit).fetch_all(source).await?;
+        let fetched_all = fetched.len() < usize::try_from(limit)?;
+        let known = known_runs(&mut tx, fetched.iter().map(|row| row.run_id)).await?;
+        let total = fetched.len();
+        let rows = importable_prefix(fetched, |row| known.contains(&row.run_id));
+        let blocked = rows.len() < total;
         for row in &rows {
             sqlx::query("INSERT INTO ingest.observation_failures VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING")
                 .bind(dataset).bind(row.failure_id).bind(row.run_id).bind(&row.worker).bind(row.observed_at).bind(&row.error).execute(&mut *tx).await?;
@@ -465,7 +497,7 @@ async fn sync_failures(
             advance_cursor(&mut tx, dataset, "observation_failures", last.failure_id).await?;
         }
         tx.commit().await?;
-        if rows.len() < usize::try_from(limit)? {
+        if fetched_all || blocked {
             break;
         }
     }
@@ -956,10 +988,10 @@ async fn sync_event_observation_page(
     .await?
     .into_iter()
     .collect();
-    let observations = observations
-        .into_iter()
-        .take_while(|row| imported.contains(&row.event_id))
-        .collect::<Vec<_>>();
+    let known = known_runs(&mut *destination, observations.iter().map(|row| row.run_id)).await?;
+    let observations = importable_prefix(observations, |row| {
+        imported.contains(&row.event_id) && known.contains(&row.run_id)
+    });
     if observations.is_empty() {
         return Ok(0);
     }
@@ -1058,6 +1090,8 @@ async fn sync_tip_page(
     .bind(batch_size)
     .fetch_all(source)
     .await?;
+    let known = known_runs(&mut *destination, observations.iter().map(|row| row.run_id)).await?;
+    let observations = importable_prefix(observations, |row| known.contains(&row.run_id));
     if observations.is_empty() {
         return Ok(0);
     }
@@ -1298,8 +1332,20 @@ async fn sync_extractor_status(
         "SELECT w.* FROM extractor_worker_status w JOIN extractor_run r USING(run_id) WHERE r.dataset_id=$1")
         .bind(dataset_id).fetch_all(source).await?;
     let mut tx = destination.begin().await?;
+    // Rows of a run started after this cycle's run import are retried next cycle.
+    let known = known_runs(
+        &mut tx,
+        statuses
+            .iter()
+            .map(|status| status.run_id)
+            .chain(workers.iter().map(|worker| worker.run_id)),
+    )
+    .await?;
     let mut changed = false;
-    for status in statuses {
+    for status in statuses
+        .into_iter()
+        .filter(|status| known.contains(&status.run_id))
+    {
         let old: Option<(Uuid, Option<String>)> = sqlx::query_as(
             "SELECT run_id, last_error FROM ingest.extractor_status WHERE dataset_id=$1 AND source=$2")
             .bind(dataset_id).bind(&status.source).fetch_optional(&mut *tx).await?;
@@ -1312,7 +1358,10 @@ async fn sync_extractor_status(
             .bind(status.dataset_id).bind(&status.source).bind(status.run_id).bind(status.last_tip_hash)
             .bind(status.last_tip_height).bind(status.last_error).bind(status.updated_at).execute(&mut *tx).await?;
     }
-    for worker in workers {
+    for worker in workers
+        .into_iter()
+        .filter(|worker| known.contains(&worker.run_id))
+    {
         let old: Option<(i32, Option<String>, bool)> = sqlx::query_as(
             "SELECT consecutive_failures,last_error,last_success_at IS NOT NULL FROM ingest.worker_status WHERE run_id=$1 AND worker=$2")
             .bind(worker.run_id).bind(&worker.worker).fetch_optional(&mut *tx).await?;
@@ -1744,4 +1793,27 @@ fn init_tracing() {
         )
         .json()
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::importable_prefix;
+
+    #[test]
+    fn a_blocked_row_holds_back_every_later_row() {
+        // Rows of run 2 wait for it; the later run-1 row must not jump ahead.
+        let page = vec![(1, 'a'), (1, 'b'), (2, 'c'), (1, 'd')];
+        let known = [1];
+        assert_eq!(
+            importable_prefix(page, |row| known.contains(&row.0)),
+            vec![(1, 'a'), (1, 'b')]
+        );
+    }
+
+    #[test]
+    fn a_fully_known_page_is_imported_whole() {
+        let page = vec![1, 2, 3];
+        assert_eq!(importable_prefix(page.clone(), |_| true), page);
+        assert!(importable_prefix(page, |row| *row > 1).is_empty());
+    }
 }
