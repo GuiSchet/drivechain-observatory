@@ -53,6 +53,11 @@ def writer():
 def commit(f,n=9):
     f.finish(n);sql("monitor_fixture","\n".join(f.statements));settle()
 
+# A page bounded by bytes keeps the cycle paging: with a one-byte budget every
+# page is a single (oversized) event, and one cycle still imports them all.
+sync("--event-page-bytes","1","--max-pages-per-cycle","1000")
+assert sql("postgres","SELECT cursor_value FROM ops.sync_cursors WHERE stream='source_events'")==sql("monitor_fixture","SELECT max(id) FROM event")
+check("byte-bounded event pages import oversized events one at a time")
 sync("--batch-size","2","--max-pages-per-cycle","1")
 settle()
 meta=get("/api/v1/meta")
