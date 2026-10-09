@@ -4,11 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { getAuctions, getJson } from "@/lib/api";
 import { object } from "@/lib/protocol";
-import { declarationOf, formatCoins, formatSats, short } from "@/lib/explain";
+import { declarationOf, formatCoins, formatSats } from "@/lib/explain";
 import { activeSidechains, n, proofHref, snapshotOf, useNetworkParams, useObservatory, useProtocolPage } from "@/lib/live";
 import type { BmmMetrics } from "@/lib/types";
 import { useUnit } from "@/lib/unit";
-import { ConfidenceChip, GoDeeper, LivePanel, Stat, Term } from "@/components/learn/primitives";
+import { ConfidenceChip, GoDeeper, LivePanel, Term } from "@/components/learn/primitives";
 import { ActivityFeed } from "@/components/live/activity";
 import { TreasuryHistory, WithdrawalOutcomes, WithdrawalVotes } from "@/components/live/money";
 import { BmmBids, BmmCommitments } from "@/components/live/bmm";
@@ -26,7 +26,7 @@ export function SidechainGallery() {
   const snap = snapshotOf(observatory.data, "active_sidechains");
   return <main className="page-shell wide">
     <div className="eyebrow">THE SIDECHAINS OF BETANET</div><h1>Meet the sidechains</h1>
-    <p className="lede">Each card is one active sidechain: what it declares to be, how many coins it holds on L1, and whether it is producing blocks through merged mining. Open one to follow its whole story. New to the terms? Start with <Link className="text-link" href="/learn/slots">slots and sidechains</Link>.</p>
+    <p className="lede">Each card is one active sidechain: what it declares to be, how many coins it holds on L1, and how often L1 miners committed to one of its blocks (blind merged mining). Open one to follow its whole story. New to the terms? Start with <Link className="text-link" href="/learn/slots">slots and sidechains</Link>.</p>
     {observatory.isPending && <p className="live-empty" role="status">Loading sidechains…</p>}
     {observatory.isError && !observatory.data && <p className="live-empty" role="status">The sidechain list is unavailable right now; retrying automatically.</p>}
     {snap && <p className="gallery-meta"><ConfidenceChip quality={snap.quality}/> {active.length} active sidechains in the latest reading · <Link className="text-link" href={proofHref(snap, observatory.data?.context.meta.dataset_id) ?? "#"}>See the proof</Link></p>}
@@ -37,10 +37,10 @@ export function SidechainGallery() {
       return <li key={s.slot}><Link href={`/sidechains/${s.slot}`}>
         <span className="sc-slot">Slot #{s.slot}</span>
         <strong className="sc-title">{s.title ?? "Unnamed sidechain"}</strong>
-        <p>{s.description ?? "No description declared."}</p>
+        <p className="sc-desc">{s.description ?? "No description declared."}</p>
         <dl>
           <div><dt>Locked on L1</dt><dd>{ctip === null ? "nothing yet" : value ? formatCoins(value, true) : "unknown"}{value ? <small>{formatSats(value, unit)}</small> : null}</dd></div>
-          <div><dt>Blocks via merged mining</dt><dd>{row ? `${row.present} of last ${row.covered}` : "unknown"}{bid ? <small>open bid {formatSats(bid.bid_sats, unit)}</small> : null}</dd></div>
+          <div><dt>BMM commitments, last 24 L1 blocks</dt><dd>{row ? `in ${row.present} of ${row.covered} observed` : "unknown"}{bid ? <small>open bid {formatSats(bid.bid_sats, unit)}</small> : null}</dd></div>
           <div><dt>Withdrawals in vote</dt><dd>{pending}</dd></div>
           <div><dt>Active since</dt><dd>block {n(s.activationHeight)}</dd></div>
         </dl>
@@ -83,16 +83,13 @@ export function SidechainStory({ slot }: { slot: number }) {
           <li><span className="story-num">3</span><div><strong>{treasury === null ? "No coins deposited yet" : treasury ? `Holds ${formatCoins(object(treasury).value_sats, true)} on L1` : "Treasury unknown"}</strong><p>{treasury ? <>{formatSats(object(treasury).value_sats, unit)} in treasury output #{String(object(treasury).sequence_number ?? "?")}. </> : null}<Link className="text-link" href="/learn/deposits">How deposits work</Link></p></div></li>
         </ol>
       </section>
-      <div className="stat-grid two">
-        <Stat label="Slot" value={`#${slot}`} hint={<Link href="/learn/slots">slots explained →</Link>}/>
-        <Stat label="Declaration hash" value={<span className="hash">{short(sc.descriptionHash ?? "unknown")}</span>} hint="its identity, together with slot and heights"/>
-      </div>
       <h2 className="story-h2">Coins in and out</h2>
       <TreasuryHistory fixedSlot={slot}/>
-      <LivePanel title={`Deposits into ${sc.title ?? `slot #${slot}`}`}><ActivityFeed kind="deposit" slot={slot} limit={8} paged/></LivePanel>
+      <LivePanel title={`Deposits into ${sc.title ?? `slot #${slot}`}`}><ActivityFeed kind="deposit" slot={slot} limit={12} paged withTreasury/></LivePanel>
       <WithdrawalVotes slot={slot}/>
       <WithdrawalOutcomes slot={slot}/>
-      <h2 className="story-h2">Making blocks</h2>
+      <h2 className="story-h2">Merged-mining commitments</h2>
+      <p className="section-lede">L1 records a commitment to a sidechain block hash. It does not see or check what is inside that block; sidechain nodes do. <Link className="text-link" href="/learn/merged-mining">How BMM works</Link></p>
       <BmmCommitments slot={slot}/>
       <BmmBids slot={slot}/>
       <GoDeeper summary="its full declaration">
@@ -101,15 +98,17 @@ export function SidechainStory({ slot }: { slot: number }) {
           <dt>Hash 1 (release archive)</dt><dd className="hash">{decl?.hash1 ?? "—"}</dd><dt>Hash 2 (git commit)</dt><dd className="hash">{decl?.hash2 ?? "—"}</dd>
           <dt>Declaration hash</dt><dd className="hash">{sc.descriptionHash ?? "—"}</dd>
         </dl>
-        <p>The two hashes are meant to identify the sidechain's software, but L1 does not enforce them. <Term id="declaration">More about declarations</Term>.</p>
+        <p>The declaration hash, together with the slot and heights, identifies this sidechain. The two other hashes are meant to identify its software, but L1 does not enforce them. <Term id="declaration">More about declarations</Term>.</p>
       </GoDeeper>
     </>}
 
     <h2 className="story-h2">Sidechains that have used this slot</h2>
     <LivePanel title={`Instances in slot #${slot}`} status={{ pending: instances.isPending, error: instances.isError && !history.size, empty: !history.size, emptyText: "No sidechain has been recorded in this slot." }}>
-      <ul className="plain-list">{[...history.values()].map((h, i) => <li key={i}><strong>{h.title ?? "Unnamed"}</strong>: proposed in block {String(h.proposal ?? "?")}, active from block {String(h.activation ?? "?")}{h.ended != null ? `, last seen active at block ${String(h.ended)}` : h.current ? ", active now" : ""}.</li>)}</ul>
+      <ul className="plain-list">{[...history.values()].map((h, i) => <li key={i}><strong>{h.title ?? "Unnamed"}</strong>: proposed in block {typeof h.proposal === "number" ? n(h.proposal) : "unknown"}, active from block {typeof h.activation === "number" ? n(h.activation) : "unknown"}{typeof h.ended === "number" ? `, last seen active at block ${n(h.ended)}` : h.current ? ", active now" : ""}.</li>)}</ul>
     </LivePanel>
-    <h2 className="story-h2">Everything recorded for {sc?.title ?? `slot #${slot}`}</h2>
-    <ActivityFeed slot={slot} limit={15} paged/>
+    <GoDeeper summary={`everything recorded for ${sc?.title ?? `slot #${slot}`}`}>
+      <p>Every event and change in this slot, newest block first, including the ones shown above.</p>
+      <ActivityFeed slot={slot} limit={30} paged/>
+    </GoDeeper>
   </main>;
 }

@@ -46,7 +46,7 @@ export function HowItWorks() {
       fact: sc?.description ? <>{name} describes itself as “{sc.description}”. We don&apos;t watch the sidechains themselves, so this step has no live number.</> : <>We don&apos;t watch the sidechains themselves, so this step has no live number.</> },
     { title: "Miners keep it moving", lesson: "merged-mining", lessonTitle: "Blind merged mining",
       body: <>Each L1 block can seal one new {name} block. Sidechain users pay the L1 miner to include it, and the miner never runs sidechain software: that is <strong>blind merged mining</strong>.</>,
-      fact: bmm ? <>{name} got a block in <strong>{n(bmm.present)} of the last {n(bmm.covered)}</strong> L1 blocks.</> : null },
+      fact: bmm ? <>L1 miners committed to a {name} block hash in <strong>{n(bmm.present)} of the last {n(bmm.covered)}</strong> L1 blocks.</> : null },
     { title: "Withdraw by miner vote", lesson: "withdrawals", lessonTitle: "Withdrawals by miner vote",
       body: <>To leave, the sidechain bundles withdrawals into one L1 payout. Miners vote on it block by block. Only with <strong>more than {n(params.withdrawalThreshold)} votes</strong> within {n(params.withdrawalMaxAge)} blocks do the coins leave the treasury.</>,
       fact: hasBundle ? <>{name}&apos;s withdrawal in vote has <strong>{n(votes)} votes</strong> so far.</> : loaded ? <>No {name} withdrawal is being voted on right now.</> : null },

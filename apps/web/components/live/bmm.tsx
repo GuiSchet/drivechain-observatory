@@ -46,10 +46,10 @@ export function BmmCommitments({ slot }: { slot?: number }) {
   const metrics = useQuery({ queryKey: ["protocol", "bmm", "metrics", query], queryFn: () => getJson<BmmMetrics>(`/api/v1/bmm?${query}`) });
   const rows = metrics.data?.slots ?? [];
   const dataset = metrics.data?.context.meta.dataset_id;
-  return <LivePanel title="Which sidechains got a block, block by block" quality={rows.length ? "observed" : null}
+  return <LivePanel title="BMM commitments, L1 block by L1 block" quality={rows.length ? "observed" : null}
     status={{ pending: metrics.isPending, error: metrics.isError && !rows.length, empty: !rows.length, emptyText: "No commitments have been observed yet." }}
     footer={<span className="legend"><i className="cell present"/> commitment (BMM Accept) <i className="cell observed_absent"/> none <i className="cell unknown_eligibility"/> not observed</span>}>
-    <p className="live-lede">The last 24 L1 blocks, oldest on the left. A lit cell means that L1 block committed to one block hash of that sidechain, so that sidechain block was "found". Whether the sidechain block itself is valid is checked by sidechain nodes, not by L1. Select a cell to see its proof.</p>
+    <p className="live-lede">The last 24 L1 blocks, oldest on the left. A lit cell means that L1 block committed to one block hash of that sidechain (BIP301 calls this "finding" the sidechain block). L1 only records the hash: whether that sidechain block exists and is valid is checked by sidechain nodes, not by L1. Select a cell to see its proof.</p>
     <div className="commit-grid">{rows.map(row => <div className="commit-row" key={row.slot}>
       <span className="commit-name"><Link href={`/sidechains/${row.slot}`}>{sidechainLabel(row.slot, names)}</Link><small>{n(row.present)} of {n(row.covered)}</small></span>
       <span className="commit-cells">{[...row.cells].reverse().map(cell => {

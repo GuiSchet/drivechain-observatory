@@ -15,7 +15,7 @@ try {
   browser=await chromium.launch({headless:true,executablePath:process.env.PULSE_BROWSER_EXECUTABLE});
   const page=await browser.newPage({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  const api=async path=>(await fetch('http://127.0.0.1:18080'+path)).json();
+  const api=async path=>(await fetch(`http://127.0.0.1:${process.env.PULSE_TEST_API_PORT??'18080'}`+path)).json();
   const body=async()=>await page.locator('body').innerText();
   const meta=await api('/api/v1/meta');
   const unit=meta.native_asset.symbol;
@@ -61,13 +61,25 @@ try {
   await page.goto(base+'/glossary#ctip');
   await page.getByRole('heading',{name:'CTIP (treasury output)'}).waitFor();
 
-  // Search reaches the block proof page, which explains itself.
+  // Live activity reads block by block, newest first, starting at the selected tip.
+  await page.goto(base+'/live');
+  await page.locator('.timeline-blocks .tl-tag',{hasText:'newest'}).waitFor();
+  const firstBlock=(await page.locator('.timeline-blocks .tl-head strong').first().textContent()).replace(/\D/g,'');
+  assert.equal(Number(firstBlock),(await api('/api/v1/blocks?limit=1')).blocks[0].height,'live starts at the newest block');
+
+  // Search reaches the block page: what happened first, its proof one click away.
   const tip=(await api('/api/v1/blocks?limit=1')).blocks[0];
   await page.goto(`${base}/search?q=${tip.height}`);
   await page.getByRole('link',{name:new RegExp(`Block ${tip.height.toLocaleString('en-US')}`)}).click();
-  await page.getByRole('heading',{name:'Header and membership'}).waitFor();
+  await page.getByRole('heading',{name:'What happened in this block'}).waitFor();
+  await page.getByText('Go deeper: how we know').click();
   await page.getByText('You are looking at a proof.').first().waitFor();
   assert(!(await body()).includes('Coinbase messages'),'block detail still lists coinbase messages');
+  // A proof opens with what the record says in words; the exact JSON sits behind it.
+  await page.getByRole('link',{name:'report'}).first().click();
+  await page.getByRole('heading',{name:'What it says'}).waitFor();
+  await page.getByRole('heading',{name:/^Enforcer report for /}).waitFor();
+  await page.getByText('Go deeper: the exact record').waitFor();
 
   // The about page shows the donation address and its QR code.
   await page.goto(base+'/about');
@@ -83,7 +95,8 @@ try {
   assert.equal(claude.origin+claude.pathname,'https://claude.ai/new');
   assert(claude.searchParams.get('q').includes('Withdrawals by miner vote')&&claude.searchParams.get('q').includes('/learn/withdrawals'),'prompt names the lesson');
   await page.goto(base+'/about');
-  await page.locator('.contact-line',{hasText:'Discord'}).getByText('guischet',{exact:true}).waitFor();
+  await page.locator('.about-section',{hasText:'About us'}).getByText('guischet',{exact:true}).waitFor();
+  assert(!(await page.locator('.site-footer').innerText()).includes('Discord'),'Discord appears only in About us');
 
   // Replaced technical views redirect to the page that now covers them.
   for(const [from,to] of [['/bmm','/learn/merged-mining'],['/explorer','/search'],['/about/data','/learn/how-we-know'],['/pegs','/learn/deposits']]){

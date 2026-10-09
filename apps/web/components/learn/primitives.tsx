@@ -65,7 +65,9 @@ export function CheckYourself({ question, choices }: { question: string; choices
   </fieldset>;
 }
 
-/** A labelled number with a short explanation underneath. */
-export function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
-  return <div className="stat"><span>{label}</span><strong>{value}</strong>{hint && <small>{hint}</small>}</div>;
+/** A labelled number with a short explanation underneath; `quality` and `proof` describe this value alone. */
+export function Stat({ label, value, hint, quality, proof }: { label: string; value: ReactNode; hint?: ReactNode; quality?: string | null; proof?: string }) {
+  return <div className="stat"><span>{label}</span><strong>{value}</strong>{hint && <small>{hint}</small>}
+    {(quality !== undefined || proof) && <div className="stat-meta">{quality !== undefined && <ConfidenceChip quality={quality}/>}{proof && <Link className="proof-link" href={proof}>proof</Link>}</div>}
+  </div>;
 }

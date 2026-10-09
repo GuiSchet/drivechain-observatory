@@ -2,7 +2,7 @@
 import { Section } from "@/components/learn/chapter-layout";
 import { Analogy, CheckYourself, GoDeeper, SpecNote, Term } from "@/components/learn/primitives";
 import { BmmDiagram, TreasuryDiagram, VoteDiagram } from "@/components/learn/diagrams";
-import { ActivationTimeline, DepositFeed, ParamsPanel, ProposalsNow, TreasuryBars, TreasuryHistory, WithdrawalOutcomes, WithdrawalVotes } from "@/components/live/money";
+import { ActivationTimeline, DepositFeed, DepositStory, ParamsPanel, ProposalsNow, TreasuryBars, TreasuryHistory, WithdrawalOutcomes, WithdrawalVotes } from "@/components/live/money";
 import { BmmBids, BmmCommitments, ConfirmedFees } from "@/components/live/bmm";
 import { ActivityFeed } from "@/components/live/activity";
 import { LivePanel } from "@/components/learn/primitives";
@@ -53,6 +53,7 @@ export function Deposits() {
     </Section>
     <TreasuryDiagram/>
     <SpecNote refs={["bip300M5", "spec300Treasury"]}>A deposit is valid if it has exactly one OP_DRIVECHAIN output, which becomes the new treasury output, and that output holds more coins than the old one. Deposits and withdrawals never create extra treasury outputs.</SpecNote>
+    <DepositStory/>
     <TreasuryBars/>
     <DepositFeed/>
     <TreasuryHistory/>

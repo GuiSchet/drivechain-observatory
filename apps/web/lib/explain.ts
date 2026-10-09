@@ -43,6 +43,12 @@ export function formatCoins(value: unknown, approx = false): string {
   return `${whole.toLocaleString("en-US")}${fraction ? "." + fraction : ""} ${whole === BigInt(1) && !fraction ? "coin" : "coins"}`;
 }
 
+/** Two amounts in whole coins, rounded only while rounding still shows the difference between them. */
+export function formatCoinPair(a: unknown, b: unknown): [string, string] {
+  const x = formatCoins(a, true), y = formatCoins(b, true);
+  return x === y ? [formatCoins(a), formatCoins(b)] : [x, y];
+}
+
 export function timeAgo(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return "time unknown";
   const then = Date.parse(iso);
@@ -91,7 +97,7 @@ export function outcomeOf(item: ProtocolItem): "Submitted" | "Succeeded" | "Fail
 export function describeActivity(item: ProtocolItem, names: SidechainNames, unit = "sats"): string {
   const d = object(item.data), who = sidechainLabel(item.slot, names);
   switch (item.kind) {
-    case "deposit": return `${formatSats(d.value_sats, unit)} deposited into ${who}.`;
+    case "deposit": return `${formatCoins(d.value_sats)} (${formatSats(d.value_sats, unit)}) deposited into ${who}.`;
     case "bundle_outcome": {
       const outcome = outcomeOf(item);
       if (outcome === "Submitted") return `A withdrawal bundle for ${who} was put up for a miner vote.`;
@@ -104,12 +110,16 @@ export function describeActivity(item: ProtocolItem, names: SidechainNames, unit
       return `${who} has a pending withdrawal with ${typeof votes === "number" ? votes.toLocaleString("en-US") : "an unknown number of"} votes.`;
     }
     case "ctip_snapshot":
-    case "ctip": return d.ctip === null ? `${who} has no treasury output yet.` : `${who}'s treasury holds ${formatSats(at(d, "ctip", "value_sats"), unit)}.`;
+    case "ctip": {
+      if (d.ctip === null) return `${who} has no treasury output yet.`;
+      const value = at(d, "ctip", "value_sats"), seq = at(d, "ctip", "sequence_number");
+      return `${who}'s treasury holds ${formatCoins(value)} (${formatSats(value, unit)})${typeof seq === "string" || typeof seq === "number" ? ` in output #${seq}` : ""}.`;
+    }
     case "bmm_commitment":
     case "slot_block": return d.bmm_commitment ? `The miner committed to a ${who} block (blind merged mining).` : `No merged-mining commitment for ${who} in this block.`;
     case "instance": {
-      const sc = object(d.sidechain ?? d);
-      return `${declarationOf(sc).title ?? who} is active in slot #${item.slot ?? "?"}.`;
+      const sc = object(d.sidechain ?? d), since = sc.activation_height;
+      return `${declarationOf(sc).title ?? who} is active in slot #${item.slot ?? "?"}${typeof since === "number" ? `, since ${blockNumber(since)}` : ""}.`;
     }
     case "proposal": return `${declarationOf(object(d.proposal)).title ?? "A sidechain"} is proposed for slot #${item.slot ?? "?"}.`;
     case "confirmed_bmm_fee": return d.fee_sats == null ? `A merged-mining payment for ${who} was confirmed; its fee is unknown.` : `A merged-mining payment of ${formatSats(d.fee_sats, unit)} for ${who} was confirmed.`;

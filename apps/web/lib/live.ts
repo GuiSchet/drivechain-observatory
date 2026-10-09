@@ -15,6 +15,12 @@ export function useStatus() {
   return useQuery({ queryKey: ["status"], queryFn: getStatus, refetchInterval: 5_000 });
 }
 
+/** Height ranges whose global transitions the monitor did not observe (subscription gaps), from /coverage. */
+export function useCoverageGaps(): [number, number][] {
+  const coverage = useQuery({ queryKey: ["protocol", "coverage"], queryFn: () => getJson<{ transition_gaps?: { gap_start_height?: number | null; gap_end_height?: number | null }[] }>("/api/v1/coverage") });
+  return (coverage.data?.transition_gaps ?? []).flatMap(g => typeof g.gap_start_height === "number" && typeof g.gap_end_height === "number" ? [[g.gap_start_height, g.gap_end_height] as [number, number]] : []);
+}
+
 export function useObservatory() {
   return useQuery({ queryKey: ["protocol", "observatory", ""], queryFn: () => getJson<Observatory>("/api/v1/observatory") });
 }
@@ -69,6 +75,15 @@ export function n(value: number | null | undefined): string {
 export function proofHref(item: ProtocolItem | undefined, dataset: string | undefined): string | undefined {
   const event = item?.evidence[0]?.event_id;
   return event && dataset ? `/datasets/${dataset}/events/${event}` : undefined;
+}
+
+/** The weakest quality among several separate readings: a total is only as certain as its least certain part. */
+export function weakestQuality(items: (ProtocolItem | undefined)[]): string | null {
+  if (!items.length || items.some(i => !i)) return null;
+  const qualities = items.map(i => i!.quality);
+  if (qualities.every(q => q === "observed")) return "observed";
+  if (qualities.every(q => q === "observed" || q === "tip_matched")) return "tip_matched";
+  return qualities.find(q => q !== "observed" && q !== "tip_matched") ?? null;
 }
 
 /** The latest official read of one snapshot kind (and slot), with its quality and evidence. */

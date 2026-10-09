@@ -42,14 +42,17 @@ export function QualitySummary() {
   const errors = useProtocolPage("protocol-messages", "limit=50");
   const q = object(coverage.data?.observation_quality), c = object(q.consistency);
   const matched = Number(c.tip_matched ?? 0), unknown = Number(c.unknown ?? 0), total = matched + unknown;
-  const gaps = (coverage.data?.transition_gaps ?? []) as unknown[];
+  // Each (re)subscription leaves a boundary; only one that spans heights hides chain changes.
+  const gaps = (coverage.data?.transition_gaps ?? []) as { gap_start_height?: number | null; gap_end_height?: number | null }[];
+  const skipped = gaps.filter(g => typeof g.gap_start_height === "number" && typeof g.gap_end_height === "number" && g.gap_end_height > g.gap_start_height);
   const errorCount = errors.data?.items.length ?? 0;
   return <LivePanel title="How good is the data?" status={{ pending: coverage.isPending, error: coverage.isError && !coverage.data }}>
     <div className="stat-grid">
       <Stat label={`Readings in the last ${String(q.window_hours ?? 24)} hours`} value={n(total)} hint={total ? `${n(matched)} at a stable tip, ${n(unknown)} unknown (${((unknown / total) * 100).toFixed(1)}%)` : undefined}/>
       <Stat label="Facts that could not be interpreted" value={errors.isPending ? "…" : errorCount >= 50 ? "50+" : String(errorCount)} hint="each one stops interpretation instead of being skipped"/>
       <Stat label="Conflicting records" value={String(q.import_conflicts ?? "Unknown")} hint="a changed record stops the import"/>
-      <Stat label="Gaps in the live event stream" value={n(gaps.length)} hint="moments the live subscription restarted; chain changes inside them are unknown"/>
+      <Stat label="Blocks missed by the live event stream" value={n(skipped.reduce((sum, g) => sum + g.gap_end_height! - g.gap_start_height!, 0))}
+        hint={`the live stream restarted ${n(gaps.length)} times; ${skipped.length ? `${n(skipped.length)} restarts skipped blocks, whose chain changes are unknown` : "no restart skipped a block"}. Per-block facts such as deposits are still filled in by a catch-up read.`}/>
     </div>
   </LivePanel>;
 }

@@ -33,8 +33,8 @@ export function ChapterLayout({ slug, children }: { slug: string; children: Reac
         <span className="lesson-time"><Clock size={14}/> {chapter.minutes} min read</span>
       </header>
       {children}
-      <AskAi chapter={chapter}/>
       {!!chapter.refs.length && <section className="lesson-refs"><h2>Read the source</h2><p>The rules in this lesson come from these documents and code:</p><RefLinks refs={chapter.refs}/></section>}
+      <AskAi chapter={chapter}/>
       <footer className="lesson-footer">
         <button className={done ? "done-button done" : "done-button"} onClick={() => setDone(slug, !done)} aria-pressed={done}><Check size={16}/>{done ? "Marked as understood" : "I understand this concept"}</button>
         <nav className="lesson-nav" aria-label="Lesson navigation">

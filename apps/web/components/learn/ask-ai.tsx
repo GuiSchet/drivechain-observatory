@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ExternalLink, Sparkles } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import type { ChapterMeta } from "@/content/chapters";
 import { references } from "@/content/references";
 
@@ -26,11 +26,10 @@ export function AskAi({ chapter }: { chapter: ChapterMeta }) {
   const [origin, setOrigin] = useState("");
   useEffect(() => setOrigin(window.location.origin), []);
   const prompt = askAiPrompt(chapter, `${origin}/learn/${chapter.slug}`);
-  return <section className="ask-ai" aria-labelledby="ask-ai-title">
-    <h2 id="ask-ai-title"><Sparkles size={18}/> Still curious? Ask an AI to explain it</h2>
-    <p>Opens your assistant with a question about this concept and its sources already written.</p>
+  return <details className="ask-ai">
+    <summary>Ask an AI assistant about this concept</summary>
+    <p>Opens your assistant with a question about this concept and its sources already written. AI answers can be wrong{chapter.refs.length ? ": check them against the sources above" : ""}. Your question goes to the assistant you choose, not to us.</p>
     <div className="ask-ai-buttons">{assistants.map(([name, url]) =>
       <a key={name} href={url(prompt)} target="_blank" rel="noopener noreferrer">Ask {name} <ExternalLink size={13}/></a>)}</div>
-    <p className="ask-ai-note">AI answers can be wrong. Check them against the sources below. Your question goes to the assistant you choose, not to us.</p>
-  </section>;
+  </details>;
 }

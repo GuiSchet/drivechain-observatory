@@ -1,11 +1,16 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { object, at } from "@/lib/protocol";
-import { declarationOf, formatCoins, formatSats, sats, short, sidechainLabel, timeAgo } from "@/lib/explain";
-import { activeSidechains, n, proofHref, snapshotOf, useNetworkParams, useObservatory, useProtocolPage, useSidechainNames } from "@/lib/live";
+import { useQuery } from "@tanstack/react-query";
+import { getJson } from "@/lib/api";
+import { apiQuery, object, at } from "@/lib/protocol";
+import { groupActivity, readingTip } from "@/lib/activity";
+import type { ProtocolItem, ProtocolPage } from "@/lib/types";
+import { blockNumber, declarationOf, depositAddress, formatCoinPair, formatCoins, formatSats, sats, short, sidechainLabel, timeAgo } from "@/lib/explain";
+import { activeSidechains, n, proofHref, snapshotOf, useCoverageGaps, useNetworkParams, useObservatory, useProtocolPage, useSidechainNames, weakestQuality } from "@/lib/live";
 import { useUnit } from "@/lib/unit";
-import { LivePanel, Stat } from "@/components/learn/primitives";
+import { ConfidenceChip, GoDeeper, LivePanel, Stat } from "@/components/learn/primitives";
+import { ReadingsChart } from "./readings-chart";
 import { ActivityFeed } from "./activity";
 import { useNow } from "./basics";
 
@@ -93,7 +98,8 @@ export function TreasuryBars() {
   }).sort((a, b) => (b.value ?? BigInt(-1)) > (a.value ?? BigInt(-1)) ? 1 : -1);
   const top = rows.reduce((m, r) => r.value && r.value > m ? r.value : m, BigInt(1));
   const dataset = observatory.data?.context.meta.dataset_id;
-  return <LivePanel title="What each treasury holds" quality={snapshotOf(observatory.data, "ctip")?.quality ?? null}
+  const reads = rows.map(r => snapshotOf(observatory.data, "ctip", r.slot));
+  return <LivePanel title="What each treasury holds" quality={observatory.data ? weakestQuality(reads) : undefined}
     status={{ pending: observatory.isPending, error: observatory.isError && !observatory.data, empty: !rows.length }}
     footer="Each value is the latest separate reading of that sidechain's treasury output. Bars are to scale with the largest treasury.">
     <ol className="bars">{rows.map(r => {
@@ -113,6 +119,8 @@ export function TreasuryHistory({ fixedSlot }: { fixedSlot?: number }) {
   const [picked, setPicked] = useState<number>();
   const slot = fixedSlot ?? picked ?? funded[0]?.slot;
   const history = useProtocolPage("ctip/history", `slot=${slot}&limit=100`, slot != null);
+  const changes = useProtocolPage("activity", `kind=ctip&slot=${slot}&changes=true&order=block&limit=200`, slot != null);
+  const chartReadings = slot == null ? [] : changes.data?.items ?? [], gaps = useCoverageGaps();
   const dataset = history.data?.context.meta.dataset_id;
   // The monitor re-reads the treasury at every tip; keep one row per treasury output.
   const outputs = new Map<string, { value: unknown; txid: unknown; first?: string | null; last?: string | null; proof?: string }>();
@@ -126,17 +134,25 @@ export function TreasuryHistory({ fixedSlot }: { fixedSlot?: number }) {
   const rows = [...outputs].sort(([a], [b]) => Number(b) - Number(a));
   return <LivePanel title="A treasury, output by output" status={{ pending: observatory.isPending || (slot != null && history.isPending), error: history.isError && !rows.length, empty: fixedSlot == null ? !funded.length : !rows.length, emptyText: fixedSlot == null ? "No sidechain has a treasury output yet." : "No treasury output has been read for this sidechain yet." }}>
     {fixedSlot == null && <label className="picker">Sidechain <select value={slot ?? ""} onChange={e => setPicked(Number(e.target.value))}>{funded.map(s => <option key={s.slot} value={s.slot}>{s.title ?? `#${s.slot}`} (#{s.slot})</option>)}</select></label>}
-    <p className="live-lede">Every deposit or withdrawal replaces the treasury output with a new one, and the output number goes up by one. These are the outputs the monitor has read so far, newest first.</p>
-    <ol className="treasury-steps">{rows.map(([seq, r]) => <li key={seq}><span className="seq">#{seq}</span>
-      <span><strong>{seq === "none" ? "No treasury output" : formatSats(r.value, unit)}</strong><small>{typeof r.txid === "string" ? `created by transaction ${short(r.txid)} · ` : ""}first read {timeAgo(r.first, now)}, last read {timeAgo(r.last, now)}</small></span>
+    <p className="live-lede">Every deposit or withdrawal replaces the treasury output with a new one, and the output number goes up by one. These are the outputs the monitor has read so far.</p>
+    <ReadingsChart label="Treasury value at each reading" gaps={gaps} yFormat={y => formatCoins(BigInt(Math.round(y * 1e8)).toString(), true)}
+      points={chartReadings.map(i => {
+        const c = object(object(i.data).ctip), v = sats(c.value_sats), tip = readingTip(i);
+        return v === undefined || tip === undefined ? [] : [{ x: tip, y: Number(v) / 1e8, href: i.evidence[0] && dataset ? `/datasets/${dataset}/events/${i.evidence[0].event_id}` : undefined,
+          label: <>Output #{String(c.sequence_number ?? "?")}: <strong>{formatSats(c.value_sats, unit)}</strong>, first read at tip {n(tip)}</> }];
+      }).flat()}/>
+    <GoDeeper summary="every treasury output, newest first">
+    <ol className="treasury-steps">{rows.map(([seq, r]) => <li key={seq}><span className="seq">{seq === "none" ? "—" : `#${seq}`}</span>
+      <span><strong>{seq === "none" ? "No treasury output yet" : formatSats(r.value, unit)}</strong><small>{typeof r.txid === "string" ? `created by transaction ${short(r.txid)} · ` : ""}first read {timeAgo(r.first, now)}, last read {timeAgo(r.last, now)}</small></span>
       {r.proof && <Link href={r.proof}>proof</Link>}</li>)}</ol>
+    </GoDeeper>
     {rows.length === 1 && <p className="live-note">Only one output has been read for this sidechain so far. The next deposit or withdrawal will add a new row.</p>}
   </LivePanel>;
 }
 
 export function DepositFeed() {
   return <LivePanel title="Latest deposits">
-    <ActivityFeed kind="deposit" limit={6}/>
+    <ActivityFeed kind="deposit" limit={10} withTreasury/>
   </LivePanel>;
 }
 
@@ -147,7 +163,9 @@ export function WithdrawalVotes({ slot }: { slot?: number }) {
   const pending = (bundles.data?.items ?? []).filter(i => i.kind === "bundle");
   const dataset = bundles.data?.context.meta.dataset_id;
   const complete = object(observatory.data?.state).bundle_complete;
-  return <LivePanel title="Withdrawals being voted on" quality={pending[0]?.quality ?? null}
+  // The panel is as certain as the readings behind it, including the ones that found nothing pending.
+  const reads = activeSidechains(observatory.data).filter(s => slot == null || s.slot === slot).map(s => snapshotOf(observatory.data, "withdrawal_bundle_proposals", s.slot));
+  return <LivePanel title="Withdrawals being voted on" quality={observatory.data ? weakestQuality(reads) : undefined}
     status={{ pending: bundles.isPending, error: bundles.isError && !pending.length, empty: !pending.length,
       emptyText: <p>{Array.isArray(complete) && complete.length ? "No withdrawal bundle is being voted on right now." : "No pending withdrawal bundle appears in the latest readings."} When a sidechain proposes one, it will appear here with its votes.</p> }}>
     <div className="vote-cards">{pending.map(item => {
@@ -158,7 +176,8 @@ export function WithdrawalVotes({ slot }: { slot?: number }) {
       const treasury = object(object(object(observatory.data?.state).treasury)[String(item.slot)]);
       return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(typeof b.m6id === "string" ? b.m6id : "unknown")} · proposed in block ${n(height)}`}
         votes={votes} threshold={params.withdrawalThreshold} age={age} maxAge={params.withdrawalMaxAge}
-        footer={<p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the proof →</Link>}</p>}/>;
+        footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the proof →</Link>}</p>
+          <VoteHistory item={item} threshold={params.withdrawalThreshold}/></>}/>;
     })}</div>
   </LivePanel>;
 }
@@ -167,4 +186,61 @@ export function WithdrawalOutcomes({ slot }: { slot?: number }) {
   return <LivePanel title="Withdrawal history">
     <ActivityFeed kind="bundle_outcome" slot={slot} limit={6}/>
   </LivePanel>;
+}
+
+/**
+ * The newest deposit whose new treasury output the monitor also read, told step by step.
+ * Each step names its own source: the deposit is observed in a block; the treasury after it is a separate reading.
+ */
+export function DepositStory({ slot, compact = false }: { slot?: number; compact?: boolean }) {
+  const names = useSidechainNames(), unit = useUnit(), now = useNow(30_000);
+  const query = apiQuery({ kind: "deposit,ctip", slot, changes: "true", order: "block", limit: 60 });
+  const page = useQuery({ queryKey: ["protocol", "activity", "deposit-story", query], queryFn: () => getJson<ProtocolPage>(`/api/v1/activity?${query}`) });
+  const items = page.data?.items ?? [], dataset = page.data?.context.meta.dataset_id;
+  const story = groupActivity(items).find(e => e.type === "item" && e.treasury);
+  const deposit = story?.type === "item" ? story.item : undefined, change = story?.type === "item" ? story.treasury : undefined;
+  const d = object(deposit?.data), txid = at(deposit?.data, "outpoint", "txid"), address = depositAddress(d.address);
+  const who = deposit ? sidechainLabel(deposit.slot, names) : "";
+  const seq = change?.sequence != null ? Number(change.sequence) : undefined;
+  const [before, after] = change ? formatCoinPair(change.before.toString(), change.after.toString()) : [];
+  const tip = change ? readingTip(change.reading) : undefined;
+  return <LivePanel title="One real deposit, step by step"
+    status={{ pending: page.isPending, error: page.isError && !items.length, empty: !deposit,
+      emptyText: "No recent deposit has a matching treasury reading yet. Deposits from before the monitor started reading treasuries show only the amount." }}>
+    {deposit && change && <ol className="story-steps deposit-story">
+      <li><span className="story-num">1</span><div>
+        <strong>{formatCoins(d.value_sats)} sent to {who}</strong>
+        <p>In {blockNumber(deposit.height)} ({timeAgo(deposit.block_time ?? deposit.observed_at, now)}), transaction <span className="hash">{short(typeof txid === "string" ? txid : "unknown")}</span> deposited {formatSats(d.value_sats, unit)}{address ? <> for the sidechain address <span className="hash">{short(address)}</span></> : null}.</p>
+        <div className="stat-meta"><ConfidenceChip quality={deposit.quality}/>{proofHref(deposit, dataset) && <Link className="proof-link" href={proofHref(deposit, dataset)!}>proof</Link>}</div>
+      </div></li>
+      <li><span className="story-num">2</span><div>
+        <strong>The treasury is replaced: {before} → {after}</strong>
+        <p>The same transaction spent the old treasury output{seq != null && seq > 0 ? <> (#{seq - 1})</> : null} and created a new one{seq != null ? <> (#{seq})</> : null}. The new output holds the old balance plus the deposit: that difference is the amount.</p>
+      </div></li>
+      <li><span className="story-num">3</span><div>
+        <strong>Our monitor read the new treasury</strong>
+        <p>At tip {blockNumber(tip)}, a separate reading found {who}&apos;s treasury output {seq != null ? `#${seq}` : ""} with {formatSats(change.after.toString(), unit)}, created by that same transaction.</p>
+        <div className="stat-meta"><ConfidenceChip quality={change.reading.quality}/>{proofHref(change.reading, dataset) && <Link className="proof-link" href={proofHref(change.reading, dataset)!}>proof</Link>}</div>
+      </div></li>
+      {!compact && <li><span className="story-num">4</span><div>
+        <strong>The sidechain credits the coins</strong>
+        <p>{who.replace(/ \(#\d+\)$/, "")}&apos;s own nodes see the deposit and credit the address. That happens on the sidechain, which we don&apos;t watch, so there is no proof for this step here.</p>
+      </div></li>}
+    </ol>}
+    <p className="live-note"><Link className="text-link" href="/learn/deposits">How deposits work</Link> · <Link className="text-link" href="/live?kind=deposit">all deposits</Link></p>
+  </LivePanel>;
+}
+
+/** How one pending bundle's vote count changed between readings; nothing is inferred between them. */
+function VoteHistory({ item, threshold }: { item: ProtocolItem; threshold?: number }) {
+  const page = useProtocolPage("activity", `kind=bundle&slot=${item.slot}&changes=true&order=block&limit=200`, item.slot != null);
+  const gaps = useCoverageGaps(), dataset = page.data?.context.meta.dataset_id;
+  const points = (page.data?.items ?? []).filter(i => i.entity_id === item.entity_id).flatMap(i => {
+    const votes = at(i.data, "bundle", "vote_count"), tip = readingTip(i);
+    return typeof votes === "number" && tip !== undefined ? [{ x: tip, y: votes, href: i.evidence[0] && dataset ? `/datasets/${dataset}/events/${i.evidence[0].event_id}` : undefined,
+      label: <><strong>{n(votes)} votes</strong> read at tip {n(tip)}</> }] : [];
+  });
+  if (points.length < 2) return null;
+  return <ReadingsChart label="Votes at each reading of this withdrawal" points={points} gaps={gaps} zero={false} yFormat={y => n(Math.round(y))}
+    note={<>Votes at each reading, from {n(points[points.length - 1].y)} to {n(points[0].y)}; the axis shows only that range{threshold != null ? ` (it needs more than ${n(threshold)} to pass)` : ""}.</>}/>;
 }

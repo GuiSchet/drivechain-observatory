@@ -1,6 +1,6 @@
 import Link from "next/link";
 import QRCode from "qrcode";
-import { CodeXml, ExternalLink, FolderGit2, HeartHandshake, MessageCircle, MessageSquareWarning, Star } from "lucide-react";
+import { CodeXml, ExternalLink, FolderGit2, HeartHandshake, MessageSquareWarning, Star } from "lucide-react";
 import { project } from "@/content/project";
 import { ISSUES_URL } from "@/content/references";
 import { apiBaseUrl } from "@/lib/api";
@@ -21,8 +21,7 @@ export default async function Page() {
 
     <section className="about-section">
       <h2>About us</h2>
-      <p>The Observatory is built and maintained by <a className="text-link" href={project.maintainer.href} target="_blank" rel="noopener noreferrer">{project.maintainer.name}</a> as an independent, open-source project. It runs its own eCash Betanet node and the official BIP300/301 enforcer, records everything they report, and turns it into lessons anyone can follow.</p>
-      <div className="contact-line"><MessageCircle size={18}/><span>Questions, ideas or want to help? Reach me on <strong>Discord</strong>:</span><CopyText value={project.maintainer.discord} label="Copy username" className="contact-copy"/></div>
+      <p>The Observatory is built and maintained by <a className="text-link" href={project.maintainer.href} target="_blank" rel="noopener noreferrer">{project.maintainer.name}</a> as an independent, open-source project. It runs its own eCash Betanet node and the official BIP300/301 enforcer, records everything they report, and turns it into lessons anyone can follow. For questions or ideas, you can find me on Discord as <strong>{project.maintainer.discord}</strong>.</p>
       <p>It is made possible by the support of <a className="text-link" href="https://libreriadesatoshi.com/" target="_blank" rel="noopener noreferrer">Librería de Satoshi</a> and <a className="text-link" href="https://b4os.dev/" target="_blank" rel="noopener noreferrer">B4OS</a>.</p>
     </section>
 
