@@ -650,6 +650,8 @@ pub async fn evidence(
         fact_sha256: row.try_get("fact_hash")?,
         envelope_hex: row.try_get("envelope_hex")?,
         payload_json: row.try_get("payload_json")?,
+        raw_block_omitted: row.try_get::<String, _>("source")? == "node"
+            && row.try_get::<String, _>("kind")? == "mainchain_block",
         interpretation_error: match row.try_get::<Option<String>,_>("interpretation_error")? {
             // The importer's error, then the chain's, then the protocol facts'.
             Some(e)=>Some(e),None=>sqlx::query_scalar("SELECT coalesce(

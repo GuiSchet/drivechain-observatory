@@ -800,6 +800,13 @@ async fn sync_dataset_locked(
     Ok(())
 }
 
+/// Node `mainchain_block` events carry the full raw block (megabytes), but the
+/// Observatory only reads their header. The body is dropped at import; both
+/// source hashes are kept verbatim and still cover the full block, so conflict
+/// detection and the content audit are unchanged.
+const RAW_BLOCK_EVENT: &str = "source = 'node' AND kind = 'mainchain_block'";
+const RAW_BLOCK_PATH: &str = "{monitor_event,Node,event,MainchainBlock,raw_block}";
+
 /// Imports the next contiguous page of source events and reports whether it was
 /// full, i.e. limited by rows or bytes, so more may follow.
 async fn sync_event_page(
@@ -812,16 +819,18 @@ async fn sync_event_page(
     let cursor = cursor(destination, dataset_id, "source_events").await?;
     // Sizes come from TOAST headers (no detoasting), so bounding the page is
     // cheap. The first row is always taken, however large, to keep progressing.
-    let (upper, rows, bytes_limited): (Option<i64>, i64, bool) = sqlx::query_as(
+    // A node raw block is imported without its body, so it costs a header.
+    let (upper, rows, bytes_limited): (Option<i64>, i64, bool) = sqlx::query_as(&format!(
         "WITH page AS ( \
-             SELECT id, octet_length(envelope)::bigint + pg_column_size(payload)::bigint AS size \
+             SELECT id, CASE WHEN {RAW_BLOCK_EVENT} THEN 1024 \
+                        ELSE octet_length(envelope)::bigint + pg_column_size(payload)::bigint END AS size \
                FROM event WHERE dataset_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3), \
          running AS (SELECT id, size, sum(size) OVER (ORDER BY id) AS total FROM page) \
          SELECT max(id) FILTER (WHERE total <= $4 OR id = (SELECT min(id) FROM page)), \
                 count(*) FILTER (WHERE total <= $4 OR id = (SELECT min(id) FROM page)), \
                 coalesce(bool_or(total > $4), false) \
-           FROM running",
-    )
+           FROM running"
+    ))
     .bind(dataset_id)
     .bind(cursor)
     .bind(batch_size)
@@ -831,14 +840,16 @@ async fn sync_event_page(
     let Some(upper) = upper else {
         return Ok(false);
     };
-    let events = sqlx::query_as::<_, SourceEvent>(
+    let events = sqlx::query_as::<_, SourceEvent>(&format!(
         "SELECT id, dataset_id, event_contract_version, observed_at, ingested_at, \
                 source, kind, sidechain, sidechain_instance_id, block_hash, height, \
-                envelope, envelope_sha256, fact_sha256, payload \
+                CASE WHEN {RAW_BLOCK_EVENT} THEN '\\x'::bytea ELSE envelope END AS envelope, \
+                envelope_sha256, fact_sha256, \
+                CASE WHEN {RAW_BLOCK_EVENT} THEN payload #- '{RAW_BLOCK_PATH}' ELSE payload END AS payload \
            FROM event \
           WHERE dataset_id = $1 AND id > $2 AND id <= $3 \
-          ORDER BY id ASC",
-    )
+          ORDER BY id ASC"
+    ))
     .bind(dataset_id)
     .bind(cursor)
     .bind(upper)
@@ -1355,16 +1366,21 @@ async fn check_continuity(
         }
     }
     check_import_order(source, destination, dataset).await?;
-    let witness: Option<(i64,Vec<u8>)> = sqlx::query_as("SELECT source_event_id,envelope FROM ingest.source_events WHERE dataset_id=$1 ORDER BY source_event_id DESC LIMIT 1")
+    // Hashes, not bytes: imported raw blocks have no body, and the source
+    // hashes still identify the exact source row.
+    type Witness = (Option<Vec<u8>>, Option<Vec<u8>>);
+    type WitnessRow = (i64, Option<Vec<u8>>, Option<Vec<u8>>);
+    let witness: Option<WitnessRow> = sqlx::query_as("SELECT source_event_id,envelope_sha256,fact_sha256 FROM ingest.source_events WHERE dataset_id=$1 ORDER BY source_event_id DESC LIMIT 1")
         .bind(dataset).fetch_optional(&mut *destination).await?;
-    if let Some((id, envelope)) = witness {
-        let actual: Option<Vec<u8>> =
-            sqlx::query_scalar("SELECT envelope FROM event WHERE dataset_id=$1 AND id=$2")
-                .bind(dataset)
-                .bind(id)
-                .fetch_optional(source)
-                .await?;
-        if actual.as_ref() != Some(&envelope) {
+    if let Some((id, envelope_sha256, fact_sha256)) = witness {
+        let actual: Option<Witness> = sqlx::query_as(
+            "SELECT envelope_sha256,fact_sha256 FROM event WHERE dataset_id=$1 AND id=$2",
+        )
+        .bind(dataset)
+        .bind(id)
+        .fetch_optional(source)
+        .await?;
+        if actual != Some((envelope_sha256, fact_sha256)) {
             return Err(incompatible(
                 "source event witness changed; reconcile dataset",
             ));
@@ -1602,14 +1618,15 @@ async fn repair_fact_hashes(
     dataset: Uuid,
     limit: i64,
 ) -> Result<()> {
-    let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as("SELECT source_event_id,envelope FROM ingest.source_events WHERE dataset_id=$1 AND fact_sha256 IS NULL ORDER BY source_event_id LIMIT $2")
+    // Envelope hashes, not bytes: an imported raw block has no body.
+    let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as("SELECT source_event_id,coalesce(envelope_sha256,sha256(envelope)) FROM ingest.source_events WHERE dataset_id=$1 AND fact_sha256 IS NULL ORDER BY source_event_id LIMIT $2")
         .bind(dataset).bind(limit).fetch_all(&mut *destination).await?;
     if rows.is_empty() {
         return Ok(());
     }
     let ids = rows.iter().map(|row| row.0).collect::<Vec<_>>();
     let facts: Vec<(i64, Vec<u8>, Vec<u8>)> = sqlx::query_as(
-        "SELECT id,envelope,fact_sha256 FROM event WHERE dataset_id=$1 AND id=ANY($2)",
+        "SELECT id,coalesce(envelope_sha256,sha256(envelope)),fact_sha256 FROM event WHERE dataset_id=$1 AND id=ANY($2)",
     )
     .bind(dataset)
     .bind(ids)
