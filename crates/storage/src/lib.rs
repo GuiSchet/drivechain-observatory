@@ -371,9 +371,10 @@ async fn status_snapshot(
         cursors.push(StreamProgress {
             stream: stream.to_owned(),
             imported_through: cursor.to_string(),
+            // Stored at cycle end; the cursor already proves rows up to itself.
             source_high_water: row
                 .try_get::<Option<i64>, _>(column)?
-                .map(|v| v.to_string()),
+                .map(|v| v.max(cursor).to_string()),
         });
     }
     Ok(StatusResponse {
