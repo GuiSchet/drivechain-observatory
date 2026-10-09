@@ -107,11 +107,11 @@ export function TreasuryBars() {
   </LivePanel>;
 }
 
-export function TreasuryHistory() {
+export function TreasuryHistory({ fixedSlot }: { fixedSlot?: number }) {
   const observatory = useObservatory(), unit = useUnit(), now = useNow(30_000);
   const funded = activeSidechains(observatory.data).filter(s => object(object(observatory.data?.state).treasury)[String(s.slot)]);
   const [picked, setPicked] = useState<number>();
-  const slot = picked ?? funded[0]?.slot;
+  const slot = fixedSlot ?? picked ?? funded[0]?.slot;
   const history = useProtocolPage("ctip/history", `slot=${slot}&limit=100`, slot != null);
   const dataset = history.data?.context.meta.dataset_id;
   // The monitor re-reads the treasury at every tip; keep one row per treasury output.
@@ -124,8 +124,8 @@ export function TreasuryHistory() {
     else if (first && (!row.first || first < row.first)) row.first = first;
   }
   const rows = [...outputs].sort(([a], [b]) => Number(b) - Number(a));
-  return <LivePanel title="A treasury, output by output" status={{ pending: observatory.isPending || (slot != null && history.isPending), error: history.isError && !rows.length, empty: !funded.length, emptyText: "No sidechain has a treasury output yet." }}>
-    <label className="picker">Sidechain <select value={slot ?? ""} onChange={e => setPicked(Number(e.target.value))}>{funded.map(s => <option key={s.slot} value={s.slot}>{s.title ?? `#${s.slot}`} (#{s.slot})</option>)}</select></label>
+  return <LivePanel title="A treasury, output by output" status={{ pending: observatory.isPending || (slot != null && history.isPending), error: history.isError && !rows.length, empty: fixedSlot == null ? !funded.length : !rows.length, emptyText: fixedSlot == null ? "No sidechain has a treasury output yet." : "No treasury output has been read for this sidechain yet." }}>
+    {fixedSlot == null && <label className="picker">Sidechain <select value={slot ?? ""} onChange={e => setPicked(Number(e.target.value))}>{funded.map(s => <option key={s.slot} value={s.slot}>{s.title ?? `#${s.slot}`} (#{s.slot})</option>)}</select></label>}
     <p className="live-lede">Every deposit or withdrawal replaces the treasury output with a new one, and the output number goes up by one. These are the outputs the monitor has read so far, newest first.</p>
     <ol className="treasury-steps">{rows.map(([seq, r]) => <li key={seq}><span className="seq">#{seq}</span>
       <span><strong>{seq === "none" ? "No treasury output" : formatSats(r.value, unit)}</strong><small>{typeof r.txid === "string" ? `created by transaction ${short(r.txid)} · ` : ""}first read {timeAgo(r.first, now)}, last read {timeAgo(r.last, now)}</small></span>
@@ -141,9 +141,9 @@ export function DepositFeed() {
 }
 
 /** Pending withdrawal bundles as the enforcer reports them, against the observed thresholds. */
-export function WithdrawalVotes() {
+export function WithdrawalVotes({ slot }: { slot?: number }) {
   const observatory = useObservatory(), { params } = useNetworkParams(), names = useSidechainNames(), unit = useUnit();
-  const bundles = useProtocolPage("withdrawal-bundles", "limit=50");
+  const bundles = useProtocolPage("withdrawal-bundles", slot == null ? "limit=50" : `slot=${slot}&limit=50`);
   const pending = (bundles.data?.items ?? []).filter(i => i.kind === "bundle");
   const dataset = bundles.data?.context.meta.dataset_id;
   const complete = object(observatory.data?.state).bundle_complete;
@@ -163,8 +163,8 @@ export function WithdrawalVotes() {
   </LivePanel>;
 }
 
-export function WithdrawalOutcomes() {
+export function WithdrawalOutcomes({ slot }: { slot?: number }) {
   return <LivePanel title="Withdrawal history">
-    <ActivityFeed kind="bundle_outcome" limit={6}/>
+    <ActivityFeed kind="bundle_outcome" slot={slot} limit={6}/>
   </LivePanel>;
 }

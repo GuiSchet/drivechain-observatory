@@ -23,11 +23,11 @@ const auctionState: Record<string, string> = {
   branch_unresolved: "The chain branch is unclear right now, so these bids may not be current.",
 };
 
-export function BmmBids() {
+export function BmmBids({ slot }: { slot?: number }) {
   const auctions = useQuery({ queryKey: ["bmm"], queryFn: getAuctions, refetchInterval: 5_000 });
   const names = useSidechainNames(), unit = useUnit(), now = useNow(2_000);
   const a = auctions.data;
-  const bids = [...(a?.requests ?? [])].sort((x, y) => BigInt(y.bid_sats) > BigInt(x.bid_sats) ? 1 : -1);
+  const bids = [...(a?.requests ?? [])].filter(b => slot == null || b.slot === slot).sort((x, y) => BigInt(y.bid_sats) > BigInt(x.bid_sats) ? 1 : -1);
   return <LivePanel title="Open bids for the next block" quality={a?.state === "available" ? "tip_matched" : a ? "unknown" : null} proof={a?.evidence_url ?? undefined}
     status={{ pending: auctions.isPending, error: auctions.isError && !a }}>
     <p className="live-lede">{a ? auctionState[a.state] ?? a.state.replaceAll("_", " ") : null} {a?.observed_at && <>Sampled {timeAgo(a.observed_at, now)}.</>}</p>
@@ -40,9 +40,10 @@ export function BmmBids() {
 
 const cellText: Record<string, string> = { present: "commitment in this block", observed_absent: "no commitment in this block", unknown_eligibility: "not observed" };
 
-export function BmmCommitments() {
+export function BmmCommitments({ slot }: { slot?: number }) {
   const names = useSidechainNames();
-  const metrics = useQuery({ queryKey: ["protocol", "bmm", "metrics", "lesson"], queryFn: () => getJson<BmmMetrics>("/api/v1/bmm?window_blocks=24") });
+  const query = slot == null ? "window_blocks=24" : `window_blocks=24&slot=${slot}`;
+  const metrics = useQuery({ queryKey: ["protocol", "bmm", "metrics", query], queryFn: () => getJson<BmmMetrics>(`/api/v1/bmm?${query}`) });
   const rows = metrics.data?.slots ?? [];
   const dataset = metrics.data?.context.meta.dataset_id;
   return <LivePanel title="Which sidechains got a block, block by block" quality={rows.length ? "observed" : null}

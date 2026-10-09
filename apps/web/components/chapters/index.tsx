@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ChapterLayout } from "@/components/learn/chapter-layout";
 import { Blocks, Slots, WhatIsADrivechain } from "./basics";
 import { CreatingASidechain, Deposits, MergedMining, Withdrawals } from "./money";
+import { HowWeKnow } from "./trust";
 
 const lessons: Record<string, ComponentType> = {
   "what-is-a-drivechain": WhatIsADrivechain,
@@ -13,6 +14,7 @@ const lessons: Record<string, ComponentType> = {
   deposits: Deposits,
   withdrawals: Withdrawals,
   "merged-mining": MergedMining,
+  "how-we-know": HowWeKnow,
 };
 
 export function Lesson({ slug }: { slug: string }) {

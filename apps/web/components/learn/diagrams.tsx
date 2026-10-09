@@ -94,3 +94,17 @@ export function BmmDiagram() {
     <figcaption>The miner never looks inside the sidechain block; that is why it is called "blind".</figcaption>
   </figure>;
 }
+
+export function PipelineDiagram() {
+  const steps = [["Betanet node", "blocks, headers"], ["Enforcer", "BIP300/301 API"], ["Monitor", "records readings"], ["Observatory", "verified copy"], ["This site", "explains it"]];
+  return <figure className="diagram">
+    <svg viewBox="0 0 680 120" role="img" aria-labelledby="pd-title">
+      <title id="pd-title">From the network to this page: node and enforcer, monitor, Observatory, this site</title>
+      <defs><marker id="pd-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="currentColor"/></marker></defs>
+      {steps.map(([name, what], i) => { const x = 8 + i * 136; return <g key={name} className={i === 4 ? "bd-block" : "bd-actor"}>
+        <rect x={x} y="24" width="116" height="72" rx="12"/><text x={x + 58} y="54" textAnchor="middle" className="dd-strong">{name}</text><text x={x + 58} y="76" textAnchor="middle" className="dd-small">{what}</text>
+        {i < 4 && <path className="bd-flow" d={`M${x + 117} 60 h16`} markerEnd="url(#pd-arrow)"/>}</g>; })}
+    </svg>
+    <figcaption>Nothing on this site queries the network directly: it reads the Observatory's copy of what the monitor recorded.</figcaption>
+  </figure>;
+}
