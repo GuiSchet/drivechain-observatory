@@ -69,6 +69,12 @@ try {
   await page.getByText('You are looking at a proof.').first().waitFor();
   assert(!(await body()).includes('Coinbase messages'),'block detail still lists coinbase messages');
 
+  // The about page shows the donation address and its QR code.
+  await page.goto(base+'/about');
+  await page.getByRole('heading',{name:'Help the project'}).waitFor();
+  await page.getByText('bc1qkh8xcznxzd2l3useajnz22pwsdtthwhp56kt6m',{exact:true}).waitFor();
+  assert.equal(await page.locator('.donate-qr svg').count(),1,'the donation QR code must render');
+
   // Replaced technical views redirect to the page that now covers them.
   for(const [from,to] of [['/bmm','/learn/merged-mining'],['/explorer','/search'],['/about/data','/learn/how-we-know'],['/pegs','/learn/deposits']]){
     await page.goto(base+from);

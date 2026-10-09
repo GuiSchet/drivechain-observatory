@@ -28,6 +28,9 @@ Status: ✅ verified · ⚠️ verified with a caveat stated in the lesson.
 | One coin = 100,000,000 sats | Bitcoin consensus `COIN`, inherited by the fork; API `native_asset` is `sats` with 0 decimals (display unit) | ✅ |
 | New blocks about every ten minutes on average | Bitcoin difficulty target, inherited by the fork | ✅ |
 
+| Donation address `bc1qkh8x…kt6m` is a valid mainnet SegWit v0 (P2WPKH) address | bech32 checksum and program length checked; rendered QR decoded back to the same string with jsQR | ✅ |
+| The same `bc1…` address works on eCash: its node keeps Bitcoin's mainnet `bech32_hrp = "bc"` | `ecash-com/bitcoin` branches `betanet` and `drivechain-ecash`, `src/kernel/chainparams.cpp` | ✅ |
+
 ## Concepts
 
 | Claim | Source | Status |
