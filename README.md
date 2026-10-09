@@ -104,9 +104,13 @@ See [deploy/README.md](deploy/README.md) for exact environment and upgrade rules
   event `/occurrences` and entity details
 - `/api/v1/stream`, `/openapi.json`, `/docs`
 
-Web routes include `/`, `/sidechains`, `/sidechains/{slot}`, instance/proposal/
-withdrawal-attempt details, `/pegs`, `/bmm`, `/blocks`, `/explorer`, `/learn`,
-`/about/data`, run/capture details and dataset-scoped block/event evidence.
+The web app is a guided learning path: `/` and `/learn/{chapter}` teach BIP300/301
+one concept at a time, each with live panels and links to the specification;
+`/sidechains`, `/sidechains/{slot}`, `/live`, `/glossary` and `/search` follow the
+same plain-language style. Run/capture details and dataset-scoped block/event
+pages remain as the proof behind every value. Lesson claims and their sources are
+tracked in `apps/web/content/FACT_CHECK.md`; the earlier technical routes redirect
+to their lessons.
 Bids are exact strings in satoshis. API availability, source reachability,
 worker health and freshness are separate states. Branch selection reports its
 evidence, verified boundary and uncertainty. Development verification uses

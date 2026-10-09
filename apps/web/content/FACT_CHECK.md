@@ -65,6 +65,13 @@ Status: ✅ verified · ⚠️ verified with a caveat stated in the lesson.
 | "Show of hands that lasts for weeks" (activation) | Betanet unused-slot max age 2,016 blocks ≈ 2 weeks | ✅ |
 | "Votes for months" (withdrawals) | Betanet withdrawal threshold 13,150 blocks ≈ 3 months at 10 min/block | ✅ |
 
+| Pipeline: node + enforcer → monitor records every reading → Observatory copy → site; the site never queries the network | `README.md` Architecture; `SOURCE_CONTRACT.md` | ✅ |
+| Snapshot readings are "tip matched" when the tip was the same before and after; not atomic, not tied to a block | `SOURCE_CONTRACT.md` ("Equal tips never prove atomicity") | ✅ |
+| No protocol rules are replayed to fill gaps; vote counts are shown as read, not individual votes | `SOURCE_CONTRACT.md` ("does not implement BIP300 voting…", "No votes … are inferred between reads") | ✅ |
+| Chain check: parent work + block work = cumulative work; node/enforcer disagreement prevents joint certification; a changed imported record stops the sync | `SOURCE_CONTRACT.md` | ✅ |
+| Worker states: `stale` = no success within `stale_after_seconds` (30 s); `retrying` = failures; `degraded` = error | `crates/storage/src/lib.rs` `workers()` | ✅ |
+| Exports hold up to 10,000 records and report truncation | Previous explorer copy; API `/api/v1/export` | ✅ |
+
 ## Cross-checks with live data
 
 | Observation | Consistent with | Status |

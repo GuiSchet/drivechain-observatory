@@ -16,7 +16,7 @@ export function CopyValue({ value }: { value: string }) {
 export function ContextNote({ context }: { context: ProtocolContext }) {
   return <aside className="context-note" aria-label="Observation context"><Quality value={context.state}/><span>At {context.anchor_height == null ? "unknown height" : `block ${context.anchor_height.toLocaleString("en-US")}`}</span><span>Branch {context.branch.status}</span>
     {!context.semantics_supported && <strong>{context.semantics_issue ?? "Historical protocol effects are not exposed by the official API."} Derived thresholds are unavailable.</strong>}
-    <Link className="text-link" href="/about/data">Coverage and provenance</Link>
+    <Link className="text-link" href="/learn/how-we-know">Coverage and provenance</Link>
     {context.families.filter(f => f.first_error_event_id).map(f => <span className="error-text" key={f.family}>{f.family}: interpretation stopped at <Link className="text-link" href={`/datasets/${context.meta.dataset_id}/events/${f.first_error_event_id}`}>event {f.first_error_event_id}</Link></span>)}
   </aside>;
 }

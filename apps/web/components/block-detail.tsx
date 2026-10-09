@@ -5,12 +5,13 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiFailure, getBlock } from "@/lib/api";
 import type { Block } from "@/lib/types";
 import { BranchSummary } from "./branch-summary";
+import { ProofIntro } from "./proof-intro";
 export function BlockDetail({dataset,hash,initial}:{dataset:string;hash:string;initial:Block|null}) {
   const query=useQuery({queryKey:["blocks","detail",dataset,hash],queryFn:()=>getBlock(dataset,hash),initialData:initial??undefined,retry:(n,e)=>!(e instanceof ApiFailure&&e.status===404)&&n<2});
   const data=query.data;
   const groups=new Map<string,NonNullable<Block["facts"]>>();
   for(const fact of data?.facts??[]){const name=fact.slot==null?"Global observations":`Slot #${fact.slot}`;groups.set(name,[...(groups.get(name)??[]),fact]);}
-  return <main className="detail-shell"><Link className="text-link" href="/blocks">← Block explorer</Link><div className="eyebrow">PERMANENT BLOCK REFERENCE</div><h1>{data?`Block ${data.block.height}`:"Block detail"}</h1>
+  return <main className="detail-shell"><Link className="text-link" href="/live">← Live activity</Link><div className="eyebrow">PERMANENT BLOCK REFERENCE</div><h1>{data?`Block ${data.block.height}`:"Block detail"}</h1><ProofIntro what="block"/>
     <p className="hash">{hash}</p>
     {query.isError&&<p className="inline-notice" role="status">{query.error instanceof ApiFailure&&query.error.status===404?"This block header has not been imported for this dataset. A tip or disconnect can arrive before its header.":"API unavailable. Any values below are the last loaded view."}</p>}
     {data&&<><section className="panel compact-panel"><h2>Header and membership</h2><dl className="facts">

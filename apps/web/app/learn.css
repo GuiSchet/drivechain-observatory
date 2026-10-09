@@ -348,3 +348,8 @@
 .story-steps strong { font-size: 18px; }
 .story-steps p { margin: 4px 0 0; color: var(--reading); line-height: 1.6; }
 .stat-grid.two { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+/* ---------- Proof pages ---------- */
+.proof-intro { display: flex; gap: 14px; align-items: flex-start; margin: 8px 0 24px; padding: 16px 18px; border: 1px solid #346547; border-radius: 12px; background: rgba(74, 222, 128, 0.06); color: var(--reading); line-height: 1.6; max-width: 860px; }
+.proof-intro svg { flex-shrink: 0; margin-top: 3px; color: var(--green-soft); }
+.proof-intro strong { color: var(--text); }
