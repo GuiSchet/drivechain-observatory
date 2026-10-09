@@ -4,8 +4,9 @@ title = "Drivechain Observatory secret scanning"
 useDefault = true
 
 # These are deterministic blockchain transaction IDs, not Coinbase API tokens.
-# Keep the exception limited to this field in the generated SQL fixtures,
-# at their current archive paths and at the paths they had in history.
+# Keep the exception limited to this field in the generated SQL fixtures. The
+# files were removed with the contract 5-8 archives but remain in history, so
+# full-history scans still need it.
 [[rules]]
 id = "coinbase-access-token"
 

@@ -57,8 +57,7 @@ Requires Docker Compose, Rust, Python 3 and curl; uses loopback ports
 project. The v9 fixture uses all ten actual monitor migrations and a separate
 Observatory database. The exact upstream files are included under `fixtures/v9`
 (and `fixtures/upstream`), with their license and checksums; no sibling monitor
-checkout is needed. Suites and fixtures for contracts 5–8 are archived under
-`scripts/archive` and `fixtures/archive`; nothing runs them.
+checkout is needed.
 
 To include Chromium checks against that same fixture, run:
 

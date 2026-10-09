@@ -59,4 +59,4 @@ changes, stops the sync as `incompatible` and is recorded in
 The importer uses a dedicated read-only source role. Tests use all ten actual
 monitor migrations and generated envelopes in `fixtures/v9`; synthetic block
 bytes test projection behavior, not cryptographic validation. The monitor tests
-raw block decoding separately. Contract 5–8 fixtures are archived references.
+raw block decoding separately.
