@@ -60,6 +60,36 @@ assert sql("postgres","SELECT cursor_value FROM ops.sync_cursors WHERE stream='s
 check("byte-bounded event pages import oversized events one at a time")
 sync("--batch-size","2","--max-pages-per-cycle","1")
 settle()
+# Node raw blocks are imported without their body; both source hashes stay verbatim.
+BLOCKS="FROM {table} WHERE source='node' AND kind='mainchain_block'"
+shape=sql("postgres","SELECT count(*),bool_and(octet_length(envelope)=0),bool_and(NOT payload #> '{monitor_event,Node,event,MainchainBlock}' ? 'raw_block') "+BLOCKS.format(table="ingest.source_events"))
+assert shape.split("|")[0]!="0" and shape.endswith("|t|t"),shape
+hashes="string_agg({id}||':'||encode(fact_sha256,'hex')||':'||encode(envelope_sha256,'hex'),',' ORDER BY {id}) "
+source_hashes=sql("monitor_fixture","SELECT "+hashes.format(id="id")+BLOCKS.format(table="event"))
+imported_hashes=sql("postgres","SELECT "+hashes.format(id="source_event_id")+BLOCKS.format(table="ingest.source_events"))
+assert source_hashes==imported_hashes,(source_hashes,imported_hashes)
+block_event=imported_hashes.split(":")[0]
+evidence=get(f"/api/v1/datasets/{DATASET}/events/{block_event}")
+assert evidence["raw_block_omitted"] and evidence["envelope_hex"]=="" and "raw_block" not in evidence["payload_json"],evidence
+other=sql("postgres","SELECT min(source_event_id) FROM ingest.source_events WHERE kind<>'mainchain_block'")
+assert not get(f"/api/v1/datasets/{DATASET}/events/{other}")["raw_block_omitted"]
+# The migration strips rows imported in full before this change, and is idempotent.
+sql("postgres",f"UPDATE ingest.source_events SET envelope='\\x01'::bytea, payload=jsonb_set(payload,'{{monitor_event,Node,event,MainchainBlock,raw_block}}','\"00\"') WHERE source_event_id={block_event}")
+strip=(ROOT/"migrations/0013_strip_raw_blocks.sql").read_text()
+sql("postgres",strip);sql("postgres",strip)
+assert sql("postgres","SELECT count(*) "+BLOCKS.format(table="ingest.source_events")+" AND (octet_length(envelope)>0 OR payload #> '{monitor_event,Node,event,MainchainBlock}' ? 'raw_block')")=="0"
+settle()
+check("node raw blocks import as headers with verbatim source hashes")
+# A long cycle that commits pages is alive, even after an earlier failed cycle.
+sql("postgres","UPDATE ops.source_status SET sync_mode='interrupted',source_reachable=false,last_cycle_at=now()-interval '10 minutes'; UPDATE ops.sync_cursors SET updated_at=now()-interval '11 minutes'")
+status=get("/api/v1/status")
+assert status["sync_mode"]=="interrupted" and not status["source_reachable"],status
+sql("postgres","UPDATE ops.sync_cursors SET updated_at=now() WHERE stream='source_events'")
+status=get("/api/v1/status")
+assert status["sync_mode"]=="catching_up" and status["source_reachable"] and not status["sync_stale"],status
+settle()
+assert all(int(c["imported_through"])<=int(c["source_high_water"]) for c in get("/api/v1/status")["cursors"]),get("/api/v1/status")["cursors"]
+check("page progress keeps status live; high water never trails the cursor")
 meta=get("/api/v1/meta")
 assert meta["meta"]["projection_version"]==8,meta
 assert meta["current_run"]["event_contract_version"]==9

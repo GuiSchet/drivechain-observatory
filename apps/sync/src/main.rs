@@ -809,13 +809,18 @@ async fn sync_dataset_locked(
     } else {
         "following"
     };
+    // Pages read past the cycle's starting high water; the cursors are a lower
+    // bound of the source maximum too, so report whichever is larger.
     let mut transaction = destination.begin().await?;
     let changed: bool = sqlx::query_scalar("SELECT sync_mode IS DISTINCT FROM $2 OR NOT source_reachable FROM ops.source_status WHERE dataset_id=$1")
         .bind(dataset_id).bind(sync_mode).fetch_one(&mut *transaction).await?;
     sqlx::query("UPDATE ops.source_status SET source_reachable=true, sync_mode=$3,
         last_source_contact_at=now(), last_cycle_at=now(), last_error=NULL, source_schema_version=$2,
-        source_event_high_water=$4, source_observation_high_water=$5, source_tip_high_water=$6,
-        source_coverage_high_water=$7, updated_at=now() WHERE dataset_id=$1")
+        source_event_high_water=GREATEST($4,(SELECT cursor_value FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='source_events')),
+        source_observation_high_water=GREATEST($5,(SELECT cursor_value FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='event_observations')),
+        source_tip_high_water=GREATEST($6,(SELECT cursor_value FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='tip_observations')),
+        source_coverage_high_water=GREATEST($7,(SELECT cursor_value FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='coverage_revisions')),
+        updated_at=now() WHERE dataset_id=$1")
         .bind(dataset_id).bind(schema_version).bind(sync_mode)
         .bind(high_water.events).bind(high_water.observations).bind(high_water.tips).bind(high_water.coverage)
         .execute(&mut *transaction).await?;
