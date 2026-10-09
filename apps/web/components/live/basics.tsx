@@ -23,7 +23,7 @@ export function NetworkSnapshot() {
   const values = Object.values(treasury).map(v => sats(object(v).value_sats)).filter((v): v is bigint => v !== undefined);
   const locked = values.reduce((a, b) => a + b, BigInt(0));
   const dataset = o?.meta.dataset_id, tip = o?.latest_observed_block;
-  return <LivePanel title="The network right now" quality={tip ? "observed" : null}
+  return <LivePanel title="eCash Betanet right now" quality={tip ? "observed" : null}
     proof={tip && dataset ? `/datasets/${dataset}/blocks/${tip.hash}` : undefined}
     status={{ pending: overview.isPending, error: overview.isError && !o }}>
     <div className="stat-grid">

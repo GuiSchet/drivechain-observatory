@@ -3,7 +3,8 @@ import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import { chapters } from "@/content/chapters";
 import { useProgress } from "@/lib/progress";
-import { activeSidechains, useObservatory } from "@/lib/live";
+import { activeSidechains, n, useNetworkParams, useObservatory } from "@/lib/live";
+import { references } from "@/content/references";
 import { DrivechainDiagram } from "@/components/learn/diagrams";
 import { NetworkSnapshot } from "@/components/live/basics";
 import { ActivityFeed } from "@/components/live/activity";
@@ -13,18 +14,28 @@ export function Home() {
   const doneCount = chapters.filter(c => completed.includes(c.slug)).length;
   const next = chapters.find(c => !isDone(c.slug)) ?? chapters[0];
   const sidechains = activeSidechains(useObservatory().data);
+  const { params } = useNetworkParams();
   return <main className="home">
     <section className="home-hero">
       <div>
-        <div className="eyebrow">BIP300 · BIP301 · LIVE ON BETANET</div>
+        <div className="eyebrow">eCash (ECX) · Betanet · BIP300 / BIP301</div>
         <h1>Learn drivechains by <span>watching one run.</span></h1>
-        <p>Eight short concepts, one at a time. Each lesson explains an idea in plain words, links the exact part of the specification, and shows it happening right now on a real network.</p>
+        <p>Eight short concepts, one at a time. Each lesson explains an idea in plain words, links the exact part of the specification, and shows it happening right now on <strong>eCash Betanet</strong>, the network where eCash rehearses drivechains before its mainnet.</p>
         <div className="cta-row">
           <Link className="cta primary" href={`/learn/${next.slug}`}>{doneCount ? "Continue" : "Start learning"} <ArrowRight size={16}/></Link>
           <Link className="cta" href="/sidechains">Meet the sidechains</Link>
         </div>
       </div>
       <DrivechainDiagram names={sidechains.map(s => s.title).filter((t): t is string => !!t)}/>
+    </section>
+    <section className="network-intro" aria-labelledby="network-intro-title">
+      <h2 id="network-intro-title">Which network is this?</h2>
+      <div className="network-cards">
+        <article><span className="nc-kicker">The project</span><strong>eCash (ECX)</strong><p>A hard fork of Bitcoin, associated with Paul Sztorc and LayerTwo Labs, that turns on drivechains (BIP300 and BIP301). It is <em>not</em> eCash (XEC), which is a different coin and network.</p></article>
+        <article><span className="nc-kicker">The network we watch</span><strong>Betanet</strong><p>eCash's rehearsal network. It starts from Bitcoin's own chain and enforces the drivechain rules from block {n(params.activationHeight)} onward, so every mechanism can be tried before eCash's mainnet.</p></article>
+        <article><span className="nc-kicker">Where the data comes from</span><strong>Our own Betanet node</strong><p>A Betanet node and the official enforcer, watched by a monitor that records everything it sees. <Link className="text-link" href="/learn/how-we-know">How we know</Link></p></article>
+      </div>
+      <p className="network-source">Source: <a className="text-link" href={references.ecash.href} target="_blank" rel="noopener noreferrer">ecash.com</a>. Live data below is from Betanet only, not from eCash's mainnet or from Bitcoin.</p>
     </section>
     <NetworkSnapshot/>
 

@@ -28,7 +28,7 @@ export function WhatIsADrivechain() {
       <p>This site watches <strong>eCash Betanet</strong> as it runs. Everything inside a <em>Live on Betanet</em> panel comes from a monitor connected to a Betanet node and the official <Term id="enforcer">enforcer</Term>. <em>See the proof</em> opens the exact record behind a value.</p>
     </Section>
     <NetworkSnapshot/>
-    <SpecNote variant="betanet" refs={["enforcerNetworkParams"]}>Betanet is a public trial network: a fork of Bitcoin's main chain that enforces BIP300 and BIP301 from block {n(params.activationHeight)} onward. Its sidechains and coins are real enough to watch every mechanism work.</SpecNote>
+    <SpecNote variant="betanet" refs={["ecash", "enforcerNetworkParams"]}><Term id="ecash">eCash (ECX)</Term> is a hard fork of Bitcoin built to activate drivechains; it is not eCash (XEC). <Term id="betanet">Betanet</Term> is its rehearsal network: it starts from Bitcoin's chain and enforces BIP300 and BIP301 from block {n(params.activationHeight)} onward, so every mechanism can be watched working before eCash's mainnet.</SpecNote>
     <CheckYourself question="Who decides whether coins may leave a sidechain and return to L1?" choices={[
       { text: "A fixed group of signers chosen by the sidechain", why: "That would be a federation. BIP300 replaces it with a vote by L1 miners." },
       { text: "L1 miners, voting over many blocks", correct: true, why: "Withdrawals are approved by proof-of-work: miners vote in the blocks they find." },

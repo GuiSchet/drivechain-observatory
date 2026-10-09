@@ -36,6 +36,7 @@ export const references = {
   enforcerNetworkParams: { title: "Enforcer · Betanet network parameters", href: `${enforcer}/lib/types.rs#L155-L166` },
   enforcerOpDrivechain: { title: "Enforcer · OP_DRIVECHAIN per network", href: `${enforcer}/lib/types.rs#L920-L932` },
   drivechainInfo: { title: "drivechain.info", href: "https://www.drivechain.info/" },
+  ecash: { title: "ecash.com · What is eCash (ECX)?", href: "https://ecash.com/what-is-ecash/" },
   sourceContract: { title: "Observatory · source contract", href: "https://github.com/GuiSchet/drivechain-observatory/blob/main/SOURCE_CONTRACT.md" },
 } as const;
 

@@ -17,6 +17,8 @@ Status: ✅ verified · ⚠️ verified with a caveat stated in the lesson.
 
 | Claim | Source | Status |
 |---|---|---|
+| eCash (ECX) is a Bitcoin hard fork associated with Paul Sztorc and LayerTwo Labs that activates drivechains (BIP300/301); it is distinct from eCash (XEC) | ecash.com "What is eCash" (checked 2026-10-09) | ✅ |
+| Betanet is eCash's rehearsal network ("Alpha and Beta are rehearsals"), started from a Bitcoin snapshot at block 967,680, before eCash's mainnet | ecash.com "What is eCash" ("Betanet launched on September 19, 2026 at block 967,680"); enforcer `NetworkParams::betanet` | ✅ mainnet date not shown: ecash.com calls it an estimate |
 | Betanet is a fork of Bitcoin mainnet enforcing BIP300/301 from block 967,680 | Enforcer `lib/types.rs` L155-166 (`NetworkParams::betanet`); API `chain-info.bip300_constants.activation_height = 967680`; `meta.dataset.activation_height = 967680` | ✅ |
 | Betanet: unused slot needs > 1,008 votes within 2,016 blocks | Enforcer `Thresholds::BETANET` L59-62 (overrides `unused_sidechain_slot_activation_threshold` only); API chain-info | ✅ |
 | Betanet: used slot and withdrawals need > 13,150 votes within 26,300 blocks | Enforcer `Thresholds::MAINNET` L50-57 inherited by BETANET; API chain-info | ✅ |

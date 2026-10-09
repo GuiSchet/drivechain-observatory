@@ -4,7 +4,9 @@ export type GlossaryEntry = { term: string; short: string; chapter: string; refs
 
 // Definitions stay short; the linked chapter explains each one with live data.
 export const glossary = {
-  l1: { term: "L1 (mainchain)", short: "The base blockchain. Here it is eCash Betanet, a fork of Bitcoin mainnet that enforces BIP300 and BIP301.", chapter: "what-is-a-drivechain" },
+  ecash: { term: "eCash (ECX)", short: "A hard fork of Bitcoin, associated with Paul Sztorc and LayerTwo Labs, that activates drivechains (BIP300 and BIP301). It is a different coin and network from eCash (XEC).", chapter: "what-is-a-drivechain", refs: ["ecash"] },
+  betanet: { term: "Betanet", short: "eCash's rehearsal network, started from a snapshot of Bitcoin at block 967,680, used to try drivechains before eCash's mainnet.", chapter: "what-is-a-drivechain", refs: ["ecash", "enforcerNetworkParams"] },
+  l1: { term: "L1 (mainchain)", short: "The base blockchain. On this site it is eCash Betanet.", chapter: "what-is-a-drivechain" },
   sidechain: { term: "Sidechain (L2)", short: "A separate blockchain whose coins are locked on the L1 and released only by a slow miner vote. It has its own software and rules.", chapter: "what-is-a-drivechain", refs: ["bip300Abstract"] },
   "hashrate-escrow": { term: "Hashrate escrow", short: "BIP300's name for a sidechain's locked coins: miners, voting with the blocks they find, decide when coins may leave.", chapter: "what-is-a-drivechain", refs: ["bip300"] },
   enforcer: { term: "Enforcer", short: "The program that checks the BIP300/301 rules alongside the L1 node. The Observatory reads its official API.", chapter: "how-we-know", refs: ["enforcer"] },
