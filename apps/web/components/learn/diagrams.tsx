@@ -1,30 +1,5 @@
 // Concept diagrams. Pure SVG; motion is CSS-only and stops under reduced motion.
 
-export function DrivechainDiagram({ names = [] }: { names?: string[] }) {
-  const sides = (names.length ? names : ["Sidechain A", "Sidechain B", "Sidechain C"]).slice(0, 3);
-  return <figure className="diagram">
-    <svg viewBox="0 0 640 316" role="img" aria-labelledby="dd-title dd-desc">
-      <title id="dd-title">A drivechain</title>
-      <desc id="dd-desc">The L1 chain runs along the bottom. Each sidechain above it has its coins locked in a treasury on L1. Deposits move coins up quickly; withdrawals move them down only after a long miner vote.</desc>
-      <defs><marker id="dd-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="currentColor"/></marker></defs>
-      {sides.map((name, i) => { const x = 40 + i * 200; return <g key={name} className="dd-side">
-        <rect x={x} y="20" width="160" height="70" rx="12"/>
-        <text x={x + 80} y="50" textAnchor="middle" className="dd-strong">{name.length > 16 ? name.slice(0, 15) + "…" : name}</text>
-        <text x={x + 80} y="72" textAnchor="middle" className="dd-muted">sidechain (L2)</text>
-        <path className="dd-up" d={`M${x + 50} 190 V100`} markerEnd="url(#dd-arrow)"/>
-        <path className="dd-down" d={`M${x + 110} 100 V190`} markerEnd="url(#dd-arrow)"/>
-        <rect x={x + 40} y="190" width="80" height="34" rx="8" className="dd-vault"/>
-        <text x={x + 80} y="212" textAnchor="middle" className="dd-small">treasury</text>
-      </g>; })}
-      <text x="84" y="150" className="dd-label dd-label-up" textAnchor="end">deposit</text>
-      <text x="152" y="150" className="dd-label dd-label-down">withdraw</text>
-      <text x="20" y="250" className="dd-muted">L1 mainchain: one block about every 10 minutes</text>
-      <g className="dd-chain">{Array.from({ length: 8 }, (_, i) => <g key={i}><rect x={20 + i * 78} y="262" width="62" height="40" rx="6"/>{i < 7 && <path d={`M${82 + i * 78} 282 h16`}/>}</g>)}</g>
-    </svg>
-    <figcaption>Deposits (up) are ordinary L1 transactions. Withdrawals (down) need a long, public vote by L1 miners.</figcaption>
-  </figure>;
-}
-
 export function ChainDiagram() {
   return <figure className="diagram">
     <svg viewBox="0 0 640 170" role="img" aria-labelledby="cd-title cd-desc">

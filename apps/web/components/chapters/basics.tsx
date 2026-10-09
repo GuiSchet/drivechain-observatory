@@ -2,12 +2,12 @@
 import Link from "next/link";
 import { Section } from "@/components/learn/chapter-layout";
 import { Analogy, CheckYourself, GoDeeper, SpecNote, Term } from "@/components/learn/primitives";
-import { ChainDiagram, DrivechainDiagram } from "@/components/learn/diagrams";
+import { ChainDiagram } from "@/components/learn/diagrams";
+import { HowItWorks } from "@/components/learn/how-it-works";
 import { BlockHeartbeat, BranchCheck, NetworkSnapshot, SlotGrid } from "@/components/live/basics";
-import { activeSidechains, n, useNetworkParams, useObservatory } from "@/lib/live";
+import { n, useNetworkParams } from "@/lib/live";
 
 export function WhatIsADrivechain() {
-  const names = activeSidechains(useObservatory().data).map(s => s.title).filter((t): t is string => !!t);
   const { params } = useNetworkParams();
   return <>
     <Section title="The problem">
@@ -22,7 +22,7 @@ export function WhatIsADrivechain() {
       </ul>
       <Analogy>Think of a shared vault for each sidechain. Anyone can put coins in. The door only opens after the miners have voted for months, in the open, block by block.</Analogy>
     </Section>
-    <DrivechainDiagram names={names}/>
+    <HowItWorks/>
     <SpecNote refs={["bip300Abstract"]}>BIP300 lets L2 withdrawals be governed by proof-of-work, "instead of a federation or fixed set of pubkeys". It aims for slow, transparent and auditable withdrawals, and users who don't care about sidechains can ignore them entirely.</SpecNote>
     <Section title="What you are looking at">
       <p>This site watches <strong>eCash Betanet</strong> as it runs. Everything inside a <em>Live on Betanet</em> panel comes from a monitor connected to a Betanet node and the official <Term id="enforcer">enforcer</Term>. <em>See the proof</em> opens the exact record behind a value.</p>

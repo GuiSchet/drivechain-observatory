@@ -74,6 +74,11 @@ Status: ✅ verified · ⚠️ verified with a caveat stated in the lesson.
 | Worker states: `stale` = no success within `stale_after_seconds` (30 s); `retrying` = failures; `degraded` = error | `crates/storage/src/lib.rs` `workers()` | ✅ |
 | Exports hold up to 10,000 records and report truncation | Previous explorer copy; API `/api/v1/export` | ✅ |
 
+| "How it works" step 1: a deposit is an ordinary L1 transaction into the sidechain's single treasury output; no vote | BIP300 M5 | ✅ |
+| Step 2: the sidechain's own nodes credit the deposit; L1 never inspects the sidechain | BIP300 Abstract (partitioning); enforcer only validates L1 | ✅ shown as "Declared", not live |
+| Step 3: each L1 block can commit to one block per sidechain; sidechain users pay the L1 miner; the miner runs no sidechain software | BIP301 Abstract, BMM Accept/Request | ✅ |
+| Step 4: withdrawals are bundled into one L1 payout, voted block by block, and need more than the threshold within the max age | BIP300 D2, M3, M4, M6; enforcer L698 | ✅ |
+
 ## Cross-checks with live data
 
 | Observation | Consistent with | Status |

@@ -3,9 +3,9 @@ import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import { chapters } from "@/content/chapters";
 import { useProgress } from "@/lib/progress";
-import { activeSidechains, n, useNetworkParams, useObservatory } from "@/lib/live";
+import { n, useNetworkParams } from "@/lib/live";
 import { references } from "@/content/references";
-import { DrivechainDiagram } from "@/components/learn/diagrams";
+import { HowItWorks } from "@/components/learn/how-it-works";
 import { NetworkSnapshot } from "@/components/live/basics";
 import { ActivityFeed } from "@/components/live/activity";
 
@@ -13,7 +13,6 @@ export function Home() {
   const { isDone, completed } = useProgress();
   const doneCount = chapters.filter(c => completed.includes(c.slug)).length;
   const next = chapters.find(c => !isDone(c.slug)) ?? chapters[0];
-  const sidechains = activeSidechains(useObservatory().data);
   const { params } = useNetworkParams();
   return <main className="home">
     <section className="home-hero">
@@ -26,8 +25,8 @@ export function Home() {
           <Link className="cta" href="/sidechains">Meet the sidechains</Link>
         </div>
       </div>
-      <DrivechainDiagram names={sidechains.map(s => s.title).filter((t): t is string => !!t)}/>
     </section>
+    <HowItWorks/>
     <section className="network-intro" aria-labelledby="network-intro-title">
       <h2 id="network-intro-title">Which network is this?</h2>
       <div className="network-cards">
