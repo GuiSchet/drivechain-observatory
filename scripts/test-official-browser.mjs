@@ -75,6 +75,16 @@ try {
   await page.getByText('bc1qkh8xcznxzd2l3useajnz22pwsdtthwhp56kt6m',{exact:true}).waitFor();
   assert.equal(await page.locator('.donate-qr svg').count(),1,'the donation QR code must render');
 
+  // Each lesson offers its question to three assistants; about shows how to reach the maintainer.
+  await page.goto(base+'/learn/withdrawals');
+  const asks=page.locator('.ask-ai-buttons a');
+  assert.equal(await asks.count(),3,'three Ask AI links');
+  const claude=new URL(await asks.nth(1).getAttribute('href'));
+  assert.equal(claude.origin+claude.pathname,'https://claude.ai/new');
+  assert(claude.searchParams.get('q').includes('Withdrawals by miner vote')&&claude.searchParams.get('q').includes('/learn/withdrawals'),'prompt names the lesson');
+  await page.goto(base+'/about');
+  await page.locator('.contact-line',{hasText:'Discord'}).getByText('guischet',{exact:true}).waitFor();
+
   // Replaced technical views redirect to the page that now covers them.
   for(const [from,to] of [['/bmm','/learn/merged-mining'],['/explorer','/search'],['/about/data','/learn/how-we-know'],['/pegs','/learn/deposits']]){
     await page.goto(base+from);

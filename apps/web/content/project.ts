@@ -2,7 +2,7 @@
 // checksum, mainnet SegWit v0 (P2WPKH). eCash keeps Bitcoin's "bc" prefix, so
 // the same address receives BTC and, after eCash's mainnet launch, ECX.
 export const project = {
-  maintainer: { name: "GuiSchet", href: "https://github.com/GuiSchet" },
+  maintainer: { name: "GuiSchet", href: "https://github.com/GuiSchet", discord: "guischet" },
   repos: {
     observatory: "https://github.com/GuiSchet/drivechain-observatory",
     monitor: "https://github.com/GuiSchet/bip300-monitor",

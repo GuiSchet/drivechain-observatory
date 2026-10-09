@@ -1,10 +1,10 @@
 import Link from "next/link";
 import QRCode from "qrcode";
-import { CodeXml, ExternalLink, FolderGit2, HeartHandshake, MessageSquareWarning, Star } from "lucide-react";
+import { CodeXml, ExternalLink, FolderGit2, HeartHandshake, MessageCircle, MessageSquareWarning, Star } from "lucide-react";
 import { project } from "@/content/project";
 import { ISSUES_URL } from "@/content/references";
 import { apiBaseUrl } from "@/lib/api";
-import { CopyAddress } from "@/components/donate";
+import { CopyText } from "@/components/donate";
 import { Logo } from "@/components/logo";
 
 export const metadata = { title: "About · Drivechain Observatory", description: "Who builds the Drivechain Observatory, its open-source code, and how to support it." };
@@ -22,6 +22,7 @@ export default async function Page() {
     <section className="about-section">
       <h2>About us</h2>
       <p>The Observatory is built and maintained by <a className="text-link" href={project.maintainer.href} target="_blank" rel="noopener noreferrer">{project.maintainer.name}</a> as an independent, open-source project. It runs its own eCash Betanet node and the official BIP300/301 enforcer, records everything they report, and turns it into lessons anyone can follow.</p>
+      <div className="contact-line"><MessageCircle size={18}/><span>Questions, ideas or want to help? Reach me on <strong>Discord</strong>:</span><CopyText value={project.maintainer.discord} label="Copy username" className="contact-copy"/></div>
       <p>It is made possible by the support of <a className="text-link" href="https://libreriadesatoshi.com/" target="_blank" rel="noopener noreferrer">Librería de Satoshi</a> and <a className="text-link" href="https://b4os.dev/" target="_blank" rel="noopener noreferrer">B4OS</a>.</p>
     </section>
 
@@ -42,7 +43,7 @@ export default async function Page() {
         <div className="donate-qr" role="img" aria-label={`QR code for the donation address ${project.donationAddress}`} dangerouslySetInnerHTML={{ __html: qr }}/>
         <div className="donate-info">
           <span className="nc-kicker">Donation address</span>
-          <CopyAddress address={project.donationAddress}/>
+          <CopyText value={project.donationAddress} label="Copy address"/>
           <p>This address accepts <strong>BTC</strong> today and <strong>ECX</strong> once eCash&apos;s mainnet launches: eCash keeps Bitcoin&apos;s address format, so the same address works on both.</p>
           <p className="donate-warning">Always check the address after pasting it into your wallet.</p>
         </div>

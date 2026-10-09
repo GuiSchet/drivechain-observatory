@@ -456,3 +456,21 @@
   .donate-box { grid-template-columns: 1fr; justify-items: center; }
   .donate-info { width: 100%; }
 }
+
+/* ---------- Ask an AI ---------- */
+.ask-ai { margin: 40px 0 0; padding: 20px 22px; border: 1px solid #5b4a66; border-radius: 16px; background: radial-gradient(circle at 100% 0, rgba(199, 169, 222, 0.1), transparent 16rem), var(--panel); }
+.ask-ai h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 18px; }
+.ask-ai h2 svg { color: var(--violet); }
+.ask-ai > p { margin: 0 0 14px; color: var(--reading); font-size: 15px; line-height: 1.6; }
+.ask-ai-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.ask-ai-buttons a { display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; border: 1px solid var(--violet); border-radius: 999px; color: var(--text); font-weight: 600; font-size: 14px; }
+.ask-ai-buttons a:hover { background: rgba(199, 169, 222, 0.12); }
+.ask-ai .ask-ai-note { margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+.contact-line { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--reading); font-size: 16px; }
+.contact-line > svg { color: var(--orange); }
+.contact-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.contact-copy code { font: 600 15px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 6px 10px; border-radius: 8px; background: #0b0a08; color: var(--text); }
+.contact-copy button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 13px; }
+.contact-copy small { flex-basis: 100%; color: var(--muted); }
+.footer-links span { color: var(--muted); font-size: 14px; }
+@media (max-width: 560px) { .ask-ai-buttons a { flex: 1 1 100%; justify-content: center; } }

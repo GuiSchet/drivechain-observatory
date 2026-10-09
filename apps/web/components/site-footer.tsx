@@ -14,6 +14,7 @@ export function SiteFooter() {
           <Link href="/about">About the project</Link>
           <Link href="/about#support">Support the project</Link>
           <a href={project.repos.observatory} target="_blank" rel="noopener noreferrer">Source code</a>
+          <span>Discord: <strong>{project.maintainer.discord}</strong></span>
         </p>
       </div>
       <div className="supporter-links">
