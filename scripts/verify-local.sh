@@ -4,6 +4,8 @@ project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 export PULSE_TEST_COMPOSE_PROJECT="drivechain-observatory-e2e-$$"
 export PULSE_DATASET_ID=11111111-1111-4111-8111-111111111111
+# The isolated test API; override when 18080 is taken by a running stack.
+export PULSE_TEST_API_PORT=${PULSE_TEST_API_PORT:-18080}
 export MONITOR_DATABASE_URL='postgres://monitor_reader:monitor_reader_dev@127.0.0.1:55434/bip300_monitor'
 export PULSE_DATABASE_URL='postgres://pulse_sync:change-me-sync@127.0.0.1:55433/drivechain_pulse'
 build_dir=${CARGO_TARGET_DIR:-target}
@@ -19,7 +21,7 @@ trap cleanup EXIT INT TERM
 (cd fixtures/v9 && sha256sum --check SHA256SUMS)
 cargo build --workspace --offline --locked
 if [ "${PULSE_BROWSER_TESTS:-0}" = 1 ]; then
-  NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:18080 npm --prefix apps/web run build
+  NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:$PULSE_TEST_API_PORT npm --prefix apps/web run build
 fi
 compose up -d --wait --wait-timeout 90 postgres monitor_fixture || { compose logs --tail 70 postgres monitor_fixture; exit 1; }
 # Prove that container replacement preserves data in the named volume. All
@@ -31,11 +33,11 @@ probe=$(compose exec -T postgres psql -XAt -U pulse_admin -d drivechain_pulse -c
 compose exec -T postgres psql -U pulse_admin -d drivechain_pulse -c 'DROP TABLE public.volume_probe' >/dev/null
 echo 'PASS PostgreSQL18 named-volume persistence across container replacement'
 PULSE_DATABASE_URL='postgres://pulse_admin:change-me-admin@127.0.0.1:55433/drivechain_pulse' "$build_dir/debug/pulse-api" migrate-only
-PULSE_DATABASE_URL='postgres://pulse_api:change-me-api@127.0.0.1:55433/drivechain_pulse' PULSE_API_BIND='127.0.0.1:18080' PULSE_CORS_ORIGIN='http://127.0.0.1:13000' "$build_dir/debug/pulse-api" &
+PULSE_DATABASE_URL='postgres://pulse_api:change-me-api@127.0.0.1:55433/drivechain_pulse' PULSE_API_BIND="127.0.0.1:$PULSE_TEST_API_PORT" PULSE_CORS_ORIGIN='http://127.0.0.1:13000' "$build_dir/debug/pulse-api" &
 api_pid=$!
 ready=false
 for _ in $(seq 1 30); do
-  if curl --fail --silent http://127.0.0.1:18080/health/ready >/dev/null; then ready=true; break; fi
+  if curl --fail --silent "http://127.0.0.1:$PULSE_TEST_API_PORT/health/ready" >/dev/null; then ready=true; break; fi
   sleep 1
 done
 [ "$ready" = true ] || { echo 'API readiness timed out' >&2; exit 1; }

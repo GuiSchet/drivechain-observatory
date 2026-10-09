@@ -15,7 +15,7 @@ spec=importlib.util.spec_from_file_location("fixture",ROOT/"fixtures/v9.py")
 fixture=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 DATASET,RUN=fixture.DATASET,fixture.RUN
-BASE="http://127.0.0.1:18080"
+BASE="http://127.0.0.1:"+os.environ.get("PULSE_TEST_API_PORT","18080")
 COMPOSE=["docker","compose","-p",os.environ["PULSE_TEST_COMPOSE_PROJECT"],"--env-file","deploy/.env.example","-f","deploy/compose.yaml","-f","deploy/compose.dev.yaml"]
 
 def sql(service,statement,*,user=None,fail=False):
@@ -125,6 +125,39 @@ assert block["chain_work"]=="10" and block["block_work"]=="1",block
 bmm=get("/api/v1/bmm?slot=9")
 assert bmm["slots"][0]["eligible"] is None and bmm["slots"][0]["rate"] is None,bmm
 check("node absolute work and unknown historical BMM eligibility")
+def order_height(x):
+    return x["height"] if x["height"] is not None else (x["data"].get("observation_window") or {}).get("reference_tip_height",-1)
+def pages(path):
+    items,cursor=[],None
+    while True:
+        page=get(path+("&cursor="+cursor if cursor else ""))
+        items+=page["items"];cursor=page.get("next_cursor")
+        if not cursor:return items
+by_block=get("/api/v1/activity?order=block&scope=all&limit=200")["items"]
+assert by_block and [order_height(x) for x in by_block]==sorted((order_height(x) for x in by_block),reverse=True),by_block
+assert [x["id"] for x in pages("/api/v1/activity?order=block&scope=all&limit=1")]==[x["id"] for x in by_block]
+assert [x["id"] for x in pages("/api/v1/deposits?limit=1")]==[x["id"] for x in get("/api/v1/deposits?order=block&limit=200")["items"]]
+error("/api/v1/activity?order=height",400)
+check("histories sort by block height with a stable cursor")
+def content(x):return {k:v for k,v in x["data"].items() if k not in ("observation_window","occurrences")}
+every=get("/api/v1/activity?scope=all&limit=200")["items"]
+changed=get("/api/v1/activity?changes=true&scope=all&limit=200")["items"]
+assert changed and {x["id"] for x in changed}<={x["id"] for x in every},changed
+for entity in {x["entity_id"] for x in changed}:
+    rows=sorted((x for x in every if x["entity_id"]==entity),key=lambda x:int((x["evidence"][0].get("observation_id") or 0)))
+    kept=[x for i,x in enumerate(rows) if i==0 or content(x)!=content(rows[i-1])]
+    assert {x["id"] for x in kept}=={x["id"] for x in changed if x["entity_id"]==entity},(entity,kept)
+    # A kept row reports the latest read and total occurrences of the repeats it stands for.
+    for x in (y for y in changed if y["entity_id"]==entity):
+        start=next(i for i,r in enumerate(rows) if r["id"]==x["id"])
+        end=next((i for i in range(start+1,len(rows)) if content(rows[i])!=content(rows[i-1])),len(rows))
+        group=rows[start:end]
+        assert x["observed_at"]==max(r["observed_at"] for r in group),(x,group)
+        assert int(x["data"]["occurrences"])==sum(int(r["data"]["occurrences"]) for r in group),(x,group)
+kinds=get("/api/v1/activity?kind=deposit,bundle_outcome&scope=all&limit=200")["items"]
+assert kinds and {x["kind"] for x in kinds}<={"deposit","bundle_outcome"},kinds
+assert len(kinds)==len(get("/api/v1/activity?kind=deposit&scope=all&limit=200")["items"])+len(get("/api/v1/activity?kind=bundle_outcome&scope=all&limit=200")["items"])
+check("change-only histories and several kinds per query")
 # New upstream source SHA is provenance, never a compatibility allowlist.
 sql("monitor_fixture",f"UPDATE extractor_run SET enforcer_commit=repeat('a',40) WHERE run_id='{RUN}'")
 settle();assert get("/api/v1/status")["sync_mode"]=="following"

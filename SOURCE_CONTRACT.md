@@ -37,6 +37,13 @@ Every list reports the quality and `observed_at` of an item's latest read and
 `first_observed_at`; snapshot quality is `tip_matched` only when that read was.
 The monitor records every reading, so an unchanged value re-read at a later tip
 extends its history row (occurrences) and shows when it was last confirmed.
+Histories sort by latest occurrence (`order=observed`) or by block height
+(`order=block`, the deposits default); in block order an unanchored reading sorts
+by the tip of its first read, which orders it but does not anchor it.
+`changes=true` drops a reading equal to the previous reading of the same entity,
+such as a re-read after a restart. The kept reading reports the latest read,
+latest quality and total occurrences of the repeats it stands for, and keeps the
+evidence of its first read; values are never merged across a change or interpolated.
 
 Enforcer tip observations select the branch. Node cumulative work must satisfy
 parent work + child work = child cumulative work, with positive block work.
