@@ -6,10 +6,11 @@ import { SiteFooter } from "@/components/site-footer";
 import { Providers } from "@/components/providers";
 
 import "./globals.css";
+import "./learn.css";
 
 export const metadata: Metadata = {
-  title: "Drivechain - Observatory",
-  description: "Live, evidence-backed BIP300/301 observatory",
+  title: "Drivechain Observatory · Learn drivechains live",
+  description: "Learn BIP300 and BIP301 one concept at a time, with live data from eCash Betanet.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
