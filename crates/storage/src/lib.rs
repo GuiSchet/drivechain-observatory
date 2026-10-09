@@ -212,6 +212,47 @@ async fn latest_block(
         _ => None,
     })
 }
+/// What `/status` reports from the stored sync state and import progress.
+struct SyncHealth {
+    mode: SyncMode,
+    reachable: bool,
+    stale: bool,
+}
+
+/// `last_cycle_at` is written only when a cycle ends, and a long catch-up cycle
+/// (many pages of large events) can run for minutes. A cursor committed after
+/// the last cycle end is proof the importer is alive: it keeps the status fresh
+/// and supersedes a stored `interrupted` from an earlier failed cycle. A cycle
+/// that keeps failing without committing anything still shows as interrupted.
+fn sync_health(
+    raw: &str,
+    reachable: bool,
+    cycle: Option<DateTime<Utc>>,
+    progress: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+    seconds: i64,
+) -> Result<SyncHealth, StorageError> {
+    let progressed = match (progress, cycle) {
+        (Some(p), Some(c)) => p > c,
+        (Some(_), None) => true,
+        _ => false,
+    };
+    let alive = if progressed { progress } else { cycle };
+    let stale = is_stale(alive, now, seconds);
+    let mode = if stale && raw != "incompatible" {
+        SyncMode::Interrupted
+    } else if raw == "interrupted" && progressed {
+        SyncMode::CatchingUp
+    } else {
+        parse_sync_mode(raw)?
+    };
+    Ok(SyncHealth {
+        mode,
+        reachable: (reachable || (progressed && raw == "interrupted")) && !stale,
+        stale,
+    })
+}
+
 fn is_stale(at: Option<DateTime<Utc>>, now: DateTime<Utc>, seconds: i64) -> bool {
     at.is_none_or(|at| {
         (now - at).num_seconds() > seconds || at > now + chrono::Duration::seconds(5)
@@ -266,13 +307,21 @@ async fn status_snapshot(
         .fetch_one(&mut **tx)
         .await?;
     let cycle: Option<DateTime<Utc>> = row.try_get("last_cycle_at")?;
-    let sync_stale = is_stale(cycle, now, stale);
+    let progress: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT max(updated_at) FROM ops.sync_cursors WHERE dataset_id=$1")
+            .bind(data.dataset_id)
+            .fetch_one(&mut **tx)
+            .await?;
     let raw: String = row.try_get("sync_mode")?;
-    let mode = if sync_stale && raw != "incompatible" {
-        SyncMode::Interrupted
-    } else {
-        parse_sync_mode(&raw)?
-    };
+    let health = sync_health(
+        &raw,
+        row.try_get("source_reachable")?,
+        cycle,
+        progress,
+        now,
+        stale,
+    )?;
+    let (mode, sync_stale) = (health.mode, health.stale);
     let mut extractors = Vec::new();
     for r in sqlx::query("SELECT *,encode(last_tip_hash,'hex') AS hash FROM ingest.extractor_status WHERE dataset_id=$1 ORDER BY source")
         .bind(data.dataset_id).fetch_all(&mut **tx).await? {
@@ -322,16 +371,17 @@ async fn status_snapshot(
         cursors.push(StreamProgress {
             stream: stream.to_owned(),
             imported_through: cursor.to_string(),
+            // Stored at cycle end; the cursor already proves rows up to itself.
             source_high_water: row
                 .try_get::<Option<i64>, _>(column)?
-                .map(|v| v.to_string()),
+                .map(|v| v.max(cursor).to_string()),
         });
     }
     Ok(StatusResponse {
         branch: branch(tx, data.dataset_id).await?,
         meta: response_meta(tx, &data).await?,
         sync_mode: mode,
-        source_reachable: row.try_get::<bool, _>("source_reachable")? && !sync_stale,
+        source_reachable: health.reachable,
         last_source_contact_at: row.try_get("last_source_contact_at")?,
         last_projection_update_at: row.try_get("last_projection_update_at")?,
         latest_observed_block: latest_block(tx, data.dataset_id).await?,
@@ -650,6 +700,8 @@ pub async fn evidence(
         fact_sha256: row.try_get("fact_hash")?,
         envelope_hex: row.try_get("envelope_hex")?,
         payload_json: row.try_get("payload_json")?,
+        raw_block_omitted: row.try_get::<String, _>("source")? == "node"
+            && row.try_get::<String, _>("kind")? == "mainchain_block",
         interpretation_error: match row.try_get::<Option<String>,_>("interpretation_error")? {
             // The importer's error, then the chain's, then the protocol facts'.
             Some(e)=>Some(e),None=>sqlx::query_scalar("SELECT coalesce(
@@ -731,6 +783,31 @@ fn parse_sync_mode(value: &str) -> Result<SyncMode, StorageError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_progress_after_a_failed_cycle_reads_as_catching_up() {
+        let now = Utc::now();
+        let failed = Some(now - chrono::Duration::seconds(300));
+        let page = Some(now - chrono::Duration::seconds(3));
+        let h = sync_health("interrupted", false, failed, page, now, 30).unwrap();
+        assert!(matches!(h.mode, SyncMode::CatchingUp) && h.reachable && !h.stale);
+        // No commit since the failure: still interrupted and unreachable.
+        let h = sync_health("interrupted", false, failed, failed, now, 30).unwrap();
+        assert!(matches!(h.mode, SyncMode::Interrupted) && !h.reachable && h.stale);
+    }
+
+    #[test]
+    fn a_long_healthy_cycle_stays_fresh_while_pages_commit() {
+        let now = Utc::now();
+        let ended = Some(now - chrono::Duration::seconds(600));
+        let page = Some(now - chrono::Duration::seconds(2));
+        let h = sync_health("catching_up", true, ended, page, now, 30).unwrap();
+        assert!(matches!(h.mode, SyncMode::CatchingUp) && h.reachable && !h.stale);
+        let h = sync_health("catching_up", true, ended, ended, now, 30).unwrap();
+        assert!(matches!(h.mode, SyncMode::Interrupted) && !h.reachable);
+        let h = sync_health("incompatible", true, ended, page, now, 30).unwrap();
+        assert!(matches!(h.mode, SyncMode::Incompatible));
+    }
     #[test]
     fn cursors_are_scoped_and_bounded() {
         let cursor = StreamCursor {

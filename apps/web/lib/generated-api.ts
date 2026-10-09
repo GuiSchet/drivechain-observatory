@@ -967,6 +967,12 @@ export interface components {
             occurrences_truncated: boolean;
             /** @description JSON text, deliberately not a JS-number-bearing object. Copy verbatim. */
             payload_json: string;
+            /**
+             * @description True for a node raw block imported without its body: `envelope_hex` is
+             *     empty and `payload_json` lacks `raw_block`. `fact_sha256` still hashes
+             *     the full source block.
+             */
+            raw_block_omitted: boolean;
             source_event_id: string;
         };
         ExtractorStatus: {

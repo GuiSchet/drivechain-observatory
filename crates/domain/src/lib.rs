@@ -217,6 +217,10 @@ pub struct EvidenceResponse {
     pub envelope_hex: String,
     /// JSON text, deliberately not a JS-number-bearing object. Copy verbatim.
     pub payload_json: String,
+    /// True for a node raw block imported without its body: `envelope_hex` is
+    /// empty and `payload_json` lacks `raw_block`. `fact_sha256` still hashes
+    /// the full source block.
+    pub raw_block_omitted: bool,
     pub interpretation_error: Option<String>,
     pub occurrences: Vec<EvidenceOccurrence>,
     pub occurrences_truncated: bool,

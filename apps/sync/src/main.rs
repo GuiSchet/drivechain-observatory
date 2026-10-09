@@ -437,6 +437,33 @@ async fn sync_cycle(source: &PgPool, destination: &PgPool, args: &Args) -> Resul
     .await
 }
 
+/// Runs already imported. `sync_runs` reads runs once per cycle, so a run the
+/// monitor starts mid-cycle is unknown until the next one; its rows must wait
+/// rather than fail the `run_id` foreign key.
+async fn known_runs(
+    destination: &mut PgConnection,
+    runs: impl IntoIterator<Item = Uuid>,
+) -> Result<std::collections::HashSet<Uuid>> {
+    let runs = runs.into_iter().collect::<Vec<_>>();
+    if runs.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    Ok(
+        sqlx::query_scalar("SELECT run_id FROM ingest.extractor_runs WHERE run_id=ANY($1)")
+            .bind(&runs)
+            .fetch_all(&mut *destination)
+            .await?
+            .into_iter()
+            .collect(),
+    )
+}
+
+/// The longest prefix of an id-ordered page whose rows are importable. A blocked
+/// row is never skipped: everything after it waits with it.
+fn importable_prefix<T>(rows: Vec<T>, importable: impl Fn(&T) -> bool) -> Vec<T> {
+    rows.into_iter().take_while(|row| importable(row)).collect()
+}
+
 async fn sync_failures(
     source: &PgPool,
     destination: &PgPool,
@@ -455,8 +482,13 @@ async fn sync_failures(
     for _ in 0..pages {
         let mut tx = destination.begin().await?;
         let after = cursor(&mut tx, dataset, "observation_failures").await?;
-        let rows = sqlx::query_as::<_, Failure>("SELECT failure_id,run_id,worker,observed_at,error FROM observation_failure WHERE dataset_id=$1 AND failure_id>$2 ORDER BY failure_id LIMIT $3")
+        let fetched = sqlx::query_as::<_, Failure>("SELECT failure_id,run_id,worker,observed_at,error FROM observation_failure WHERE dataset_id=$1 AND failure_id>$2 ORDER BY failure_id LIMIT $3")
             .bind(dataset).bind(after).bind(limit).fetch_all(source).await?;
+        let fetched_all = fetched.len() < usize::try_from(limit)?;
+        let known = known_runs(&mut tx, fetched.iter().map(|row| row.run_id)).await?;
+        let total = fetched.len();
+        let rows = importable_prefix(fetched, |row| known.contains(&row.run_id));
+        let blocked = rows.len() < total;
         for row in &rows {
             sqlx::query("INSERT INTO ingest.observation_failures VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING")
                 .bind(dataset).bind(row.failure_id).bind(row.run_id).bind(&row.worker).bind(row.observed_at).bind(&row.error).execute(&mut *tx).await?;
@@ -465,7 +497,7 @@ async fn sync_failures(
             advance_cursor(&mut tx, dataset, "observation_failures", last.failure_id).await?;
         }
         tx.commit().await?;
-        if rows.len() < usize::try_from(limit)? {
+        if fetched_all || blocked {
             break;
         }
     }
@@ -777,13 +809,18 @@ async fn sync_dataset_locked(
     } else {
         "following"
     };
+    // Pages read past the cycle's starting high water; the cursors are a lower
+    // bound of the source maximum too, so report whichever is larger.
     let mut transaction = destination.begin().await?;
     let changed: bool = sqlx::query_scalar("SELECT sync_mode IS DISTINCT FROM $2 OR NOT source_reachable FROM ops.source_status WHERE dataset_id=$1")
         .bind(dataset_id).bind(sync_mode).fetch_one(&mut *transaction).await?;
     sqlx::query("UPDATE ops.source_status SET source_reachable=true, sync_mode=$3,
         last_source_contact_at=now(), last_cycle_at=now(), last_error=NULL, source_schema_version=$2,
-        source_event_high_water=$4, source_observation_high_water=$5, source_tip_high_water=$6,
-        source_coverage_high_water=$7, updated_at=now() WHERE dataset_id=$1")
+        source_event_high_water=GREATEST($4,(SELECT cursor_value FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='source_events')),
+        source_observation_high_water=GREATEST($5,(SELECT cursor_value FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='event_observations')),
+        source_tip_high_water=GREATEST($6,(SELECT cursor_value FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='tip_observations')),
+        source_coverage_high_water=GREATEST($7,(SELECT cursor_value FROM ops.sync_cursors WHERE dataset_id=$1 AND stream='coverage_revisions')),
+        updated_at=now() WHERE dataset_id=$1")
         .bind(dataset_id).bind(schema_version).bind(sync_mode)
         .bind(high_water.events).bind(high_water.observations).bind(high_water.tips).bind(high_water.coverage)
         .execute(&mut *transaction).await?;
@@ -800,6 +837,13 @@ async fn sync_dataset_locked(
     Ok(())
 }
 
+/// Node `mainchain_block` events carry the full raw block (megabytes), but the
+/// Observatory only reads their header. The body is dropped at import; both
+/// source hashes are kept verbatim and still cover the full block, so conflict
+/// detection and the content audit are unchanged.
+const RAW_BLOCK_EVENT: &str = "source = 'node' AND kind = 'mainchain_block'";
+const RAW_BLOCK_PATH: &str = "{monitor_event,Node,event,MainchainBlock,raw_block}";
+
 /// Imports the next contiguous page of source events and reports whether it was
 /// full, i.e. limited by rows or bytes, so more may follow.
 async fn sync_event_page(
@@ -812,16 +856,18 @@ async fn sync_event_page(
     let cursor = cursor(destination, dataset_id, "source_events").await?;
     // Sizes come from TOAST headers (no detoasting), so bounding the page is
     // cheap. The first row is always taken, however large, to keep progressing.
-    let (upper, rows, bytes_limited): (Option<i64>, i64, bool) = sqlx::query_as(
+    // A node raw block is imported without its body, so it costs a header.
+    let (upper, rows, bytes_limited): (Option<i64>, i64, bool) = sqlx::query_as(&format!(
         "WITH page AS ( \
-             SELECT id, octet_length(envelope)::bigint + pg_column_size(payload)::bigint AS size \
+             SELECT id, CASE WHEN {RAW_BLOCK_EVENT} THEN 1024 \
+                        ELSE octet_length(envelope)::bigint + pg_column_size(payload)::bigint END AS size \
                FROM event WHERE dataset_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3), \
          running AS (SELECT id, size, sum(size) OVER (ORDER BY id) AS total FROM page) \
          SELECT max(id) FILTER (WHERE total <= $4 OR id = (SELECT min(id) FROM page)), \
                 count(*) FILTER (WHERE total <= $4 OR id = (SELECT min(id) FROM page)), \
                 coalesce(bool_or(total > $4), false) \
-           FROM running",
-    )
+           FROM running"
+    ))
     .bind(dataset_id)
     .bind(cursor)
     .bind(batch_size)
@@ -831,14 +877,16 @@ async fn sync_event_page(
     let Some(upper) = upper else {
         return Ok(false);
     };
-    let events = sqlx::query_as::<_, SourceEvent>(
+    let events = sqlx::query_as::<_, SourceEvent>(&format!(
         "SELECT id, dataset_id, event_contract_version, observed_at, ingested_at, \
                 source, kind, sidechain, sidechain_instance_id, block_hash, height, \
-                envelope, envelope_sha256, fact_sha256, payload \
+                CASE WHEN {RAW_BLOCK_EVENT} THEN '\\x'::bytea ELSE envelope END AS envelope, \
+                envelope_sha256, fact_sha256, \
+                CASE WHEN {RAW_BLOCK_EVENT} THEN payload #- '{RAW_BLOCK_PATH}' ELSE payload END AS payload \
            FROM event \
           WHERE dataset_id = $1 AND id > $2 AND id <= $3 \
-          ORDER BY id ASC",
-    )
+          ORDER BY id ASC"
+    ))
     .bind(dataset_id)
     .bind(cursor)
     .bind(upper)
@@ -945,10 +993,10 @@ async fn sync_event_observation_page(
     .await?
     .into_iter()
     .collect();
-    let observations = observations
-        .into_iter()
-        .take_while(|row| imported.contains(&row.event_id))
-        .collect::<Vec<_>>();
+    let known = known_runs(&mut *destination, observations.iter().map(|row| row.run_id)).await?;
+    let observations = importable_prefix(observations, |row| {
+        imported.contains(&row.event_id) && known.contains(&row.run_id)
+    });
     if observations.is_empty() {
         return Ok(0);
     }
@@ -1047,6 +1095,8 @@ async fn sync_tip_page(
     .bind(batch_size)
     .fetch_all(source)
     .await?;
+    let known = known_runs(&mut *destination, observations.iter().map(|row| row.run_id)).await?;
+    let observations = importable_prefix(observations, |row| known.contains(&row.run_id));
     if observations.is_empty() {
         return Ok(0);
     }
@@ -1287,8 +1337,20 @@ async fn sync_extractor_status(
         "SELECT w.* FROM extractor_worker_status w JOIN extractor_run r USING(run_id) WHERE r.dataset_id=$1")
         .bind(dataset_id).fetch_all(source).await?;
     let mut tx = destination.begin().await?;
+    // Rows of a run started after this cycle's run import are retried next cycle.
+    let known = known_runs(
+        &mut tx,
+        statuses
+            .iter()
+            .map(|status| status.run_id)
+            .chain(workers.iter().map(|worker| worker.run_id)),
+    )
+    .await?;
     let mut changed = false;
-    for status in statuses {
+    for status in statuses
+        .into_iter()
+        .filter(|status| known.contains(&status.run_id))
+    {
         let old: Option<(Uuid, Option<String>)> = sqlx::query_as(
             "SELECT run_id, last_error FROM ingest.extractor_status WHERE dataset_id=$1 AND source=$2")
             .bind(dataset_id).bind(&status.source).fetch_optional(&mut *tx).await?;
@@ -1301,7 +1363,10 @@ async fn sync_extractor_status(
             .bind(status.dataset_id).bind(&status.source).bind(status.run_id).bind(status.last_tip_hash)
             .bind(status.last_tip_height).bind(status.last_error).bind(status.updated_at).execute(&mut *tx).await?;
     }
-    for worker in workers {
+    for worker in workers
+        .into_iter()
+        .filter(|worker| known.contains(&worker.run_id))
+    {
         let old: Option<(i32, Option<String>, bool)> = sqlx::query_as(
             "SELECT consecutive_failures,last_error,last_success_at IS NOT NULL FROM ingest.worker_status WHERE run_id=$1 AND worker=$2")
             .bind(worker.run_id).bind(&worker.worker).fetch_optional(&mut *tx).await?;
@@ -1355,16 +1420,21 @@ async fn check_continuity(
         }
     }
     check_import_order(source, destination, dataset).await?;
-    let witness: Option<(i64,Vec<u8>)> = sqlx::query_as("SELECT source_event_id,envelope FROM ingest.source_events WHERE dataset_id=$1 ORDER BY source_event_id DESC LIMIT 1")
+    // Hashes, not bytes: imported raw blocks have no body, and the source
+    // hashes still identify the exact source row.
+    type Witness = (Option<Vec<u8>>, Option<Vec<u8>>);
+    type WitnessRow = (i64, Option<Vec<u8>>, Option<Vec<u8>>);
+    let witness: Option<WitnessRow> = sqlx::query_as("SELECT source_event_id,envelope_sha256,fact_sha256 FROM ingest.source_events WHERE dataset_id=$1 ORDER BY source_event_id DESC LIMIT 1")
         .bind(dataset).fetch_optional(&mut *destination).await?;
-    if let Some((id, envelope)) = witness {
-        let actual: Option<Vec<u8>> =
-            sqlx::query_scalar("SELECT envelope FROM event WHERE dataset_id=$1 AND id=$2")
-                .bind(dataset)
-                .bind(id)
-                .fetch_optional(source)
-                .await?;
-        if actual.as_ref() != Some(&envelope) {
+    if let Some((id, envelope_sha256, fact_sha256)) = witness {
+        let actual: Option<Witness> = sqlx::query_as(
+            "SELECT envelope_sha256,fact_sha256 FROM event WHERE dataset_id=$1 AND id=$2",
+        )
+        .bind(dataset)
+        .bind(id)
+        .fetch_optional(source)
+        .await?;
+        if actual != Some((envelope_sha256, fact_sha256)) {
             return Err(incompatible(
                 "source event witness changed; reconcile dataset",
             ));
@@ -1602,14 +1672,15 @@ async fn repair_fact_hashes(
     dataset: Uuid,
     limit: i64,
 ) -> Result<()> {
-    let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as("SELECT source_event_id,envelope FROM ingest.source_events WHERE dataset_id=$1 AND fact_sha256 IS NULL ORDER BY source_event_id LIMIT $2")
+    // Envelope hashes, not bytes: an imported raw block has no body.
+    let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as("SELECT source_event_id,coalesce(envelope_sha256,sha256(envelope)) FROM ingest.source_events WHERE dataset_id=$1 AND fact_sha256 IS NULL ORDER BY source_event_id LIMIT $2")
         .bind(dataset).bind(limit).fetch_all(&mut *destination).await?;
     if rows.is_empty() {
         return Ok(());
     }
     let ids = rows.iter().map(|row| row.0).collect::<Vec<_>>();
     let facts: Vec<(i64, Vec<u8>, Vec<u8>)> = sqlx::query_as(
-        "SELECT id,envelope,fact_sha256 FROM event WHERE dataset_id=$1 AND id=ANY($2)",
+        "SELECT id,coalesce(envelope_sha256,sha256(envelope)),fact_sha256 FROM event WHERE dataset_id=$1 AND id=ANY($2)",
     )
     .bind(dataset)
     .bind(ids)
@@ -1727,4 +1798,27 @@ fn init_tracing() {
         )
         .json()
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::importable_prefix;
+
+    #[test]
+    fn a_blocked_row_holds_back_every_later_row() {
+        // Rows of run 2 wait for it; the later run-1 row must not jump ahead.
+        let page = vec![(1, 'a'), (1, 'b'), (2, 'c'), (1, 'd')];
+        let known = [1];
+        assert_eq!(
+            importable_prefix(page, |row| known.contains(&row.0)),
+            vec![(1, 'a'), (1, 'b')]
+        );
+    }
+
+    #[test]
+    fn a_fully_known_page_is_imported_whole() {
+        let page = vec![1, 2, 3];
+        assert_eq!(importable_prefix(page.clone(), |_| true), page);
+        assert!(importable_prefix(page, |row| *row > 1).is_empty());
+    }
 }

@@ -8,7 +8,7 @@ not require changing a SHA allowlist. Old databases remain separate archives.
 
 | Source | Available information | Limits |
 |---|---|---|
-| Node mainchain_block | Verified raw bytes, headers, parent links, absolute work | Does not select the enforcer branch |
+| Node mainchain_block | Verified headers, parent links, absolute work; the raw block body stays in the monitor | Does not select the enforcer branch |
 | Official GetBlockInfo | Per-slot deposits, BMM commitments, bundle outcomes | No resolved historical protocol effects |
 | Official SubscribeEvents(0) | Global live connects/disconnects, even with no active slots; a boundary per (re)subscription bounding each gap | No durable server sequence/baseline or offline replay |
 | Official state RPCs | Active instances, proposals, CTIP, pending bundles, read on every tip change | Unanchored read windows; no atomic snapshot |
@@ -18,7 +18,9 @@ not require changing a SHA allowlist. Old databases remain separate archives.
 `crates/source` normalizes observations. It does not implement BIP300 voting,
 expiry, activation or treasury transition rules. No votes or terminal outcomes
 are inferred between reads. Historical eligibility ratios remain null.
-Raw protobuf and exact source JSON remain available separately. Monetary u64
+Raw protobuf and exact source JSON remain available separately, except the node
+raw block body: `mainchain_block` is imported with an empty envelope and without
+`raw_block`, keeping both source hashes (which cover the full block) verbatim. Monetary u64
 values and identifiers are decimal strings. Description identity is SHA256d of
 the decoded description bytes, excluding CompactSize, in display order. Every
 hash and txid is in display order, including the M6 identifier (bundle txid).

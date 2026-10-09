@@ -3,7 +3,7 @@ services:
     image: drivechain-observatory-ssh-tunnel:local
     build:
       context: ./tunnel
-    entrypoint: ["ssh"]
+    entrypoint: ["/usr/local/bin/tunnel.sh"]
     command:
       - -NT
       - -i
@@ -35,7 +35,8 @@ services:
       - /tmp:size=4m,mode=1777
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "5432"]
+      # End to end: the monitor PostgreSQL must answer an SSLRequest.
+      test: ["CMD-SHELL", "printf '\\000\\000\\000\\010\\004\\322\\026\\057' | nc -N -w 2 127.0.0.1 5432 | head -c 1 | grep -q ."]
       interval: 3s
       timeout: 2s
       retries: 20
