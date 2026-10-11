@@ -55,7 +55,7 @@ export function ReadingsChart({ points, gaps = [], reference, yFormat, label, ze
         </g>)}
       </svg>
       {shown && <div className={`rc-tooltip ${sx(shown.x) < W * 0.25 ? "start" : sx(shown.x) > W * 0.75 ? "end" : ""}`} style={{ left: `${(sx(shown.x) / W) * 100}%`, top: `${(sy(shown.y) / H) * 100}%` }} role="status">
-        {shown.label}{shown.href && <> · <Link href={shown.href}>proof</Link></>}
+        {shown.label}{shown.href && <> · <Link href={shown.href}>evidence</Link></>}
       </div>}
     </div>
     <figcaption>{note ? <>{note} </> : null}Each dot is one reading, placed at the L1 tip it was first taken at. The line only joins readings; it is not a reading itself.{gaps.some(([a, b]) => b > a) ? " Shaded bands are heights the monitor did not observe." : ""}</figcaption>

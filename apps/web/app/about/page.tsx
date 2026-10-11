@@ -16,7 +16,7 @@ export default async function Page() {
     <section className="about-hero">
       <Logo size={72}/>
       <div><div className="eyebrow">ABOUT THE PROJECT</div><h1>Drivechain Observatory</h1>
-        <p className="lede">A place to learn drivechains by watching them run. Every lesson explains one idea in plain words and shows it live on eCash Betanet, with the proof behind every number.</p></div>
+        <p className="lede">A place to learn drivechains by watching them run. Every lesson explains one idea in plain words and shows it live on eCash Betanet, with the record behind each value and a plain label for how certain it is.</p></div>
     </section>
 
     <section className="about-section">

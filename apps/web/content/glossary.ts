@@ -10,7 +10,7 @@ export const glossary = {
   sidechain: { term: "Sidechain (L2)", short: "A separate blockchain whose coins are locked on the L1 and released only by a slow miner vote. It has its own software and rules.", chapter: "what-is-a-drivechain", refs: ["bip300Abstract"] },
   "hashrate-escrow": { term: "Hashrate escrow", short: "BIP300's name for a sidechain's locked coins: miners, voting with the blocks they find, decide when coins may leave.", chapter: "what-is-a-drivechain", refs: ["bip300"] },
   enforcer: { term: "Enforcer", short: "The program that checks the BIP300/301 rules alongside the L1 node. The Observatory reads its official API.", chapter: "how-we-know", refs: ["enforcer"] },
-  block: { term: "Block", short: "A batch of transactions added to the chain by a miner, on average every ten minutes.", chapter: "blocks" },
+  block: { term: "Block", short: "A batch of transactions added to the chain by a miner. Difficulty aims for one every ten minutes on average; the real pace varies with hashrate.", chapter: "blocks" },
   height: { term: "Height", short: "A block's position in the chain: the number of blocks before it.", chapter: "blocks" },
   "block-hash": { term: "Block hash", short: "A block's unique fingerprint. Each block also records the hash of its parent, which links the chain together.", chapter: "blocks" },
   reorg: { term: "Reorganization (reorg)", short: "When the network switches to a competing branch with more work, so some recent blocks stop being part of the chain.", chapter: "blocks" },

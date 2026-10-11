@@ -35,10 +35,15 @@ try {
   await page.getByText(`> ${constants.unused_sidechain_slot_activation_threshold.toLocaleString('en-US')} votes`,{exact:true}).first().waitFor();
   await page.getByText(`> ${constants.used_sidechain_slot_activation_threshold.toLocaleString('en-US')} votes`,{exact:true}).first().waitFor();
   await page.getByRole('link',{name:/BIP300 · M2, ACK sidechain proposal/}).first().waitFor();
+  // The vote message is shown as each document defines it, and Betanet's own header is named.
+  await page.getByText('Go deeper: what the messages look like, in each document').click();
+  await page.getByRole('cell',{name:'D6E1C5DF'}).waitFor();
+  await page.getByText(`at least ${(constants.unused_sidechain_slot_activation_threshold+1).toLocaleString('en-US')} within`).first().waitFor();
 
   // A pending bundle is shown against the observed threshold and age limit.
   await page.goto(base+'/learn/withdrawals');
-  await page.getByText(`needs more than ${constants.withdrawal_bundle_inclusion_threshold.toLocaleString('en-US')}`).first().waitFor();
+  await page.getByText(`needs at least ${(constants.withdrawal_bundle_inclusion_threshold+1).toLocaleString('en-US')}`).first().waitFor();
+  await page.getByRole('heading',{name:'What protects the coins in a treasury'}).waitFor();
   await page.getByText(`limit ${constants.withdrawal_bundle_max_age.toLocaleString('en-US')} blocks`).first().waitFor();
 
   // An exact u64 bid keeps every digit.
@@ -73,7 +78,7 @@ try {
   await page.getByRole('link',{name:new RegExp(`Block ${tip.height.toLocaleString('en-US')}`)}).click();
   await page.getByRole('heading',{name:'What happened in this block'}).waitFor();
   await page.getByText('Go deeper: how we know').click();
-  await page.getByText('You are looking at a proof.').first().waitFor();
+  await page.getByText('You are looking at evidence.').first().waitFor();
   assert(!(await body()).includes('Coinbase messages'),'block detail still lists coinbase messages');
   // A proof opens with what the record says in words; the exact JSON sits behind it.
   await page.getByRole('link',{name:'report'}).first().click();
@@ -97,6 +102,37 @@ try {
   await page.goto(base+'/about');
   await page.locator('.about-section',{hasText:'About us'}).getByText('guischet',{exact:true}).waitFor();
   assert(!(await page.locator('.site-footer').innerText()).includes('Discord'),'Discord appears only in About us');
+
+  // While the API catches up with a block it withholds state: that must read as updating, never as zero.
+  await page.route('**/api/v1/observatory',async route=>{
+    const real=await (await route.fetch()).json();
+    await route.fulfill({json:{...real,context:{...real.context,state:'catching_up'},state:{}}});
+  });
+  await page.goto(base+'/sidechains');
+  await page.getByText('is being updated to the newest block').waitFor();
+  assert(!/\b256 of 256 slots are empty/.test(await body()),'an empty state must not read as 256 empty slots');
+  await page.goto(base);
+  await page.locator('.stat',{hasText:'Active sidechains'}).getByText('Updating…').waitFor();
+  assert.equal(await page.locator('.stat',{hasText:'Withdrawals being voted on'}).locator('strong').innerText(),'Updating…');
+  await page.unroute('**/api/v1/observatory');
+  // A family that failed to read is unknown, even when the rest of the state is fine.
+  await page.route('**/api/v1/observatory',async route=>{
+    const real=await (await route.fetch()).json();
+    const families=real.context.families.map(f=>f.family==='treasury'?{...f,first_error_event_id:'1'}:f);
+    await route.fulfill({json:{...real,context:{...real.context,state:'partial',families}}});
+  });
+  await page.goto(base);
+  assert.equal(await page.locator('.stat',{hasText:'Coins locked in treasuries'}).locator('strong').innerText(),'Unknown');
+  await page.unroute('**/api/v1/observatory');
+  // A stale sync says so in words on every page, even with the live connection open.
+  await page.route('**/api/v1/status',async route=>{
+    const real=await (await route.fetch()).json();
+    await route.fulfill({json:{...real,sync_stale:true,source_reachable:false,sync_mode:'interrupted'}});
+  });
+  await page.goto(base+'/learn/blocks');
+  await page.locator('.status-banner',{hasText:'may be behind the network'}).waitFor();
+  await page.locator('.live-pill.health-delayed',{hasText:'Delayed'}).waitFor();
+  await page.unroute('**/api/v1/status');
 
   // Replaced technical views redirect to the page that now covers them.
   for(const [from,to] of [['/bmm','/learn/merged-mining'],['/explorer','/search'],['/about/data','/learn/how-we-know'],['/pegs','/learn/deposits']]){

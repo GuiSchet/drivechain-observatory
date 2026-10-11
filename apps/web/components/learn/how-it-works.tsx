@@ -39,7 +39,7 @@ export function HowItWorks() {
       body: <>You send coins to {name}&apos;s <strong>treasury</strong>: a single locked output on the main chain. It is an ordinary L1 transaction, so no vote is needed.</>,
       fact: coins ? <>Right now {name}&apos;s treasury holds <strong>{coins}</strong>.</> : loaded ? <>{name} has no coins locked yet.</> : null },
     { title: "Use them on the sidechain", lesson: "slots", lessonTitle: "Slots and sidechains", tag: "Declared",
-      body: <>{name}&apos;s own nodes see the deposit and credit the same amount to your sidechain address. From there you use what {name} offers. L1 never looks inside the sidechain: it only guards the locked coins.</>,
+      body: <>{name}&apos;s own nodes see the deposit and credit the same amount to your sidechain address. From there you use what {name} offers. L1 never looks inside the sidechain: it only holds the locked coins until miners approve a withdrawal.</>,
       fact: sc?.description ? <>{name} describes itself as “{sc.description}”. We don&apos;t watch the sidechains themselves, so this step has no live number.</> : <>We don&apos;t watch the sidechains themselves, so this step has no live number.</> },
     { title: "Miners keep it moving", lesson: "merged-mining", lessonTitle: "Blind merged mining",
       body: <>Each L1 block can seal one new {name} block. Sidechain users pay the L1 miner to include it, and the miner never runs sidechain software: that is <strong>blind merged mining</strong>.</>,

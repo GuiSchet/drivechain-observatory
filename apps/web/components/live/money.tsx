@@ -14,6 +14,9 @@ import { ReadingsChart } from "./readings-chart";
 import { ActivityFeed } from "./activity";
 import { useNow } from "./basics";
 
+/** "at least N + 1": the enforcer compares votes > threshold. */
+const atLeast = (threshold: number | undefined) => `at least ${n(threshold != null ? threshold + 1 : undefined)}`;
+
 export function ParamsPanel({ show }: { show: ("activation" | "withdrawal")[] }) {
   const { params, isPending, isError } = useNetworkParams();
   return <LivePanel title="The rules Betanet is running" quality={params.item?.quality ?? null} proof={proofHref(params.item, params.dataset)}
@@ -21,10 +24,10 @@ export function ParamsPanel({ show }: { show: ("activation" | "withdrawal")[] })
     <p className="live-lede">These numbers come straight from the enforcer. The rule is always <strong>more than</strong> the threshold, before the proposal is older than the maximum age.</p>
     <div className="stat-grid">
       {show.includes("activation") && <>
-        <Stat label="New sidechain, empty slot" value={`> ${n(params.unusedThreshold)} votes`} hint={`within ${n(params.unusedMaxAge)} blocks`}/>
-        <Stat label="New sidechain, replacing one" value={`> ${n(params.usedThreshold)} votes`} hint={`within ${n(params.usedMaxAge)} blocks`}/>
+        <Stat label="New sidechain, empty slot" value={`> ${n(params.unusedThreshold)} votes`} hint={`${atLeast(params.unusedThreshold)} within ${n(params.unusedMaxAge)} blocks`}/>
+        <Stat label="New sidechain, replacing one" value={`> ${n(params.usedThreshold)} votes`} hint={`${atLeast(params.usedThreshold)} within ${n(params.usedMaxAge)} blocks`}/>
       </>}
-      {show.includes("withdrawal") && <Stat label="Withdrawal bundle" value={`> ${n(params.withdrawalThreshold)} votes`} hint={`within ${n(params.withdrawalMaxAge)} blocks`}/>}
+      {show.includes("withdrawal") && <Stat label="Withdrawal bundle" value={`> ${n(params.withdrawalThreshold)} votes`} hint={`${atLeast(params.withdrawalThreshold)} within ${n(params.withdrawalMaxAge)} blocks`}/>}
     </div>
   </LivePanel>;
 }
@@ -62,8 +65,8 @@ export function VoteCard({ title, subtitle, votes, threshold, age, maxAge, foote
   const left = age != null && maxAge != null ? maxAge - age : undefined;
   return <article className="vote-card">
     <h4>{title}</h4><p className="vote-sub">{subtitle}</p>
-    <div className="vote-row"><span>Votes</span><strong>{n(votes)}</strong><span>needs more than {n(threshold)}</span></div>
-    <Meter value={votes} max={threshold} label={`${n(votes)} of more than ${n(threshold)} votes`}/>
+    <div className="vote-row"><span>Votes</span><strong>{n(votes)}</strong><span>needs {atLeast(threshold)}</span></div>
+    <Meter value={votes} max={threshold} label={`${n(votes)} votes; it needs ${atLeast(threshold)}`}/>
     <div className="vote-row"><span>Age</span><strong>{n(age)} blocks</strong><span>limit {n(maxAge)} blocks</span></div>
     <Meter value={age} max={maxAge} label={`Age ${n(age)} of ${n(maxAge)} blocks`}/>
     {left != null && left >= 0 && <p className="vote-note">If it does not pass within the next {n(left)} blocks, it expires. Votes can also go down, so this is a reading, not a forecast.</p>}
@@ -109,7 +112,7 @@ export function TreasuryBars() {
       return <li key={r.slot}>
         <span className="bar-name"><Link href={`/sidechains/${r.slot}`}>{sidechainLabel(r.slot, names)}</Link></span>
         <span className="bar-track">{r.value ? <span className="bar-fill" style={{ width: `${Math.max(0.8, Number((r.value * BigInt(10000)) / top) / 100)}%` }}/> : null}</span>
-        <span className="bar-value">{r.value === null ? "no treasury output yet" : r.value === undefined ? "unknown" : <><strong>{formatCoins(r.value.toString(), true)}</strong><small>{formatSats(r.value.toString(), unit)}{typeof r.seq === "string" ? ` · output #${r.seq}` : ""}</small></>}{proof && <Link className="bar-proof" href={proof}>proof</Link>}</span>
+        <span className="bar-value">{r.value === null ? "no treasury output yet" : r.value === undefined ? "unknown" : <><strong>{formatCoins(r.value.toString(), true)}</strong><small>{formatSats(r.value.toString(), unit)}{typeof r.seq === "string" ? ` · output #${r.seq}` : ""}</small></>}{proof && <Link className="bar-proof" href={proof}>evidence</Link>}</span>
       </li>;
     })}</ol>
   </LivePanel>;
@@ -147,7 +150,7 @@ export function TreasuryHistory({ fixedSlot }: { fixedSlot?: number }) {
     <GoDeeper summary="every treasury output, newest first">
     <ol className="treasury-steps">{rows.map(([seq, r]) => <li key={seq}><span className="seq">{seq === "none" ? "—" : `#${seq}`}</span>
       <span><strong>{seq === "none" ? "No treasury output yet" : formatSats(r.value, unit)}</strong><small>{typeof r.txid === "string" ? `created by transaction ${short(r.txid)} · ` : ""}first read {timeAgo(r.first, now)}, last read {timeAgo(r.last, now)}</small></span>
-      {r.proof && <Link href={r.proof}>proof</Link>}</li>)}</ol>
+      {r.proof && <Link href={r.proof}>evidence</Link>}</li>)}</ol>
     </GoDeeper>
     {rows.length === 1 && <p className="live-note">Only one output has been read for this sidechain so far. The next deposit or withdrawal will add a new row.</p>}
   </LivePanel>;
@@ -180,7 +183,7 @@ export function WithdrawalVotes({ slot }: { slot?: number }) {
       const treasury = object(object(object(observatory.data?.state).treasury)[String(item.slot)]);
       return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(typeof b.m6id === "string" ? b.m6id : "unknown")} · proposed in block ${n(height)}${item.is_current == null ? " · not confirmed in the latest complete reading" : ""}`}
         votes={votes} threshold={params.withdrawalThreshold} age={age} maxAge={params.withdrawalMaxAge}
-        footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the proof →</Link>}</p>
+        footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the evidence →</Link>}</p>
           <VoteHistory item={item} threshold={params.withdrawalThreshold}/></>}/>;
     })}</div>
   </LivePanel>;
@@ -215,7 +218,7 @@ export function DepositStory({ slot, compact = false }: { slot?: number; compact
       <li><span className="story-num">1</span><div>
         <strong>{formatCoins(d.value_sats)} sent to {who}</strong>
         <p>In {blockNumber(deposit.height)} ({timeAgo(deposit.block_time ?? deposit.observed_at, now)}), transaction <span className="hash">{short(typeof txid === "string" ? txid : "unknown")}</span> deposited {formatSats(d.value_sats, unit)}{address ? <> for the sidechain address <span className="hash">{short(address)}</span></> : null}.</p>
-        <div className="stat-meta"><ConfidenceChip quality={deposit.quality}/>{proofHref(deposit, dataset) && <Link className="proof-link" href={proofHref(deposit, dataset)!}>proof</Link>}</div>
+        <div className="stat-meta"><ConfidenceChip quality={deposit.quality}/>{proofHref(deposit, dataset) && <Link className="proof-link" href={proofHref(deposit, dataset)!}>evidence</Link>}</div>
       </div></li>
       <li><span className="story-num">2</span><div>
         <strong>The treasury is replaced: {before} → {after}</strong>
@@ -224,11 +227,11 @@ export function DepositStory({ slot, compact = false }: { slot?: number; compact
       <li><span className="story-num">3</span><div>
         <strong>Our monitor read the new treasury</strong>
         <p>At tip {blockNumber(tip)}, a separate reading found {who}&apos;s treasury output {seq != null ? `#${seq}` : ""} with {formatSats(change.after.toString(), unit)}, created by that same transaction.</p>
-        <div className="stat-meta"><ConfidenceChip quality={change.reading.quality}/>{proofHref(change.reading, dataset) && <Link className="proof-link" href={proofHref(change.reading, dataset)!}>proof</Link>}</div>
+        <div className="stat-meta"><ConfidenceChip quality={change.reading.quality}/>{proofHref(change.reading, dataset) && <Link className="proof-link" href={proofHref(change.reading, dataset)!}>evidence</Link>}</div>
       </div></li>
       {!compact && <li><span className="story-num">4</span><div>
         <strong>The sidechain credits the coins</strong>
-        <p>{who.replace(/ \(#\d+\)$/, "")}&apos;s own nodes see the deposit and credit the address. That happens on the sidechain, which we don&apos;t watch, so there is no proof for this step here.</p>
+        <p>{who.replace(/ \(#\d+\)$/, "")}&apos;s own nodes see the deposit and credit the address. That happens on the sidechain, which we don&apos;t watch, so there is no evidence for this step here.</p>
       </div></li>}
     </ol>}
     <p className="live-note"><Link className="text-link" href="/learn/deposits">How deposits work</Link> · <Link className="text-link" href="/live?kind=deposit">all deposits</Link></p>

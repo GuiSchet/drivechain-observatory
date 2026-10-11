@@ -28,7 +28,7 @@ export function LiveActivity({ kind }: { kind?: string }) {
   const key = kind && kind in filters ? kind : "blocks", f = filters[key];
   return <main className="page-shell">
     <div className="eyebrow">LIVE ON BETANET</div><h1>What is happening now</h1>
-    <p className="lede">Betanet block by block, newest first. For each L1 block: what it contained, and what our readings found had changed while it was the newest block. Every line links to its proof. Looking for something specific? <Link className="text-link" href="/search">Search a block, transaction or sidechain</Link>.</p>
+    <p className="lede">Betanet block by block, newest first. For each L1 block: what it contained, and what our readings found had changed while it was the newest block. Every line links to the record behind it. Looking for something specific? <Link className="text-link" href="/search">Search a block, transaction or sidechain</Link>.</p>
     <nav className="filter-chips" aria-label="Filter activity">{Object.entries(filters).map(([k, { label }]) =>
       <Link key={k} href={k === "blocks" ? "/live" : `/live?kind=${k}`} className={k === key ? "active" : ""} aria-current={k === key ? "page" : undefined}>{label}</Link>)}</nav>
     {key === "blocks" ? <BlockTimeline/> : <>

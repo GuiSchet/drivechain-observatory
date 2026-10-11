@@ -12,7 +12,7 @@ export function WhatIsADrivechain() {
   return <>
     <Section title="The problem">
       <p>Bitcoin changes slowly on purpose. Every node must agree on the same rules, so adding a new feature to the main chain is hard and risky.</p>
-      <p>A <Term id="sidechain">sidechain</Term> is a separate blockchain with its own software and features, which uses coins brought over from the main chain. If something goes wrong on a sidechain, the main chain is not affected.</p>
+      <p>A <Term id="sidechain">sidechain</Term> is a separate blockchain with its own software and features, which uses coins brought over from the main chain. If something goes wrong on a sidechain, the main chain&apos;s own rules and blocks are not affected. The coins locked for that sidechain are another matter: they come back only through withdrawals that miners approve, as you will see.</p>
     </Section>
     <Section title="The idea">
       <p>A drivechain connects the main chain (<Term id="l1">L1</Term>) with sidechains (L2) using two proposals:</p>
@@ -20,12 +20,12 @@ export function WhatIsADrivechain() {
         <li><strong>BIP300, hashrate escrows.</strong> Coins sent to a sidechain are locked on L1. Getting them back out requires L1 miners to approve the withdrawal in a slow, public vote.</li>
         <li><strong>BIP301, blind merged mining.</strong> L1 miners help produce sidechain blocks and collect their fees, without running any sidechain software.</li>
       </ul>
-      <Analogy>Think of a shared vault for each sidechain. Anyone can put coins in. The door only opens after the miners have voted for months, in the open, block by block.</Analogy>
+      <Analogy>Think of a shared vault for each sidechain. Anyone can put coins in. The door only opens after the miners have voted for thousands of blocks (months, at Bitcoin&apos;s ten-minute pace), in the open, block by block.</Analogy>
     </Section>
     <HowItWorks/>
     <SpecNote refs={["bip300Abstract"]}>BIP300 lets L2 withdrawals be governed by proof-of-work, "instead of a federation or fixed set of pubkeys". It aims for slow, transparent and auditable withdrawals, and users who don't care about sidechains can ignore them entirely.</SpecNote>
     <Section title="What you are looking at">
-      <p>This site watches <strong>eCash Betanet</strong> as it runs. Everything inside a <em>Live on Betanet</em> panel comes from a monitor connected to a Betanet node and the official <Term id="enforcer">enforcer</Term>. <em>See the proof</em> opens the exact record behind a value.</p>
+      <p>This site watches <strong>eCash Betanet</strong> as it runs. Everything inside a <em>Live on Betanet</em> panel comes from a monitor connected to a Betanet node and the official <Term id="enforcer">enforcer</Term>. <em>See the evidence</em> opens the exact record behind a value.</p>
     </Section>
     <NetworkSnapshot/>
     <SpecNote variant="betanet" refs={["ecash", "enforcerNetworkParams"]}><Term id="ecash">eCash (ECX)</Term> is a hard fork of Bitcoin built to activate drivechains; it is not eCash (XEC). <Term id="betanet">Betanet</Term> is its rehearsal network: it starts from Bitcoin's chain and enforces BIP300 and BIP301 from block {n(params.activationHeight)} onward, so every mechanism can be watched working before eCash's mainnet.</SpecNote>
@@ -40,7 +40,7 @@ export function WhatIsADrivechain() {
 export function Blocks() {
   return <>
     <Section title="A chain of blocks">
-      <p>Transactions on L1 are grouped into <Term id="block">blocks</Term>. Miners compete to find the next block using proof-of-work, and the network adjusts the difficulty so a new block appears about every ten minutes on average.</p>
+      <p>Transactions on L1 are grouped into <Term id="block">blocks</Term>. Miners compete to find the next block using proof-of-work, and the network adjusts the difficulty aiming for one block every ten minutes on average. The real pace drifts with hashrate; on a young test network like Betanet it has varied widely, so the panel below shows the recent pace.</p>
       <p>Every block has a <Term id="height">height</Term> (how many blocks came before it) and a <Term id="block-hash">hash</Term>, a unique fingerprint. Each block also records its parent's hash, which is what chains them together.</p>
     </Section>
     <ChainDiagram/>

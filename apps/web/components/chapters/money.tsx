@@ -16,8 +16,8 @@ export function CreatingASidechain() {
       <p>Only miners write coinbase transactions, so a sidechain's developers ask miners to include their proposal.</p>
     </Section>
     <Section title="Step 2: miners vote, block by block">
-      <p>In each later block, the miner can vote for the proposal with an <Term id="m2">M2</Term> message that quotes the proposal's declaration hash. One block, at most one vote. A block that does not vote for it simply doesn't add one.</p>
-      <Analogy>It is like a show of hands that lasts for weeks: every block is one hand, and only blocks that raise it count.</Analogy>
+      <p>In each later block, the miner can vote for the proposal with an <Term id="m2">M2</Term> message that quotes the proposal's declaration hash. A block gives a proposal at most one vote. A block that does not vote for it simply doesn't add one.</p>
+      <Analogy>It is like a show of hands that lasts thousands of blocks (about two weeks at the ten-minute target): every block is one hand, and only blocks that raise it count.</Analogy>
     </Section>
     <VoteDiagram threshold={params.unusedThreshold} maxAge={params.unusedMaxAge}/>
     <Section title="Step 3: activate or expire">
@@ -27,10 +27,21 @@ export function CreatingASidechain() {
     <ProposalsNow/>
     <ActivationTimeline/>
     <SpecNote variant="betanet" refs={["bip300M2", "spec300Constants", "enforcerBetanet", "enforcerThresholdRule"]}>
-      The documents disagree on how many votes an empty slot needs. The BIP300 text says a proposal fails after 1,008 blocks without a vote out of 2,016 (a 50% majority). The LayerTwo Labs specification and the enforcer's mainnet setting require 1,815 of 2,016. Betanet uses the value in the panel above. The enforcer also requires strictly <em>more</em> votes than the threshold.
+      The documents disagree on how many votes an empty slot needs. The BIP300 text says a proposal fails after 1,008 blocks without a vote out of 2,016 (a 50% majority). The LayerTwo Labs specification and the enforcer&apos;s mainnet setting use a threshold of 1,815 of 2,016. Betanet uses the value in the panel above. The enforcer requires strictly <em>more</em> votes than the threshold, so a threshold of 1,815 means at least 1,816 votes{params.unusedThreshold != null ? <>, and Betanet&apos;s {n(params.unusedThreshold)} means at least {n(params.unusedThreshold + 1)}</> : null}.
     </SpecNote>
-    <GoDeeper summary="what the messages look like">
-      <p>Both are outputs of the coinbase transaction that start with <code>OP_RETURN</code>. M1 has the header <code>D5E0C4AF</code> followed by the slot number, a version, the title, the description and the two hashes. M2 has the header <code>D6E1C5BF</code> followed by the 32-byte declaration hash. A block may contain at most one M1 and one M2.</p>
+    <SpecNote variant="betanet" refs={["bip300M1", "bip300M2", "spec300M1", "spec300M2", "enforcerM2", "enforcerCoinbaseRules"]}>
+      The vote message on Betanet is not byte-for-byte the one in BIP300. The enforcer follows the LayerTwo Labs specification (M2 names the slot, and several proposals can be voted on in one block), but uses the header <code>D6E1C5DF</code> where both documents write <code>D6E1C5BF</code>. Details below.
+    </SpecNote>
+    <GoDeeper summary="what the messages look like, in each document">
+      <p>Both are coinbase outputs that start with <code>OP_RETURN</code>. M1 has the header <code>D5E0C4AF</code> followed by the slot number and the declaration (a version, the title, the description and the two hashes) in all three documents. M2 is where they differ:</p>
+      <div className="table-scroll"><table className="friendly-table"><thead><tr><th></th><th>BIP300</th><th>LayerTwo Labs spec</th><th>Enforcer on Betanet</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">M2 header</th><td><code>D6E1C5BF</code></td><td><code>D6E1C5BF</code></td><td><code>D6E1C5DF</code></td></tr>
+          <tr><th scope="row">M2 fields</th><td>declaration hash</td><td>slot, declaration hash</td><td>slot, declaration hash</td></tr>
+          <tr><th scope="row">M1 per block</th><td>at most one</td><td>several, not the same slot and declaration twice</td><td>several, not the same slot and declaration twice</td></tr>
+          <tr><th scope="row">M2 per block</th><td>at most one</td><td>at most one per slot</td><td>at most one per slot</td></tr>
+        </tbody></table></div>
+      <p>Betanet runs the enforcer, so the last column is what its miners must write: an M2 with the BIP&apos;s header would be ignored there. The sidechains active on Betanet got their votes in that format.</p>
       <p>A vote only counts from the block after the proposal. That is why a sidechain that got a vote in every block activates exactly {n(params.unusedThreshold != null ? params.unusedThreshold + 1 : undefined)} blocks after it was proposed on Betanet, as the timeline above shows.</p>
     </GoDeeper>
     <CheckYourself question={`On Betanet, a proposal for an empty slot has exactly ${n(params.unusedThreshold)} votes and is still young enough. Does it activate?`} choices={[
@@ -48,11 +59,11 @@ export function Deposits() {
       <Analogy>The treasury is one big jar per sidechain. Each deposit pours the old jar and your coins into a new, larger jar.</Analogy>
     </Section>
     <Section title="Depositing (M5)">
-      <p>A <Term id="m5">deposit</Term> is an ordinary L1 transaction. It spends the current treasury output together with your coins and creates a new treasury output holding more than before. Right after it, an output records the sidechain address that should receive the coins.</p>
+      <p>A <Term id="m5">deposit</Term> is an ordinary L1 transaction. It spends the current treasury output together with your coins and creates a new treasury output holding more than before. Right after it, an output records the sidechain address that should receive the coins. BIP300 itself does not require that output; the LayerTwo Labs specification and the enforcer Betanet runs do.</p>
       <p>No vote is needed: once the transaction is in a block, the deposit is done on L1. The amount deposited is exactly how much the treasury grew.</p>
     </Section>
     <TreasuryDiagram/>
-    <SpecNote refs={["bip300M5", "spec300Treasury"]}>A deposit is valid if it has exactly one OP_DRIVECHAIN output, which becomes the new treasury output, and that output holds more coins than the old one. Deposits and withdrawals never create extra treasury outputs.</SpecNote>
+    <SpecNote refs={["bip300M5", "spec300Treasury", "spec300DepositAddress"]}>A deposit is valid if it has exactly one OP_DRIVECHAIN output, which becomes the new treasury output, and that output holds more coins than the old one. Deposits and withdrawals never create extra treasury outputs.</SpecNote>
     <DepositStory/>
     <TreasuryBars/>
     <DepositFeed/>
@@ -78,7 +89,7 @@ export function Withdrawals() {
     </Section>
     <Section title="Propose (M3), then vote (M4)">
       <p>A miner puts the bundle up for a vote with an <Term id="m3">M3</Term> message. Miners vote on its <Term id="m6id">M6 id</Term>, an identifier of the payout transaction, not on the transaction itself. Being proposed counts as its first vote.</p>
-      <p>From then on, each block carries an <Term id="m4">M4</Term> vote for every sidechain that has bundles pending. For each one, the miner can:</p>
+      <p>From then on, each block may carry an <Term id="m4">M4</Term> message with the miner&apos;s vote for every sidechain that has bundles pending. For each one, the miner can:</p>
       <ul className="lesson-list">
         <li><strong>Upvote one bundle.</strong> It gains a vote; the sidechain's other pending bundles each lose one.</li>
         <li><strong>Abstain.</strong> Nothing changes. A block without an M4 counts as abstaining.</li>
@@ -89,8 +100,18 @@ export function Withdrawals() {
     <VoteDiagram threshold={params.withdrawalThreshold} maxAge={params.withdrawalMaxAge}/>
     <Section title="Pay out (M6), or expire">
       <p>Once a bundle has more votes than the threshold, the payout transaction (<Term id="m6">M6</Term>) can be included in a block. It spends the treasury, pays the withdrawals, and returns the rest to a new treasury output. A bundle that grows too old without passing is dropped and pays nothing.</p>
-      <Analogy>It is a public countdown. Everyone can watch the votes for months before a single coin leaves, so a dishonest withdrawal cannot happen quietly.</Analogy>
+      <Analogy>It is a public countdown. Everyone can watch the votes for thousands of blocks before a single coin leaves, so a dishonest withdrawal would have to happen in the open, where anyone can see it coming.</Analogy>
     </Section>
+    <Section title="What protects the coins in a treasury">
+      <p>L1 checks the vote count and nothing else. It cannot see the sidechain, so it cannot tell whether a bundle pays the people who own those coins on L2. If miners keep voting for a bundle that pays the wrong people, and it gets enough votes in time, L1 pays it out.</p>
+      <p>What the design offers instead is time and visibility: a theft needs a majority of hashrate voting for it, block after block, for thousands of blocks, in public. Every one of those blocks is a chance for other miners to vote against it and for everyone else to react. That is the security assumption of BIP300, and its text says so: sidechains &quot;are already vulnerable to one catastrophe per 13150 blocks (the invalid withdrawal)&quot;.</p>
+      <p>So keep two things apart. L1&apos;s consensus is isolated from sidechains: a broken sidechain cannot break L1. The coins deposited into a sidechain are not isolated in the same way: they are as safe as miners&apos; votes on its withdrawals are honest.</p>
+    </Section>
+    <CheckYourself question="Block after block, most miners vote for a bundle that pays coins to people who never owned them on the sidechain. It passes the threshold in time. What does L1 do?" choices={[
+      { text: "Rejects it, because L1 checks the sidechain's balances", why: "L1 never looks inside a sidechain. It only counts miner votes." },
+      { text: "Pays it out", correct: true, why: "L1 enforces the vote, not the sidechain's books. The defense is that such a vote is slow and public, not that it is impossible." },
+      { text: "Nothing: the enforcer blocks invalid withdrawals", why: "The enforcer applies the same rule as L1: enough votes in time. It cannot judge the sidechain either." },
+    ]}/>
     <ParamsPanel show={["withdrawal"]}/>
     <WithdrawalVotes/>
     <WithdrawalOutcomes/>
@@ -120,6 +141,7 @@ export function MergedMining() {
         <li><strong><Term id="bmm-accept">BMM Accept</Term>.</strong> The miner writes one h* per sidechain into the coinbase, and can then collect the matching request's payment in the same block.</li>
       </ul>
       <Analogy>It is an auction held every block: sidechain users bid for the right to make the next sidechain block, and the miner picks one winner per sidechain.</Analogy>
+      <p>An Accept does not need a Request. A miner who also builds the sidechain block commits to its own h* and has no bid to collect, and BIP301 also lets bids be paid over Lightning, which leaves nothing on L1. So a commitment without a matching on-chain bid is normal.</p>
     </Section>
     <BmmBids/>
     <SpecNote refs={["bip301Example", "bip301Request", "spec301M7", "spec301M8"]}>Only one BMM Request per sidechain can enter each L1 block, and it must match the block's BMM Accept. BIP301 names the two messages "BMM Accept" and "BMM Request"; the LayerTwo Labs specification numbers them M7 and M8.</SpecNote>

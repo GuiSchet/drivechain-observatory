@@ -18,7 +18,7 @@ export function HowWeKnow() {
         <li><ConfidenceChip quality="tip_matched"/> A reading of current state, such as a treasury balance or a vote count, taken while the chain tip did not move. It tells you the state at that moment, not how it got there.</li>
         <li><ConfidenceChip quality="unknown"/> The reading was missing, conflicting, or taken while the chain moved. The Observatory never fills a gap by guessing or by replaying the protocol rules itself.</li>
       </ul>
-      <p>Every value also has <em>See the proof</em>: the exact <Term id="evidence">evidence</Term> record behind it, which anyone can download and check.</p>
+      <p>Most values link to their <Term id="evidence">evidence</Term> (<em>See the evidence</em>): the exact record behind them, which anyone can download and check. Evidence shows what the sources reported, not that the report is right: the node and the enforcer can have bugs too.</p>
     </Section>
     <TrustStatus/>
     <QualitySummary/>

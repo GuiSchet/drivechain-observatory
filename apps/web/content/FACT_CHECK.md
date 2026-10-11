@@ -26,7 +26,7 @@ Status: ✅ verified · ⚠️ verified with a caveat stated in the lesson.
 | The unused-slot threshold differs between documents | BIP300 M2 text: 1,008 fails in 2,016 blocks (50%); L2L spec constants: 1,815; enforcer mainnet: 1,815; Betanet: 1,008 | ⚠️ explained in "Creating a sidechain" |
 | `OP_DRIVECHAIN` is `OP_NOP8` on Betanet; BIP300 specifies `OP_NOP5` | BIP300 "OP_DRIVECHAIN"; enforcer `OpDrivechain` L920-932 and `betanet()` | ✅ |
 | One coin = 100,000,000 sats | Bitcoin consensus `COIN`, inherited by the fork; API `native_asset` is `sats` with 0 decimals (display unit) | ✅ |
-| New blocks about every ten minutes on average | Bitcoin difficulty target, inherited by the fork | ✅ |
+| Difficulty aims for one block every ten minutes; the real pace varies, and Betanet's has varied widely | Bitcoin difficulty target, inherited by the fork; Betanet averaged ~7.5 min/block from 967,680 to 971,518 (Sep 19 – Oct 9) and ran far faster in bursts (an external review saw 200 blocks in ~5.5 h) | ⚠️ lessons state the target, not a pace; `BlockHeartbeat` shows the observed one |
 
 | Donation address `bc1qkh8x…kt6m` is a valid mainnet SegWit v0 (P2WPKH) address | bech32 checksum and program length checked; rendered QR decoded back to the same string with jsQR | ✅ |
 | The same `bc1…` address works on eCash: its node keeps Bitcoin's mainnet `bech32_hrp = "bc"` | `ecash-com/bitcoin` branches `betanet` and `drivechain-ecash`, `src/kernel/chainparams.cpp` | ✅ |
@@ -45,18 +45,21 @@ Status: ✅ verified · ⚠️ verified with a caveat stated in the lesson.
 | Observatory instance identity = slot + proposal height + activation height + description hash | API `entity_id` format, e.g. `9:967989:968998:3a7d…` | ✅ |
 | `mainchain_transition` records do not say whether a block was connected or disconnected in the API | `enforcer_extractor.proto` `MainchainTransition.action`; API `data` has no action field | ✅ described as "a change of the chain" |
 
-| M1 is a coinbase `OP_RETURN` with header `D5E0C4AF` (slot, version, title, description, hash1, hash2); M2 has header `D6E1C5BF` + 32-byte declaration hash; at most one M1 and one M2 per block | BIP300 M1, M2 | ✅ |
+| M1 is a coinbase `OP_RETURN` with header `D5E0C4AF` + slot + declaration (version, title, description, hash1, hash2) | BIP300 M1; L2L spec M1; enforcer `lib/messages.rs` L41 | ✅ |
+| M2 differs in three documents. BIP300: header `D6E1C5BF` + declaration hash; at most one M1 and one M2 per block. L2L spec: `D6E1C5BF` + slot + hash; several M1 (no duplicate slot+declaration), one M2 per slot. Enforcer on Betanet: **`D6E1C5DF`** + slot + hash; same per-block limits as the L2L spec | BIP300 M1/M2 ("There is already an M1 in this block", "An M2 is already in this block"); L2L spec `bip300.md` M2 Encoding and lines 1051-1062; enforcer `lib/messages.rs` L76-98 (`M2AckSidechain::TAG`), L533-568 (`CoinbaseMessages::push`) | ⚠️ the lesson shows all three; Betanet follows the enforcer |
+| A block gives a proposal at most one vote | All three: BIP300 one M2 per block; L2L spec and enforcer one M2 per slot | ✅ |
 | A new proposal starts with 0 votes; an M2 only counts from the block after the proposal | BIP300 M1 ("age=0, fails=0"); enforcer `handle_m2_ack_sidechain` comment L249-252 | ✅ |
 | Proposals are dropped when too old or when they can no longer reach the threshold | Enforcer `handle_failed_sidechain_proposals` | ✅ lesson says "dropped" when it "runs out of time" |
 | Only miners write coinbase transactions | Bitcoin consensus | ✅ |
 | Treasury: one `OP_DRIVECHAIN` output per sidechain (CTIP); deposits and withdrawals replace it with exactly one new one | BIP300 M5 ("the old UTXO is spent and a single new UTXO is created"), D1 fields 9-10 | ✅ |
 | M5 valid if exactly one `OP_DRIVECHAIN` output with more coins than before; no vote | BIP300 M5 | ✅ |
-| The output after the treasury output records the sidechain address | Enforcer `validator/task/mod.rs` L862-873 | ✅ |
+| The output after the treasury output records the sidechain address; BIP300 does not require it | Enforcer `validator/task/mod.rs` L862-873; L2L spec "address OP_RETURN output"; BIP300 M5 defines deposits only by the treasury growing | ✅ lesson says which documents require it |
 | Treasury script is `OP_DRIVECHAIN <slot> OP_TRUE`; anyone may spend it under M5/M6 rules | BIP300 "OP_DRIVECHAIN"; enforcer `OpDrivechain::script` | ✅ |
 | Crediting a deposit on L2 is the sidechain's job; L1 and the Observatory don't see it | BIP300 Abstract (partitioning); `SOURCE_CONTRACT.md` | ✅ |
 | CTIP `sequence_number` counts treasury outputs | Enforcer `treasury_utxo_count`; API FreeBank deposits at 971,479 (seq 4) and 971,481 (seq 5) match CTIP seq 5 | ✅ |
 | Bundles pay all or nothing; many withdrawals per L1 transaction | BIP300 "Withdrawing in bundles", D2 | ✅ |
 | M3 proposes a bundle and counts as the first vote | BIP300 M3 ("initial ACK score = 1"); enforcer test `handle_m3_propose_starts_vote_count_at_one` | ✅ |
+| An M4 is optional in each block | BIP300 M4; enforcer treats a block without M4 as abstain | ✅ lesson says "may carry" |
 | M4 per block: upvote one bundle per sidechain (others with votes lose one), abstain (no change), alarm (all lose one); no M4 = abstain; votes never below 0 | BIP300 M4; enforcer `handle_m4_votes`, `downvoted_others_for_upvote`, `positive_votes_proposals_for_alarm` (only bundles with `vote_count > 0`); RepeatPrevious handling L506-534 | ✅ |
 | Miners vote on the M6 id, a "blinded" txid without inputs and with the treasury output replaced by a fee `OP_RETURN` | BIP300 D2 field 2, "Withdrawing in bundles"; L2L spec `m6_to_id` | ✅ |
 | M6 returns the remainder to a new treasury output | BIP300 M6 (first output is `OP_DRIVECHAIN`) | ✅ |
@@ -67,8 +70,12 @@ Status: ✅ verified · ⚠️ verified with a caveat stated in the lesson.
 | BIP301 names BMM Accept/Request; L2L spec numbers them M7/M8 | BIP301; L2L spec `bip301.md` headings | ✅ |
 | A commitment does not establish the validity of the sidechain block | BIP301 ("blind"); previous Observatory copy | ✅ |
 | Bid samples: empty sample ≠ no bids; a vanished bid ≠ paid; fees only for observed bids matching a commitment with readable prevouts | `SOURCE_CONTRACT.md` (GetSeenBmmRequests, node fee enrichment) | ✅ |
-| "Show of hands that lasts for weeks" (activation) | Betanet unused-slot max age 2,016 blocks ≈ 2 weeks | ✅ |
-| "Votes for months" (withdrawals) | Betanet withdrawal threshold 13,150 blocks ≈ 3 months at 10 min/block | ✅ |
+| "Thousands of blocks (about two weeks at the ten-minute target)" (activation) | Betanet unused-slot max age 2,016 blocks; 2,016 × 10 min = 14 days | ✅ stated in blocks, time only at the target |
+| "Thousands of blocks (months at Bitcoin's ten-minute pace)" (withdrawals) | Betanet withdrawal threshold 13,150 blocks; × 10 min ≈ 91 days | ✅ stated in blocks, time only at the target |
+| Effective minimum: votes must exceed the threshold, so 1,815 needs 1,816 and Betanet's 1,008 needs 1,009 | Enforcer `>` comparisons cited above | ✅ shown as "at least N + 1" |
+| L1 checks only the vote count; a sustained hashrate majority can pay out a bundle that does not match L2 balances; the defense is time and visibility | BIP300 M2: "BIP-300 sidechains are already vulnerable to one catastrophe per 13150 blocks (the invalid withdrawal)"; BIP300 M6 and L2L spec M6 validate votes and the M6 id only | ✅ lesson "What protects the coins in a treasury" |
+| L1 consensus is isolated from sidechains, deposited coins are not | BIP300 Abstract (partitioning) and the M2 quote above | ✅ |
+| A BMM Accept needs no Request (miner builds the side block itself); Requests may be paid over Lightning and leave nothing on L1 | BIP301 "It is possible for Mary and Simon to be the same person… There would only be Accepts"; "This BIP allows BMM Requests to take place over Lightning" | ✅ |
 
 | Pipeline: node + enforcer → monitor records every reading → Observatory copy → site; the site never queries the network | `README.md` Architecture; `SOURCE_CONTRACT.md` | ✅ |
 | Snapshot readings are "tip matched" when the tip was the same before and after; not atomic, not tied to a block | `SOURCE_CONTRACT.md` ("Equal tips never prove atomicity") | ✅ |

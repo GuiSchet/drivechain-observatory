@@ -47,7 +47,7 @@ export function BmmCommitments({ slot }: { slot?: number }) {
   return <LivePanel title="BMM commitments, L1 block by L1 block" quality={rows.length ? "observed" : null}
     status={{ pending: metrics.isPending, error: metrics.isError && !rows.length, empty: !rows.length, emptyText: "No commitments have been observed yet." }}
     footer={<span className="legend"><i className="cell present"/> commitment (BMM Accept) <i className="cell observed_absent"/> none <i className="cell unknown_eligibility"/> not observed</span>}>
-    <p className="live-lede">The last 24 L1 blocks, oldest on the left. A lit cell means that L1 block committed to one block hash of that sidechain (BIP301 calls this "finding" the sidechain block). L1 only records the hash: whether that sidechain block exists and is valid is checked by sidechain nodes, not by L1. Select a cell to see its proof.</p>
+    <p className="live-lede">The last 24 L1 blocks, oldest on the left. A lit cell means that L1 block committed to one block hash of that sidechain (BIP301 calls this "finding" the sidechain block). L1 only records the hash: whether that sidechain block exists and is valid is checked by sidechain nodes, not by L1. Select a cell to see the record behind it.</p>
     <div className="commit-grid">{rows.map(row => <div className="commit-row" key={row.slot}>
       <span className="commit-name"><Link href={`/sidechains/${row.slot}`}>{sidechainLabel(row.slot, names)}</Link><small>{n(row.present)} of {n(row.covered)}</small></span>
       <span className="commit-cells">{[...row.cells].reverse().map(cell => {
@@ -63,7 +63,7 @@ export function ConfirmedFees() {
   const page = useProtocolPage("bmm/confirmed", "limit=6&scope=all");
   const items = page.data?.items ?? [];
   return <LivePanel title="Bids that were paid" status={{ pending: page.isPending, error: page.isError && !items.length, empty: !items.length,
-    emptyText: <p>No paid bid has been matched yet. A fee is shown only when the monitor saw the bid, found the matching commitment in a block, and could read the transaction's inputs. Otherwise the fee stays unknown rather than guessed.</p> }}>
+    emptyText: <p>No paid bid has been matched yet. A fee is shown only when the monitor saw the bid, found the matching commitment in a block, and could read the transaction's inputs. Otherwise the fee stays unknown rather than guessed. Some commitments have no on-chain bid at all: the miner may have built the sidechain block itself, or been paid over Lightning.</p> }}>
     <ul className="plain-list">{items.map(item => <li key={item.id}>{sidechainLabel(item.slot, names)}, block {n(item.height)}: {item.data && typeof item.data === "object" && "fee_sats" in item.data && item.data.fee_sats != null ? formatSats(item.data.fee_sats, unit) : "fee unknown"}</li>)}</ul>
   </LivePanel>;
 }

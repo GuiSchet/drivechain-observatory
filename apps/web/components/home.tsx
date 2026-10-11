@@ -18,7 +18,7 @@ export function Home() {
       <div>
         <div className="eyebrow">eCash (ECX) · Betanet · BIP300 / BIP301</div>
         <h1>Learn drivechains by <span>watching one run.</span></h1>
-        <p>The Drivechain Observatory watches <strong>eCash Betanet</strong>, the network where eCash tests drivechains (BIP300 and BIP301) before its mainnet. It runs its own node and the official enforcer, records every sidechain, deposit, withdrawal vote and merged-mining commitment, and explains what each one means, with the proof behind every number.</p>
+        <p>The Drivechain Observatory watches <strong>eCash Betanet</strong>, the network where eCash tests drivechains (BIP300 and BIP301) before its mainnet. It runs its own node and the official enforcer, records what they report for each block (sidechains, deposits, withdrawal payouts, merged-mining commitments) and regular readings of state such as vote counts, and explains what each one means. Values link to the record behind them, and say when a reading is incomplete.</p>
         <div className="cta-row">
           <Link className="cta primary" href={`/learn/${next.slug}`}>{doneCount ? "Continue" : "Start learning"} <ArrowRight size={16}/></Link>
           <Link className="cta" href="/sidechains">Meet the sidechains</Link>
@@ -28,7 +28,7 @@ export function Home() {
     </section>
 
     <h2>What happened recently</h2>
-    <p className="section-lede">Real events from Betanet, each with its own proof. <Link className="text-link" href="/live">See all live activity →</Link></p>
+    <p className="section-lede">Real events from Betanet, each linked to the record behind it. <Link className="text-link" href="/live">See all live activity →</Link></p>
     <div className="home-recent">
       <DepositStory/>
       <DaySummary/>

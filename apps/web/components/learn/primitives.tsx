@@ -44,7 +44,7 @@ export function ConfidenceChip({ quality }: { quality: string | null | undefined
 export function LivePanel({ title, quality, proof, status, children, footer }: { title: string; quality?: string | null; proof?: string; status?: { pending: boolean; error: boolean; updating?: boolean; empty?: boolean; emptyText?: ReactNode }; children?: ReactNode; footer?: ReactNode }) {
   return <section className="live-panel" aria-label={`Live on Betanet: ${title}`}>
     <header><span className="live-tag"><Radio size={13}/> Live on Betanet</span><h3>{title}</h3>
-      <div className="live-meta">{quality !== undefined && <ConfidenceChip quality={quality}/>}{proof && <Link className="proof-link" href={proof}>See the proof →</Link>}</div></header>
+      <div className="live-meta">{quality !== undefined && <ConfidenceChip quality={quality}/>}{proof && <Link className="proof-link" href={proof}>See the evidence →</Link>}</div></header>
     {status?.error ? <p className="live-empty" role="status">The live data is unavailable right now. The lesson still applies; this panel will retry automatically.</p>
       : status?.pending ? <p className="live-empty" role="status">Loading live data…</p>
       : status?.empty ? <div className="live-empty">{status.emptyText ?? "Nothing to show right now."}</div>
@@ -68,6 +68,6 @@ export function CheckYourself({ question, choices }: { question: string; choices
 /** A labelled number with a short explanation underneath; `quality` and `proof` describe this value alone. */
 export function Stat({ label, value, hint, quality, proof }: { label: string; value: ReactNode; hint?: ReactNode; quality?: string | null; proof?: string }) {
   return <div className="stat"><span>{label}</span><strong>{value}</strong>{hint && <small>{hint}</small>}
-    {(quality !== undefined || proof) && <div className="stat-meta">{quality !== undefined && <ConfidenceChip quality={quality}/>}{proof && <Link className="proof-link" href={proof}>proof</Link>}</div>}
+    {(quality !== undefined || proof) && <div className="stat-meta">{quality !== undefined && <ConfidenceChip quality={quality}/>}{proof && <Link className="proof-link" href={proof}>evidence</Link>}</div>}
   </div>;
 }

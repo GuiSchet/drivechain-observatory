@@ -55,8 +55,11 @@ export function NetworkSnapshot() {
 
 export function BlockHeartbeat() {
   const live = useLiveActivity(), now = useNow(1_000);
-  const blocks = useQuery({ queryKey: ["blocks", "heartbeat"], queryFn: () => getBlocks("limit=8") });
-  const list = blocks.data?.blocks ?? [], tip = list[0], dataset = blocks.data?.meta.dataset_id;
+  const blocks = useQuery({ queryKey: ["blocks", "heartbeat"], queryFn: () => getBlocks("limit=25") });
+  const recent = blocks.data?.blocks ?? [], list = recent.slice(0, 8), tip = list[0], dataset = blocks.data?.meta.dataset_id;
+  // The recent pace by the blocks' own timestamps, over consecutive heights only.
+  const oldest = recent[recent.length - 1], span = tip && oldest ? tip.height - oldest.height : 0;
+  const minutes = span > 0 && tip?.block_time && oldest?.block_time ? (Date.parse(tip.block_time) - Date.parse(oldest.block_time)) / 60_000 / span : undefined;
   return <LivePanel title="The latest L1 blocks" quality={tip ? "observed" : null} proof={tip && dataset ? `/datasets/${dataset}/blocks/${tip.hash}` : undefined}
     status={{ pending: blocks.isPending, error: blocks.isError && !list.length, empty: !list.length, emptyText: "No block headers have been imported yet." }}>
     <p className="live-lede">{tip ? <>The newest block is <strong>#{n(tip.height)}</strong>, mined about <strong>{timeAgo(tip.block_time, now)}</strong> by its own timestamp. Keep this page open: when a new block arrives, it slides in on the left.</> : null}</p>
@@ -65,7 +68,7 @@ export function BlockHeartbeat() {
         <Link href={`/datasets/${dataset}/blocks/${b.hash}`}><span className="chain-height">#{n(b.height)}</span><span className="hash">{short(b.hash)}</span><small>{timeAgo(b.block_time, now)}</small></Link>
         {i < list.length - 1 && <span className="chain-link" aria-hidden="true">←</span>}
       </li>)}</ol>
-    <p className="live-note">Each block's parent is the one to its right. Times come from each block's own timestamp, set by its miner. Hashes start with many zeros because of proof-of-work.</p>
+    <p className="live-note">Each block's parent is the one to its right. Times come from each block's own timestamp, set by its miner. Hashes start with many zeros because of proof-of-work.{minutes != null && minutes > 0 ? ` The last ${n(span)} blocks came about every ${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)} minutes on average, by those timestamps (the target is ten).` : ""}</p>
   </LivePanel>;
 }
 
