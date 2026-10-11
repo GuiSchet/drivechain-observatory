@@ -41,14 +41,14 @@ export function ConfidenceChip({ quality }: { quality: string | null | undefined
 }
 
 /** The frame around every piece of live data in a lesson. */
-export function LivePanel({ title, quality, proof, status, children, footer }: { title: string; quality?: string | null; proof?: string; status?: { pending: boolean; error: boolean; empty?: boolean; emptyText?: ReactNode }; children?: ReactNode; footer?: ReactNode }) {
+export function LivePanel({ title, quality, proof, status, children, footer }: { title: string; quality?: string | null; proof?: string; status?: { pending: boolean; error: boolean; updating?: boolean; empty?: boolean; emptyText?: ReactNode }; children?: ReactNode; footer?: ReactNode }) {
   return <section className="live-panel" aria-label={`Live on Betanet: ${title}`}>
     <header><span className="live-tag"><Radio size={13}/> Live on Betanet</span><h3>{title}</h3>
       <div className="live-meta">{quality !== undefined && <ConfidenceChip quality={quality}/>}{proof && <Link className="proof-link" href={proof}>See the proof →</Link>}</div></header>
     {status?.error ? <p className="live-empty" role="status">The live data is unavailable right now. The lesson still applies; this panel will retry automatically.</p>
       : status?.pending ? <p className="live-empty" role="status">Loading live data…</p>
       : status?.empty ? <div className="live-empty">{status.emptyText ?? "Nothing to show right now."}</div>
-      : children}
+      : <>{status?.updating && <p className="live-updating" role="status">Updating to the newest block. Showing the last complete reading until then.</p>}{children}</>}
     {footer && <footer>{footer}</footer>}
   </section>;
 }

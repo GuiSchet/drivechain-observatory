@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getBlocks } from "@/lib/api";
 import { object } from "@/lib/protocol";
 import { formatCoins, formatSats, sats, short, timeAgo } from "@/lib/explain";
-import { activeSidechains, n, proofHref, snapshotOf, useObservatory, useOverview, weakestQuality } from "@/lib/live";
+import { activeSidechains, known, n, observatoryStatus, proofHref, snapshotOf, unknownText, useObservatory, useOverview, weakestQuality } from "@/lib/live";
 import { useLiveActivity } from "@/components/providers";
 import { useUnit } from "@/lib/unit";
 import { LivePanel, Stat } from "@/components/learn/primitives";
@@ -32,20 +32,22 @@ export function NetworkSnapshot() {
   const pending = Object.values(object(state.bundles));
   const onlyBundle = pending.length === 1 ? object(pending[0]) : undefined;
   const bundleEvent = Array.isArray(onlyBundle?.evidence) ? object(onlyBundle.evidence[0]).event_id : undefined;
-  const ready = !!data;
+  // A zero is shown only when the reading behind it was complete; otherwise the value is unknown.
+  const knownActive = known(data, "sidechains"), knownTreasury = known(data, "treasury"), knownBundles = known(data, "bundles");
+  const missing = unknownText(data);
   return <LivePanel title="eCash Betanet right now"
-    status={{ pending: overview.isPending && observatory.isPending, error: overview.isError && observatory.isError && !o && !data }}
-    footer="The block is observed directly. The other three are separate readings of current state taken at the chain tip, so each has its own label and proof.">
+    status={{ pending: overview.isPending && observatory.isPending, error: overview.isError && observatory.isError && !o && !data, updating: data?.readiness === "updating" }}
+    footer="The block is observed directly. The other three are separate readings of current state taken at the chain tip, so each has its own label and evidence.">
     <div className="stat-grid">
       <Stat label="Latest L1 block" value={tip ? `#${n(tip.height)}` : "Unknown"} hint={tip ? `seen ${timeAgo(tip.observed_at, now)}` : undefined}
         quality={tip ? "observed" : undefined} proof={tip && blockDataset ? `/datasets/${blockDataset}/blocks/${tip.hash}` : undefined}/>
-      <Stat label="Active sidechains" value={ready ? active.length : "Unknown"} hint={<Link href="/sidechains">meet them →</Link>}
-        quality={ready ? activeRead?.quality ?? null : undefined} proof={proofHref(activeRead, dataset)}/>
-      <Stat label="Coins locked in treasuries" value={values.length ? formatCoins(locked.toString(), true) : "Unknown"}
-        hint={values.length ? <>{formatSats(locked.toString(), unit)}, sum of {values.length} treasury readings · <Link href="/sidechains">per sidechain →</Link></> : undefined}
-        quality={ready ? weakestQuality(treasuryReads) : undefined}/>
-      <Stat label="Withdrawals being voted on" value={ready ? pending.length : "Unknown"} hint={<Link href="/learn/withdrawals">how voting works →</Link>}
-        quality={ready ? weakestQuality(bundleReads) : undefined}
+      <Stat label="Active sidechains" value={knownActive ? active.length : missing} hint={<Link href="/sidechains">meet them →</Link>}
+        quality={data ? (knownActive ? activeRead?.quality ?? null : "unknown") : undefined} proof={proofHref(activeRead, dataset)}/>
+      <Stat label="Coins locked in treasuries" value={knownTreasury ? formatCoins(locked.toString(), true) : missing}
+        hint={knownTreasury ? <>{formatSats(locked.toString(), unit)}, sum of {values.length} treasury readings · <Link href="/sidechains">per sidechain →</Link></> : undefined}
+        quality={data ? (knownTreasury ? weakestQuality(treasuryReads) : "unknown") : undefined}/>
+      <Stat label="Withdrawals being voted on" value={knownBundles ? pending.length : missing} hint={<Link href="/learn/withdrawals">how voting works →</Link>}
+        quality={data ? (knownBundles ? weakestQuality(bundleReads) : "unknown") : undefined}
         proof={typeof bundleEvent === "string" && dataset ? `/datasets/${dataset}/events/${bundleEvent}` : undefined}/>
     </div>
   </LivePanel>;
@@ -87,9 +89,9 @@ export function SlotGrid() {
   const pick = selected ?? active[0]?.slot;
   const s = pick == null ? undefined : bySlot.get(pick);
   const dataset = observatory.data?.context.meta.dataset_id;
-  const obs = snapshotOf(observatory.data, "active_sidechains");
-  return <LivePanel title="All 256 slots" quality={obs?.quality ?? null} proof={proofHref(obs, dataset)}
-    status={{ pending: observatory.isPending, error: observatory.isError && !observatory.data }}>
+  const obs = snapshotOf(observatory.data, "active_sidechains"), complete = known(observatory.data, "sidechains");
+  return <LivePanel title="All 256 slots" quality={complete ? obs?.quality ?? null : "unknown"} proof={proofHref(obs, dataset)}
+    status={{ ...observatoryStatus(observatory), empty: !complete, emptyText: "The latest reading of active sidechains is incomplete, so the slots are not shown until the next complete one." }}>
     <p className="live-lede"><strong>{active.length}</strong> of 256 slots hold an active sidechain right now. Select a lit slot to read its declaration.</p>
     <div className="slot-grid" role="list">{Array.from({ length: 256 }, (_, i) => {
       const sc = bySlot.get(i);

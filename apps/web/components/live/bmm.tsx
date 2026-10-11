@@ -1,10 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { getAuctions, getJson } from "@/lib/api";
+import { getAuctions } from "@/lib/api";
 import { formatSats, short, sidechainLabel, timeAgo } from "@/lib/explain";
-import { n, useProtocolPage, useSidechainNames } from "@/lib/live";
-import type { BmmMetrics } from "@/lib/types";
+import { n, useBmmMetrics, useProtocolPage, useSidechainNames } from "@/lib/live";
 import { useUnit } from "@/lib/unit";
 import { LivePanel } from "@/components/learn/primitives";
 import { useNow } from "./basics";
@@ -42,8 +41,7 @@ const cellText: Record<string, string> = { present: "commitment in this block", 
 
 export function BmmCommitments({ slot }: { slot?: number }) {
   const names = useSidechainNames();
-  const query = slot == null ? "window_blocks=24" : `window_blocks=24&slot=${slot}`;
-  const metrics = useQuery({ queryKey: ["protocol", "bmm", "metrics", query], queryFn: () => getJson<BmmMetrics>(`/api/v1/bmm?${query}`) });
+  const metrics = useBmmMetrics(24, slot);
   const rows = metrics.data?.slots ?? [];
   const dataset = metrics.data?.context.meta.dataset_id;
   return <LivePanel title="BMM commitments, L1 block by L1 block" quality={rows.length ? "observed" : null}

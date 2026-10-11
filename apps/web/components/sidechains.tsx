@@ -2,11 +2,10 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { getAuctions, getJson } from "@/lib/api";
+import { getAuctions } from "@/lib/api";
 import { object } from "@/lib/protocol";
 import { declarationOf, formatCoins, formatSats } from "@/lib/explain";
-import { activeSidechains, n, proofHref, snapshotOf, useNetworkParams, useObservatory, useProtocolPage } from "@/lib/live";
-import type { BmmMetrics } from "@/lib/types";
+import { activeSidechains, known, n, useBmmMetrics, proofHref, snapshotOf, unknownText, useNetworkParams, useObservatory, useProtocolPage } from "@/lib/live";
 import { useUnit } from "@/lib/unit";
 import { ConfidenceChip, GoDeeper, LivePanel, Term } from "@/components/learn/primitives";
 import { ActivityFeed } from "@/components/live/activity";
@@ -14,7 +13,7 @@ import { TreasuryHistory, WithdrawalOutcomes, WithdrawalVotes } from "@/componen
 import { BmmBids, BmmCommitments } from "@/components/live/bmm";
 
 function useBmmRows() {
-  const metrics = useQuery({ queryKey: ["protocol", "bmm", "metrics", "window_blocks=24"], queryFn: () => getJson<BmmMetrics>("/api/v1/bmm?window_blocks=24") });
+  const metrics = useBmmMetrics(24);
   return new Map((metrics.data?.slots ?? []).map(r => [r.slot, r]));
 }
 
@@ -24,12 +23,15 @@ export function SidechainGallery() {
   const state = object(observatory.data?.state), treasury = object(state.treasury), bundles = Object.keys(object(state.bundles));
   const active = activeSidechains(observatory.data);
   const snap = snapshotOf(observatory.data, "active_sidechains");
+  const data = observatory.data, complete = known(data, "sidechains"), bundlesKnown = known(data, "bundles");
   return <main className="page-shell wide">
     <div className="eyebrow">THE SIDECHAINS OF BETANET</div><h1>Meet the sidechains</h1>
     <p className="lede">Each card is one active sidechain: what it declares to be, how many coins it holds on L1, and how often L1 miners committed to one of its blocks (blind merged mining). Open one to follow its whole story. New to the terms? Start with <Link className="text-link" href="/learn/slots">slots and sidechains</Link>.</p>
     {observatory.isPending && <p className="live-empty" role="status">Loading sidechains…</p>}
     {observatory.isError && !observatory.data && <p className="live-empty" role="status">The sidechain list is unavailable right now; retrying automatically.</p>}
-    {snap && <p className="gallery-meta"><ConfidenceChip quality={snap.quality}/> {active.length} active sidechains in the latest reading · <Link className="text-link" href={proofHref(snap, observatory.data?.context.meta.dataset_id) ?? "#"}>See the proof</Link></p>}
+    {data && !complete && <p className="live-updating" role="status">{data.readiness === "unknown" ? "The list of active sidechains is being updated to the newest block; it will appear shortly." : "The latest reading of active sidechains is incomplete, so this list may be missing some."}</p>}
+    {data?.readiness === "updating" && <p className="live-updating" role="status">Updating to the newest block. Showing the last complete reading until then.</p>}
+    {snap && complete && <p className="gallery-meta"><ConfidenceChip quality={snap.quality}/> {active.length} active sidechains in the latest reading · <Link className="text-link" href={proofHref(snap, data?.context.meta.dataset_id) ?? "#"}>See the evidence</Link></p>}
     <ul className="sidechain-cards">{active.map(s => {
       const ctip = treasury[String(s.slot)], value = ctip ? object(ctip).value_sats : undefined;
       const pending = bundles.filter(k => k.startsWith(`${s.slot}:`)).length;
@@ -41,19 +43,19 @@ export function SidechainGallery() {
         <dl>
           <div><dt>Locked on L1</dt><dd>{ctip === null ? "nothing yet" : value ? formatCoins(value, true) : "unknown"}{value ? <small>{formatSats(value, unit)}</small> : null}</dd></div>
           <div><dt>BMM commitments, last 24 L1 blocks</dt><dd>{row ? `in ${row.present} of ${row.covered} observed` : "unknown"}{bid ? <small>open bid {formatSats(bid.bid_sats, unit)}</small> : null}</dd></div>
-          <div><dt>Withdrawals in vote</dt><dd>{pending}</dd></div>
+          <div><dt>Withdrawals in vote</dt><dd>{bundlesKnown ? pending : unknownText(data)}</dd></div>
           <div><dt>Active since</dt><dd>block {n(s.activationHeight)}</dd></div>
         </dl>
         <span className="sc-open">Follow its story <ArrowRight size={14}/></span>
       </Link></li>;
     })}</ul>
-    <p className="scope-note">{256 - active.length} of 256 slots are empty right now.</p>
+    {complete && <p className="scope-note">{256 - active.length} of 256 slots are empty right now.</p>}
   </main>;
 }
 
 export function SidechainStory({ slot }: { slot: number }) {
   const observatory = useObservatory(), unit = useUnit(), { params } = useNetworkParams();
-  const sc = activeSidechains(observatory.data).find(s => s.slot === slot);
+  const sc = activeSidechains(observatory.data).find(s => s.slot === slot), complete = known(observatory.data, "sidechains");
   const treasury = object(object(observatory.data?.state).treasury)[String(slot)];
   const instances = useProtocolPage("sidechain-instances", `slot=${slot}&scope=all&limit=20`);
   const history = new Map<string, { title?: string; proposal?: unknown; activation?: unknown; ended?: unknown; current?: boolean | null }>();
@@ -72,7 +74,9 @@ export function SidechainStory({ slot }: { slot: number }) {
     <div className="eyebrow">SLOT #{slot}</div>
     <h1>{sc?.title ?? (observatory.isPending ? "Loading…" : `Slot #${slot}`)}</h1>
     {sc ? <p className="lede">{sc.description ?? "No description declared."}</p>
-      : !observatory.isPending && <p className="lede">No sidechain is active in this slot right now. Any earlier sidechains in it are listed below. <Link className="text-link" href="/learn/slots">What is a slot?</Link></p>}
+      : !observatory.isPending && (complete
+        ? <p className="lede">No sidechain is active in this slot right now. Any earlier sidechains in it are listed below. <Link className="text-link" href="/learn/slots">What is a slot?</Link></p>
+        : <p className="lede">The latest reading of active sidechains is incomplete, so we can&apos;t say yet whether this slot is in use. Earlier sidechains in it are listed below.</p>)}
 
     {sc && <>
       <section className="story">
