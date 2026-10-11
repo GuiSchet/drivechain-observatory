@@ -21,3 +21,4 @@ export type ProtocolItem = components["schemas"]["ProtocolItem"];
 export type ProtocolContext = components["schemas"]["ProtocolContext"];
 export type Observatory = components["schemas"]["ObservatoryResponse"];
 export type BmmMetrics = components["schemas"]["BmmMetricsResponse"];
+export type Summary = components["schemas"]["SummaryResponse"];

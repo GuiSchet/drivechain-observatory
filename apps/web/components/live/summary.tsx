@@ -1,71 +1,48 @@
 "use client";
 import Link from "next/link";
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { getBlocks, getJson } from "@/lib/api";
-import { apiQuery } from "@/lib/protocol";
-import { formatCoins, formatSats, outcomeOf, sats } from "@/lib/explain";
-import { n, weakestQuality } from "@/lib/live";
-import type { BmmMetrics, ProtocolItem, ProtocolPage } from "@/lib/types";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getJson } from "@/lib/api";
+import { formatCoins, formatSats } from "@/lib/explain";
+import { n } from "@/lib/live";
+import type { Summary } from "@/lib/types";
 import { useUnit } from "@/lib/unit";
 import { LivePanel, Stat } from "@/components/learn/primitives";
 
-const DAY = 24 * 3_600_000;
+type SummaryView = Summary & { updating: boolean };
+const summaryKey = ["protocol", "summary", "hours=24"];
 
-/** Every block-anchored fact of these kinds with a block time inside the window, following cursors. */
-async function factsSince(kind: string, from: string): Promise<{ items: ProtocolItem[]; complete: boolean }> {
-  const items: ProtocolItem[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < 10; page++) {
-    const query = apiQuery({ kind, time_basis: "block", from_time: from, order: "block", limit: 200, cursor });
-    const result = await getJson<ProtocolPage>(`/api/v1/activity?${query}`);
-    items.push(...result.items);
-    cursor = result.next_cursor ?? undefined;
-    if (!cursor) return { items, complete: true };
-  }
-  return { items, complete: false };
+/** While the API catches up with a new block it counts nothing; that is not zero, so the last count stays. */
+function useDaySummary() {
+  const client = useQueryClient();
+  return useQuery({ queryKey: summaryKey, refetchInterval: 60_000, queryFn: async (): Promise<SummaryView> => {
+    const fresh = await getJson<Summary>("/api/v1/summary?hours=24");
+    if (fresh.window) return { ...fresh, updating: false };
+    const previous = client.getQueryData<SummaryView>(summaryKey);
+    return previous?.window ? { ...previous, updating: true } : { ...fresh, updating: false };
+  } });
 }
 
 /**
- * What the monitor observed in L1 blocks of the last 24 hours, by block time. Only facts recorded
- * for a block count here; readings of state are not events and are left out. The footer states which
- * blocks the window covers and whether our node has all of them.
+ * What L1 blocks of the last 24 hours recorded. The API counts every figure over the same block heights, from the
+ * first block whose own timestamp is inside the period up to the newest one. Readings of state are not events and are
+ * left out.
  */
 export function DaySummary() {
-  const unit = useUnit();
-  // Rounded to the minute so the query key stays stable between renders.
-  const from = useMemo(() => new Date(Math.floor((Date.now() - DAY) / 60_000) * 60_000).toISOString(), []);
-  const deposits = useQuery({ queryKey: ["protocol", "summary", "deposits", from], queryFn: () => factsSince("deposit", from) });
-  const outcomes = useQuery({ queryKey: ["protocol", "summary", "outcomes", from], queryFn: () => factsSince("bundle_outcome", from) });
-  const blocks = useQuery({ queryKey: ["protocol", "summary", "blocks"], queryFn: () => getBlocks("limit=200") });
-  const bmm = useQuery({ queryKey: ["protocol", "bmm", "metrics", "window_blocks=144"], queryFn: () => getJson<BmmMetrics>("/api/v1/bmm?window_blocks=144") });
-
-  const inWindow = (blocks.data?.blocks ?? []).filter(b => b.block_time && b.block_time >= from);
-  const low = inWindow.length ? Math.min(...inWindow.map(b => b.height)) : undefined, high = inWindow.length ? Math.max(...inWindow.map(b => b.height)) : undefined;
-  const missing = low != null && high != null ? high - low + 1 - new Set(inWindow.map(b => b.height)).size : undefined;
-  const dep = deposits.data?.items ?? [], out = outcomes.data?.items ?? [];
-  const total = dep.reduce((sum, i) => sum + (sats((i.data as Record<string, unknown>).value_sats) ?? BigInt(0)), BigInt(0));
-  const paid = out.filter(i => outcomeOf(i) === "Succeeded").length, failed = out.filter(i => outcomeOf(i) === "Failed").length;
-  const committed = new Set<number>(), observedCells = new Set<number>();
-  for (const row of bmm.data?.slots ?? []) for (const cell of row.cells) {
-    if (low == null || cell.height < low) continue;
-    if (cell.state !== "unknown_eligibility") observedCells.add(cell.height);
-    if (cell.state === "present") committed.add(cell.height);
-  }
-  const partial = deposits.data?.complete === false || outcomes.data?.complete === false;
-  const at = (s: number) => partial ? `at least ${n(s)}` : n(s);
-  return <LivePanel title="The last 24 hours on Betanet"
-    status={{ pending: deposits.isPending || outcomes.isPending || blocks.isPending, error: (deposits.isError || outcomes.isError) && !deposits.data }}
-    footer={low != null && high != null
-      ? <>Counted by block time over blocks {n(low)}–{n(high)} ({n(inWindow.length)} blocks{missing ? `, ${n(missing)} missing from our node` : ", all of them on our node"}). These are facts recorded for those blocks; readings of state are not counted. <Link href="/live">See them in Live →</Link></>
-      : "No block in the last 24 hours has been imported yet."}>
-    <div className="stat-grid">
-      <Stat label="Deposits" value={at(dep.length)} hint={dep.length ? <>{formatCoins(total.toString(), true)} in total · {formatSats(total.toString(), unit)}</> : "none in these blocks"}
-        quality={dep.length ? weakestQuality(dep) : undefined}/>
-      <Stat label="Withdrawals paid out" value={at(paid)} hint={failed ? `${n(failed)} failed` : <Link href="/learn/withdrawals">how they are paid →</Link>}
-        quality={out.length ? weakestQuality(out) : undefined}/>
-      <Stat label="Blocks with a BMM commitment" value={observedCells.size ? `${n(committed.size)} of ${n(observedCells.size)}` : "unknown"}
-        hint="blocks where L1 committed to at least one sidechain block hash" quality={observedCells.size ? "observed" : undefined}/>
-    </div>
+  const unit = useUnit(), summary = useDaySummary(), w = summary.data?.window;
+  const at = (count: number) => w?.truncated ? `at least ${n(count)}` : n(count);
+  const missing = w ? w.blocks - w.blocks_on_branch : 0, unobserved = w ? w.blocks - w.bmm_observed_blocks : 0;
+  return <LivePanel title={w && w.blocks ? `The last 24 hours on Betanet (blocks ${n(w.from_height)}–${n(w.to_height)})` : "The last 24 hours on Betanet"}
+    status={{ pending: summary.isPending, error: summary.isError && !summary.data, updating: summary.data?.updating,
+      empty: !w || !w.blocks, emptyText: !w ? "Updating to the newest block; the counts appear once it is processed." : "No block on the selected chain has a timestamp in the last 24 hours." }}
+    footer={w && w.blocks ? <>Every figure counts the same {n(w.blocks)} blocks, {n(w.from_height)}–{n(w.to_height)}: from the first block whose own timestamp falls in the last 24 hours to the newest. Timestamps are set by miners, so the period is approximate.{missing > 0 ? ` ${n(missing)} of these blocks are missing from our copy of the chain, so counts may be low.` : ""} Readings of state are not counted. <Link href="/live">See them in Live →</Link></> : undefined}>
+    {w && <div className="stat-grid">
+      <Stat label="Deposits" value={at(w.deposits)} hint={w.deposits ? <>{formatCoins(w.deposited_sats, true)} in total · {formatSats(w.deposited_sats, unit)}</> : "none in these blocks"}
+        quality={w.deposits ? w.deposit_quality ?? null : undefined}/>
+      <Stat label="Withdrawals paid out" value={at(w.payouts_succeeded)} hint={w.payouts_failed ? `${n(w.payouts_failed)} failed` : <Link href="/learn/withdrawals">how they are paid →</Link>}
+        quality={w.payouts_succeeded || w.payouts_failed ? "observed" : undefined}/>
+      <Stat label="Blocks with a BMM commitment" value={w.bmm_observed_blocks ? `${n(w.bmm_committed_blocks)} of ${n(w.bmm_observed_blocks)}` : "unknown"}
+        hint={unobserved > 0 ? `blocks that committed to at least one sidechain block hash; ${n(unobserved)} blocks without merged-mining data are left out` : "blocks that committed to at least one sidechain block hash"}
+        quality={w.bmm_observed_blocks ? "observed" : undefined}/>
+    </div>}
   </LivePanel>;
 }

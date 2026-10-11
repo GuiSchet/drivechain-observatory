@@ -666,6 +666,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/withdrawal-bundles": {
         parameters: {
             query?: never;
@@ -1166,6 +1182,57 @@ export interface components {
             imported_through: string;
             source_high_water?: string | null;
             stream: string;
+        };
+        /** @description What L1 blocks of one recent period recorded, every figure counted over the same heights. */
+        SummaryResponse: {
+            context: components["schemas"]["ProtocolContext"];
+            window?: null | components["schemas"]["SummaryWindow"];
+        };
+        SummaryWindow: {
+            /**
+             * Format: int64
+             * @description Heights in the range, and how many of them are on the selected branch the Observatory holds.
+             */
+            blocks: number;
+            /** Format: int64 */
+            blocks_on_branch: number;
+            /** Format: int64 */
+            bmm_committed_blocks: number;
+            /**
+             * Format: int64
+             * @description Blocks whose merged-mining facts the enforcer reported, and how many of those committed to a sidechain block.
+             */
+            bmm_observed_blocks: number;
+            /** @description The weakest quality among the deposits counted, or none when there are none. */
+            deposit_quality?: string | null;
+            deposited_sats: string;
+            /** Format: int64 */
+            deposits: number;
+            /** Format: date-time */
+            from_block_time?: string | null;
+            /**
+             * Format: int32
+             * @description The first selected block whose miner-set timestamp is inside the period, through the anchor. Block times are
+             *     not monotonic, so a block in this range may carry an earlier timestamp.
+             */
+            from_height: number;
+            /** Format: int32 */
+            hours: number;
+            /** Format: int64 */
+            payouts_failed: number;
+            /** Format: int64 */
+            payouts_succeeded: number;
+            /**
+             * Format: date-time
+             * @description Start of the period, by the database clock.
+             */
+            since: string;
+            /** Format: date-time */
+            to_block_time?: string | null;
+            /** Format: int32 */
+            to_height: number;
+            /** @description More records than one response holds: counts are lower bounds. */
+            truncated: boolean;
         };
         /** @enum {string} */
         SyncMode: "bootstrap" | "catching_up" | "following" | "interrupted" | "incompatible";
@@ -3387,6 +3454,37 @@ export interface operations {
                 };
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    summary: {
+        parameters: {
+            query?: {
+                dataset?: string;
+                /** @description Length of the period in hours, 1 to 168. Default 24. */
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryResponse"];
+                };
+            };
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
