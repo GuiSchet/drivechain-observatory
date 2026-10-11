@@ -70,7 +70,7 @@ export function BlockTimeline() {
   const cells = new Map<number, { slot: number; state: string }[]>();
   for (const row of bmm.data?.slots ?? []) for (const c of row.cells) cells.set(c.height, [...(cells.get(c.height) ?? []), { slot: row.slot, state: c.state }]);
   const proof = (i: ProtocolItem) => i.evidence[0] && dataset ? `/datasets/${dataset}/events/${i.evidence[0].event_id}` : undefined;
-  const P = ({ item }: { item: ProtocolItem }) => proof(item) ? <> <Link className="tl-proof" href={proof(item)!}>proof</Link></> : null;
+  const P = ({ item }: { item: ProtocolItem }) => proof(item) ? <> <Link className="tl-proof" href={proof(item)!}>evidence</Link></> : null;
 
   if (blocks.isPending || feed.isPending) return <p className="live-empty" role="status">Loading the latest blocks…</p>;
   if ((blocks.isError && !list.length) || (feed.isError && !items.length)) return <p className="live-empty" role="status">Live activity is unavailable right now; retrying automatically.</p>;

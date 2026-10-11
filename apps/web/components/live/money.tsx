@@ -7,12 +7,15 @@ import { apiQuery, object, at } from "@/lib/protocol";
 import { groupActivity, readingTip } from "@/lib/activity";
 import type { ProtocolItem, ProtocolPage } from "@/lib/types";
 import { blockNumber, declarationOf, depositAddress, formatCoinPair, formatCoins, formatSats, sats, short, sidechainLabel, timeAgo } from "@/lib/explain";
-import { activeSidechains, n, proofHref, snapshotOf, useCoverageGaps, useNetworkParams, useObservatory, useProtocolPage, useSidechainNames, weakestQuality } from "@/lib/live";
+import { activeSidechains, known, n, observatoryStatus, proofHref, snapshotOf, useCoverageGaps, useNetworkParams, useObservatory, useProtocolPage, useSidechainNames, weakestQuality } from "@/lib/live";
 import { useUnit } from "@/lib/unit";
 import { ConfidenceChip, GoDeeper, LivePanel, Stat } from "@/components/learn/primitives";
 import { ReadingsChart } from "./readings-chart";
 import { ActivityFeed } from "./activity";
 import { useNow } from "./basics";
+
+/** "at least N + 1": the enforcer compares votes > threshold. */
+const atLeast = (threshold: number | undefined) => `at least ${n(threshold != null ? threshold + 1 : undefined)}`;
 
 export function ParamsPanel({ show }: { show: ("activation" | "withdrawal")[] }) {
   const { params, isPending, isError } = useNetworkParams();
@@ -21,10 +24,10 @@ export function ParamsPanel({ show }: { show: ("activation" | "withdrawal")[] })
     <p className="live-lede">These numbers come straight from the enforcer. The rule is always <strong>more than</strong> the threshold, before the proposal is older than the maximum age.</p>
     <div className="stat-grid">
       {show.includes("activation") && <>
-        <Stat label="New sidechain, empty slot" value={`> ${n(params.unusedThreshold)} votes`} hint={`within ${n(params.unusedMaxAge)} blocks`}/>
-        <Stat label="New sidechain, replacing one" value={`> ${n(params.usedThreshold)} votes`} hint={`within ${n(params.usedMaxAge)} blocks`}/>
+        <Stat label="New sidechain, empty slot" value={`> ${n(params.unusedThreshold)} votes`} hint={`${atLeast(params.unusedThreshold)} within ${n(params.unusedMaxAge)} blocks`}/>
+        <Stat label="New sidechain, replacing one" value={`> ${n(params.usedThreshold)} votes`} hint={`${atLeast(params.usedThreshold)} within ${n(params.usedMaxAge)} blocks`}/>
       </>}
-      {show.includes("withdrawal") && <Stat label="Withdrawal bundle" value={`> ${n(params.withdrawalThreshold)} votes`} hint={`within ${n(params.withdrawalMaxAge)} blocks`}/>}
+      {show.includes("withdrawal") && <Stat label="Withdrawal bundle" value={`> ${n(params.withdrawalThreshold)} votes`} hint={`${atLeast(params.withdrawalThreshold)} within ${n(params.withdrawalMaxAge)} blocks`}/>}
     </div>
   </LivePanel>;
 }
@@ -37,9 +40,10 @@ export function ProposalsNow() {
   const proposals = Object.values(object(state.proposals)).map(v => object(object(v).proposal ?? v));
   const snap = snapshotOf(observatory.data, "sidechain_proposals"), dataset = observatory.data?.context.meta.dataset_id;
   const tip = at(snap?.data, "observation_window", "reference_tip_height");
-  return <LivePanel title="Proposals being voted on" quality={snap?.quality ?? null} proof={proofHref(snap, dataset)}
-    status={{ pending: observatory.isPending, error: observatory.isError && !observatory.data, empty: !proposals.length,
-      emptyText: <p>{state.proposals_complete === true ? "No sidechain is being voted on right now." : "The latest reading of proposals is incomplete, so we can't say whether any are pending."} Below you can see how the current sidechains got through this step.</p> }}>
+  const complete = known(observatory.data, "proposals");
+  return <LivePanel title="Proposals being voted on" quality={complete ? snap?.quality ?? null : "unknown"} proof={proofHref(snap, dataset)}
+    status={{ ...observatoryStatus(observatory), empty: !proposals.length,
+      emptyText: <p>{complete ? "No sidechain is being voted on right now." : "The latest reading of proposals is incomplete, so we can't say whether any are pending."} Below you can see how the current sidechains got through this step.</p> }}>
     <div className="vote-cards">{proposals.map((p, i) => {
       const slot = typeof p.sidechain_number === "number" ? p.sidechain_number : undefined;
       const votes = typeof p.vote_count === "number" ? p.vote_count : undefined;
@@ -61,8 +65,8 @@ export function VoteCard({ title, subtitle, votes, threshold, age, maxAge, foote
   const left = age != null && maxAge != null ? maxAge - age : undefined;
   return <article className="vote-card">
     <h4>{title}</h4><p className="vote-sub">{subtitle}</p>
-    <div className="vote-row"><span>Votes</span><strong>{n(votes)}</strong><span>needs more than {n(threshold)}</span></div>
-    <Meter value={votes} max={threshold} label={`${n(votes)} of more than ${n(threshold)} votes`}/>
+    <div className="vote-row"><span>Votes</span><strong>{n(votes)}</strong><span>needs {atLeast(threshold)}</span></div>
+    <Meter value={votes} max={threshold} label={`${n(votes)} votes; it needs ${atLeast(threshold)}`}/>
     <div className="vote-row"><span>Age</span><strong>{n(age)} blocks</strong><span>limit {n(maxAge)} blocks</span></div>
     <Meter value={age} max={maxAge} label={`Age ${n(age)} of ${n(maxAge)} blocks`}/>
     {left != null && left >= 0 && <p className="vote-note">If it does not pass within the next {n(left)} blocks, it expires. Votes can also go down, so this is a reading, not a forecast.</p>}
@@ -76,9 +80,9 @@ export function ActivationTimeline() {
   const active = activeSidechains(observatory.data).filter(s => s.proposalHeight != null && s.activationHeight != null);
   const min = Math.min(...active.map(s => s.proposalHeight!)), max = Math.max(...active.map(s => s.activationHeight!));
   const span = Math.max(1, max - min);
-  const snap = snapshotOf(observatory.data, "active_sidechains");
-  return <LivePanel title="How today's sidechains were activated" quality={snap?.quality ?? null} proof={proofHref(snap, observatory.data?.context.meta.dataset_id)}
-    status={{ pending: observatory.isPending, error: observatory.isError && !observatory.data, empty: !active.length, emptyText: "No active sidechain has been reported yet." }}>
+  const snap = snapshotOf(observatory.data, "active_sidechains"), complete = known(observatory.data, "sidechains");
+  return <LivePanel title="How today's sidechains were activated" quality={complete ? snap?.quality ?? null : "unknown"} proof={proofHref(snap, observatory.data?.context.meta.dataset_id)}
+    status={{ ...observatoryStatus(observatory), empty: !active.length, emptyText: complete ? "No active sidechain has been reported yet." : "The latest reading of active sidechains is incomplete; the timeline returns with the next complete one." }}>
     <p className="live-lede">Each bar starts at the block where the sidechain was proposed and ends where it activated. The enforcer still reports the vote count each one reached.</p>
     <ol className="timeline">{active.map(s => <li key={s.slot}>
       <span className="tl-name"><Link href={`/sidechains/${s.slot}`}>{s.title ?? `slot #${s.slot}`}</Link><small>#{s.slot}</small></span>
@@ -99,15 +103,16 @@ export function TreasuryBars() {
   const top = rows.reduce((m, r) => r.value && r.value > m ? r.value : m, BigInt(1));
   const dataset = observatory.data?.context.meta.dataset_id;
   const reads = rows.map(r => snapshotOf(observatory.data, "ctip", r.slot));
-  return <LivePanel title="What each treasury holds" quality={observatory.data ? weakestQuality(reads) : undefined}
-    status={{ pending: observatory.isPending, error: observatory.isError && !observatory.data, empty: !rows.length }}
+  const complete = known(observatory.data, "treasury");
+  return <LivePanel title="What each treasury holds" quality={observatory.data ? (complete ? weakestQuality(reads) : "unknown") : undefined}
+    status={{ ...observatoryStatus(observatory), empty: !rows.length, emptyText: complete ? "No sidechain is active, so no treasury is held." : "The latest treasury readings are incomplete; the values return with the next complete reading." }}
     footer="Each value is the latest separate reading of that sidechain's treasury output. Bars are to scale with the largest treasury.">
     <ol className="bars">{rows.map(r => {
       const snap = snapshotOf(observatory.data, "ctip", r.slot), proof = proofHref(snap, dataset);
       return <li key={r.slot}>
         <span className="bar-name"><Link href={`/sidechains/${r.slot}`}>{sidechainLabel(r.slot, names)}</Link></span>
         <span className="bar-track">{r.value ? <span className="bar-fill" style={{ width: `${Math.max(0.8, Number((r.value * BigInt(10000)) / top) / 100)}%` }}/> : null}</span>
-        <span className="bar-value">{r.value === null ? "no treasury output yet" : r.value === undefined ? "unknown" : <><strong>{formatCoins(r.value.toString(), true)}</strong><small>{formatSats(r.value.toString(), unit)}{typeof r.seq === "string" ? ` · output #${r.seq}` : ""}</small></>}{proof && <Link className="bar-proof" href={proof}>proof</Link>}</span>
+        <span className="bar-value">{r.value === null ? "no treasury output yet" : r.value === undefined ? "unknown" : <><strong>{formatCoins(r.value.toString(), true)}</strong><small>{formatSats(r.value.toString(), unit)}{typeof r.seq === "string" ? ` · output #${r.seq}` : ""}</small></>}{proof && <Link className="bar-proof" href={proof}>evidence</Link>}</span>
       </li>;
     })}</ol>
   </LivePanel>;
@@ -132,7 +137,8 @@ export function TreasuryHistory({ fixedSlot }: { fixedSlot?: number }) {
     else if (first && (!row.first || first < row.first)) row.first = first;
   }
   const rows = [...outputs].sort(([a], [b]) => Number(b) - Number(a));
-  return <LivePanel title="A treasury, output by output" status={{ pending: observatory.isPending || (slot != null && history.isPending), error: history.isError && !rows.length, empty: fixedSlot == null ? !funded.length : !rows.length, emptyText: fixedSlot == null ? "No sidechain has a treasury output yet." : "No treasury output has been read for this sidechain yet." }}>
+  const noneFunded = known(observatory.data, "treasury") ? "No sidechain has a treasury output yet." : "The latest treasury readings are incomplete; the history returns with the next complete reading.";
+  return <LivePanel title="A treasury, output by output" status={{ pending: observatory.isPending || (slot != null && history.isPending), error: history.isError && !rows.length, empty: fixedSlot == null ? !funded.length : !rows.length, emptyText: fixedSlot == null ? noneFunded : "No treasury output has been read for this sidechain yet." }}>
     {fixedSlot == null && <label className="picker">Sidechain <select value={slot ?? ""} onChange={e => setPicked(Number(e.target.value))}>{funded.map(s => <option key={s.slot} value={s.slot}>{s.title ?? `#${s.slot}`} (#{s.slot})</option>)}</select></label>}
     <p className="live-lede">Every deposit or withdrawal replaces the treasury output with a new one, and the output number goes up by one. These are the outputs the monitor has read so far.</p>
     <ReadingsChart label="Treasury value at each reading" gaps={gaps} yFormat={y => formatCoins(BigInt(Math.round(y * 1e8)).toString(), true)}
@@ -144,7 +150,7 @@ export function TreasuryHistory({ fixedSlot }: { fixedSlot?: number }) {
     <GoDeeper summary="every treasury output, newest first">
     <ol className="treasury-steps">{rows.map(([seq, r]) => <li key={seq}><span className="seq">{seq === "none" ? "—" : `#${seq}`}</span>
       <span><strong>{seq === "none" ? "No treasury output yet" : formatSats(r.value, unit)}</strong><small>{typeof r.txid === "string" ? `created by transaction ${short(r.txid)} · ` : ""}first read {timeAgo(r.first, now)}, last read {timeAgo(r.last, now)}</small></span>
-      {r.proof && <Link href={r.proof}>proof</Link>}</li>)}</ol>
+      {r.proof && <Link href={r.proof}>evidence</Link>}</li>)}</ol>
     </GoDeeper>
     {rows.length === 1 && <p className="live-note">Only one output has been read for this sidechain so far. The next deposit or withdrawal will add a new row.</p>}
   </LivePanel>;
@@ -160,23 +166,24 @@ export function DepositFeed() {
 export function WithdrawalVotes({ slot }: { slot?: number }) {
   const observatory = useObservatory(), { params } = useNetworkParams(), names = useSidechainNames(), unit = useUnit();
   const bundles = useProtocolPage("withdrawal-bundles", slot == null ? "limit=50" : `slot=${slot}&limit=50`);
-  const pending = (bundles.data?.items ?? []).filter(i => i.kind === "bundle");
+  // The list holds each bundle's latest reading, also of bundles since paid or expired: keep the ones still pending.
+  const pending = (bundles.data?.items ?? []).filter(i => i.kind === "bundle" && i.is_current !== false);
   const dataset = bundles.data?.context.meta.dataset_id;
-  const complete = object(observatory.data?.state).bundle_complete;
+  const complete = known(observatory.data, "bundles");
   // The panel is as certain as the readings behind it, including the ones that found nothing pending.
   const reads = activeSidechains(observatory.data).filter(s => slot == null || s.slot === slot).map(s => snapshotOf(observatory.data, "withdrawal_bundle_proposals", s.slot));
-  return <LivePanel title="Withdrawals being voted on" quality={observatory.data ? weakestQuality(reads) : undefined}
+  return <LivePanel title="Withdrawals being voted on" quality={observatory.data ? (complete ? weakestQuality(reads) : "unknown") : undefined}
     status={{ pending: bundles.isPending, error: bundles.isError && !pending.length, empty: !pending.length,
-      emptyText: <p>{Array.isArray(complete) && complete.length ? "No withdrawal bundle is being voted on right now." : "No pending withdrawal bundle appears in the latest readings."} When a sidechain proposes one, it will appear here with its votes.</p> }}>
+      emptyText: <p>{complete ? "No withdrawal bundle is being voted on right now." : "No pending withdrawal bundle appears in the latest readings, but they are incomplete, so one may exist."} When a sidechain proposes one, it will appear here with its votes.</p> }}>
     <div className="vote-cards">{pending.map(item => {
       const b = object(object(item.data).bundle);
       const votes = typeof b.vote_count === "number" ? b.vote_count : undefined, height = typeof b.proposal_height === "number" ? b.proposal_height : undefined;
       const tip = at(item.data, "observation_window", "reference_tip_height");
       const age = typeof tip === "number" && height != null ? tip - height : undefined;
       const treasury = object(object(object(observatory.data?.state).treasury)[String(item.slot)]);
-      return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(typeof b.m6id === "string" ? b.m6id : "unknown")} · proposed in block ${n(height)}`}
+      return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(typeof b.m6id === "string" ? b.m6id : "unknown")} · proposed in block ${n(height)}${item.is_current == null ? " · not confirmed in the latest complete reading" : ""}`}
         votes={votes} threshold={params.withdrawalThreshold} age={age} maxAge={params.withdrawalMaxAge}
-        footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the proof →</Link>}</p>
+        footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the evidence →</Link>}</p>
           <VoteHistory item={item} threshold={params.withdrawalThreshold}/></>}/>;
     })}</div>
   </LivePanel>;
@@ -211,7 +218,7 @@ export function DepositStory({ slot, compact = false }: { slot?: number; compact
       <li><span className="story-num">1</span><div>
         <strong>{formatCoins(d.value_sats)} sent to {who}</strong>
         <p>In {blockNumber(deposit.height)} ({timeAgo(deposit.block_time ?? deposit.observed_at, now)}), transaction <span className="hash">{short(typeof txid === "string" ? txid : "unknown")}</span> deposited {formatSats(d.value_sats, unit)}{address ? <> for the sidechain address <span className="hash">{short(address)}</span></> : null}.</p>
-        <div className="stat-meta"><ConfidenceChip quality={deposit.quality}/>{proofHref(deposit, dataset) && <Link className="proof-link" href={proofHref(deposit, dataset)!}>proof</Link>}</div>
+        <div className="stat-meta"><ConfidenceChip quality={deposit.quality}/>{proofHref(deposit, dataset) && <Link className="proof-link" href={proofHref(deposit, dataset)!}>evidence</Link>}</div>
       </div></li>
       <li><span className="story-num">2</span><div>
         <strong>The treasury is replaced: {before} → {after}</strong>
@@ -220,11 +227,11 @@ export function DepositStory({ slot, compact = false }: { slot?: number; compact
       <li><span className="story-num">3</span><div>
         <strong>Our monitor read the new treasury</strong>
         <p>At tip {blockNumber(tip)}, a separate reading found {who}&apos;s treasury output {seq != null ? `#${seq}` : ""} with {formatSats(change.after.toString(), unit)}, created by that same transaction.</p>
-        <div className="stat-meta"><ConfidenceChip quality={change.reading.quality}/>{proofHref(change.reading, dataset) && <Link className="proof-link" href={proofHref(change.reading, dataset)!}>proof</Link>}</div>
+        <div className="stat-meta"><ConfidenceChip quality={change.reading.quality}/>{proofHref(change.reading, dataset) && <Link className="proof-link" href={proofHref(change.reading, dataset)!}>evidence</Link>}</div>
       </div></li>
       {!compact && <li><span className="story-num">4</span><div>
         <strong>The sidechain credits the coins</strong>
-        <p>{who.replace(/ \(#\d+\)$/, "")}&apos;s own nodes see the deposit and credit the address. That happens on the sidechain, which we don&apos;t watch, so there is no proof for this step here.</p>
+        <p>{who.replace(/ \(#\d+\)$/, "")}&apos;s own nodes see the deposit and credit the address. That happens on the sidechain, which we don&apos;t watch, so there is no evidence for this step here.</p>
       </div></li>}
     </ol>}
     <p className="live-note"><Link className="text-link" href="/learn/deposits">How deposits work</Link> · <Link className="text-link" href="/live?kind=deposit">all deposits</Link></p>

@@ -96,3 +96,36 @@ pub struct BmmMetricsResponse {
     pub slots: Vec<BmmSlotMetrics>,
     pub next_slot: Option<i16>,
 }
+/// What L1 blocks of one recent period recorded, every figure counted over the same heights.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SummaryResponse {
+    pub context: ProtocolContext,
+    /// Absent while the projection catches up with a new block: nothing is counted then, which is not zero.
+    pub window: Option<SummaryWindow>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SummaryWindow {
+    pub hours: u32,
+    /// Start of the period, by the database clock.
+    pub since: DateTime<Utc>,
+    /// The first selected block whose miner-set timestamp is inside the period, through the anchor. Block times are
+    /// not monotonic, so a block in this range may carry an earlier timestamp.
+    pub from_height: i32,
+    pub to_height: i32,
+    pub from_block_time: Option<DateTime<Utc>>,
+    pub to_block_time: Option<DateTime<Utc>>,
+    /// Heights in the range, and how many of them are on the selected branch the Observatory holds.
+    pub blocks: i64,
+    pub blocks_on_branch: i64,
+    pub deposits: i64,
+    pub deposited_sats: String,
+    /// The weakest quality among the deposits counted, or none when there are none.
+    pub deposit_quality: Option<String>,
+    pub payouts_succeeded: i64,
+    pub payouts_failed: i64,
+    /// Blocks whose merged-mining facts the enforcer reported, and how many of those committed to a sidechain block.
+    pub bmm_observed_blocks: i64,
+    pub bmm_committed_blocks: i64,
+    /// More records than one response holds: counts are lower bounds.
+    pub truncated: bool,
+}

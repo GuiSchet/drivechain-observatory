@@ -42,13 +42,13 @@ export function SearchResults({ q }: { q: string }) {
       <ol className="activity-feed">{events.map(item => <li key={item.id}><div className="activity-body">
         <p>{describeActivity(item, names, unit)}</p>
         <div className="activity-meta"><span>{item.height != null ? blockNumber(item.height) : "a reading of current state"} · {timeAgo(item.block_time ?? item.observed_at, now)}</span><ConfidenceChip quality={item.quality}/>
-          {proof(item) && <Link href={proof(item)!}>Proof</Link>}
+          {proof(item) && <Link href={proof(item)!}>Evidence</Link>}
           {item.slot != null && <Link href={`/sidechains/${item.slot}`}>Sidechain page</Link>}</div>
       </div></li>)}</ol>
     </>}
     {!!bids.length && <GoDeeper summary={`${bids.length} merged-mining ${bids.length === 1 ? "bid" : "bids"} seen while this was the newest block`}>
       <p>These bids named this block as their parent, so they competed to be included in the <strong>next</strong> block{height ? ` (${blockNumber(Number(height) + 1)})` : ""}. A bid seen here was not necessarily paid. <Link className="text-link" href="/learn/merged-mining">How bids work</Link></p>
-      <ul className="plain-list">{bids.map(b => <li key={b.id}>{sidechainLabel(b.slot, names)}: {formatSats(object(b.data).bid_sats, unit)} {proof(b) && <Link className="text-link" href={proof(b)!}>proof</Link>}</li>)}</ul>
+      <ul className="plain-list">{bids.map(b => <li key={b.id}>{sidechainLabel(b.slot, names)}: {formatSats(object(b.data).bid_sats, unit)} {proof(b) && <Link className="text-link" href={proof(b)!}>evidence</Link>}</li>)}</ul>
     </GoDeeper>}
   </main>;
 }

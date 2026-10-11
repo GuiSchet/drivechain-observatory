@@ -21,6 +21,6 @@ export function ProofIntro({ kind, what }: { kind?: string; what: "event" | "blo
   const [text, lesson] = what === "block" ? ["One L1 block, with every fact the monitor recorded about it.", "blocks"] : kinds[kind ?? ""] ?? ["A record captured by the monitor.", "how-we-know"];
   return <aside className="proof-intro">
     <ShieldCheck size={20} aria-hidden="true"/>
-    <div><strong>You are looking at a proof.</strong> {text} It is shown exactly as recorded, so anyone can check the values used on the rest of the site. <Link className="text-link" href={`/learn/${lesson}`}>Learn what it means</Link> · <Link className="text-link" href="/learn/how-we-know">How we know</Link></div>
+    <div><strong>You are looking at evidence.</strong> {text} It is shown exactly as recorded, so anyone can check the values used on the rest of the site. <Link className="text-link" href={`/learn/${lesson}`}>Learn what it means</Link> · <Link className="text-link" href="/learn/how-we-know">How we know</Link></div>
   </aside>;
 }

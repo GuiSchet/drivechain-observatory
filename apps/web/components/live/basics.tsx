@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getBlocks } from "@/lib/api";
 import { object } from "@/lib/protocol";
 import { formatCoins, formatSats, sats, short, timeAgo } from "@/lib/explain";
-import { activeSidechains, n, proofHref, snapshotOf, useObservatory, useOverview, weakestQuality } from "@/lib/live";
+import { activeSidechains, known, n, observatoryStatus, proofHref, snapshotOf, unknownText, useObservatory, useOverview, weakestQuality } from "@/lib/live";
 import { useLiveActivity } from "@/components/providers";
 import { useUnit } from "@/lib/unit";
 import { LivePanel, Stat } from "@/components/learn/primitives";
@@ -32,20 +32,22 @@ export function NetworkSnapshot() {
   const pending = Object.values(object(state.bundles));
   const onlyBundle = pending.length === 1 ? object(pending[0]) : undefined;
   const bundleEvent = Array.isArray(onlyBundle?.evidence) ? object(onlyBundle.evidence[0]).event_id : undefined;
-  const ready = !!data;
+  // A zero is shown only when the reading behind it was complete; otherwise the value is unknown.
+  const knownActive = known(data, "sidechains"), knownTreasury = known(data, "treasury"), knownBundles = known(data, "bundles");
+  const missing = unknownText(data);
   return <LivePanel title="eCash Betanet right now"
-    status={{ pending: overview.isPending && observatory.isPending, error: overview.isError && observatory.isError && !o && !data }}
-    footer="The block is observed directly. The other three are separate readings of current state taken at the chain tip, so each has its own label and proof.">
+    status={{ pending: overview.isPending && observatory.isPending, error: overview.isError && observatory.isError && !o && !data, updating: data?.readiness === "updating" }}
+    footer="The block is observed directly. The other three are separate readings of current state taken at the chain tip, so each has its own label and evidence.">
     <div className="stat-grid">
       <Stat label="Latest L1 block" value={tip ? `#${n(tip.height)}` : "Unknown"} hint={tip ? `seen ${timeAgo(tip.observed_at, now)}` : undefined}
         quality={tip ? "observed" : undefined} proof={tip && blockDataset ? `/datasets/${blockDataset}/blocks/${tip.hash}` : undefined}/>
-      <Stat label="Active sidechains" value={ready ? active.length : "Unknown"} hint={<Link href="/sidechains">meet them →</Link>}
-        quality={ready ? activeRead?.quality ?? null : undefined} proof={proofHref(activeRead, dataset)}/>
-      <Stat label="Coins locked in treasuries" value={values.length ? formatCoins(locked.toString(), true) : "Unknown"}
-        hint={values.length ? <>{formatSats(locked.toString(), unit)}, sum of {values.length} treasury readings · <Link href="/sidechains">per sidechain →</Link></> : undefined}
-        quality={ready ? weakestQuality(treasuryReads) : undefined}/>
-      <Stat label="Withdrawals being voted on" value={ready ? pending.length : "Unknown"} hint={<Link href="/learn/withdrawals">how voting works →</Link>}
-        quality={ready ? weakestQuality(bundleReads) : undefined}
+      <Stat label="Active sidechains" value={knownActive ? active.length : missing} hint={<Link href="/sidechains">meet them →</Link>}
+        quality={data ? (knownActive ? activeRead?.quality ?? null : "unknown") : undefined} proof={proofHref(activeRead, dataset)}/>
+      <Stat label="Coins locked in treasuries" value={knownTreasury ? formatCoins(locked.toString(), true) : missing}
+        hint={knownTreasury ? <>{formatSats(locked.toString(), unit)}, sum of {values.length} treasury readings · <Link href="/sidechains">per sidechain →</Link></> : undefined}
+        quality={data ? (knownTreasury ? weakestQuality(treasuryReads) : "unknown") : undefined}/>
+      <Stat label="Withdrawals being voted on" value={knownBundles ? pending.length : missing} hint={<Link href="/learn/withdrawals">how voting works →</Link>}
+        quality={data ? (knownBundles ? weakestQuality(bundleReads) : "unknown") : undefined}
         proof={typeof bundleEvent === "string" && dataset ? `/datasets/${dataset}/events/${bundleEvent}` : undefined}/>
     </div>
   </LivePanel>;
@@ -53,8 +55,11 @@ export function NetworkSnapshot() {
 
 export function BlockHeartbeat() {
   const live = useLiveActivity(), now = useNow(1_000);
-  const blocks = useQuery({ queryKey: ["blocks", "heartbeat"], queryFn: () => getBlocks("limit=8") });
-  const list = blocks.data?.blocks ?? [], tip = list[0], dataset = blocks.data?.meta.dataset_id;
+  const blocks = useQuery({ queryKey: ["blocks", "heartbeat"], queryFn: () => getBlocks("limit=25") });
+  const recent = blocks.data?.blocks ?? [], list = recent.slice(0, 8), tip = list[0], dataset = blocks.data?.meta.dataset_id;
+  // The recent pace by the blocks' own timestamps, over consecutive heights only.
+  const oldest = recent[recent.length - 1], span = tip && oldest ? tip.height - oldest.height : 0;
+  const minutes = span > 0 && tip?.block_time && oldest?.block_time ? (Date.parse(tip.block_time) - Date.parse(oldest.block_time)) / 60_000 / span : undefined;
   return <LivePanel title="The latest L1 blocks" quality={tip ? "observed" : null} proof={tip && dataset ? `/datasets/${dataset}/blocks/${tip.hash}` : undefined}
     status={{ pending: blocks.isPending, error: blocks.isError && !list.length, empty: !list.length, emptyText: "No block headers have been imported yet." }}>
     <p className="live-lede">{tip ? <>The newest block is <strong>#{n(tip.height)}</strong>, mined about <strong>{timeAgo(tip.block_time, now)}</strong> by its own timestamp. Keep this page open: when a new block arrives, it slides in on the left.</> : null}</p>
@@ -63,7 +68,7 @@ export function BlockHeartbeat() {
         <Link href={`/datasets/${dataset}/blocks/${b.hash}`}><span className="chain-height">#{n(b.height)}</span><span className="hash">{short(b.hash)}</span><small>{timeAgo(b.block_time, now)}</small></Link>
         {i < list.length - 1 && <span className="chain-link" aria-hidden="true">←</span>}
       </li>)}</ol>
-    <p className="live-note">Each block's parent is the one to its right. Times come from each block's own timestamp, set by its miner. Hashes start with many zeros because of proof-of-work.</p>
+    <p className="live-note">Each block's parent is the one to its right. Times come from each block's own timestamp, set by its miner. Hashes start with many zeros because of proof-of-work.{minutes != null && minutes > 0 ? ` The last ${n(span)} blocks came about every ${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)} minutes on average, by those timestamps (the target is ten).` : ""}</p>
   </LivePanel>;
 }
 
@@ -87,9 +92,9 @@ export function SlotGrid() {
   const pick = selected ?? active[0]?.slot;
   const s = pick == null ? undefined : bySlot.get(pick);
   const dataset = observatory.data?.context.meta.dataset_id;
-  const obs = snapshotOf(observatory.data, "active_sidechains");
-  return <LivePanel title="All 256 slots" quality={obs?.quality ?? null} proof={proofHref(obs, dataset)}
-    status={{ pending: observatory.isPending, error: observatory.isError && !observatory.data }}>
+  const obs = snapshotOf(observatory.data, "active_sidechains"), complete = known(observatory.data, "sidechains");
+  return <LivePanel title="All 256 slots" quality={complete ? obs?.quality ?? null : "unknown"} proof={proofHref(obs, dataset)}
+    status={{ ...observatoryStatus(observatory), empty: !complete, emptyText: "The latest reading of active sidechains is incomplete, so the slots are not shown until the next complete one." }}>
     <p className="live-lede"><strong>{active.length}</strong> of 256 slots hold an active sidechain right now. Select a lit slot to read its declaration.</p>
     <div className="slot-grid" role="list">{Array.from({ length: 256 }, (_, i) => {
       const sc = bySlot.get(i);

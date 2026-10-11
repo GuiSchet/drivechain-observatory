@@ -39,6 +39,13 @@ pub struct BmmQuery {
     pub slot: Option<i16>,
     pub start_slot: Option<i16>,
 }
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in=Query)]
+pub struct SummaryQuery {
+    pub dataset: Option<Uuid>,
+    /// Length of the period in hours, 1 to 168. Default 24.
+    pub hours: Option<u32>,
+}
 #[derive(Serialize, Deserialize)]
 struct Cursor {
     dataset: Uuid,
@@ -287,6 +294,117 @@ pub async fn observatory(
     })
 }
 
+/// Records one summary counts per kind before it reports `truncated`.
+const SUMMARY_MAX: u32 = 10_000;
+
+/// Deposits, payouts and merged-mining commitments of one recent period, all counted over the same block heights
+/// and from the same build, so the figures can be compared with each other.
+pub async fn summary(pool: &PgPool, q: SummaryQuery) -> Result<SummaryResponse, StorageError> {
+    let hours = q.hours.unwrap_or(24);
+    if !(1..=168).contains(&hours) {
+        return Err(StorageError::InvalidQuery);
+    }
+    let mut tx = snapshot(pool).await?;
+    let d = dataset(&mut tx, q.dataset).await?;
+    let c = context(&mut tx, &d).await?;
+    let anchor = c
+        .anchor_height
+        .filter(|_| matches!(c.state.as_str(), "available" | "partial"));
+    let Some(anchor) = anchor else {
+        tx.commit().await?;
+        return Ok(SummaryResponse {
+            context: c,
+            window: None,
+        });
+    };
+    let g = c.meta.projection_generation;
+    let since: DateTime<Utc> = sqlx::query_scalar("SELECT now()-make_interval(hours=>$1)")
+        .bind(i32::try_from(hours).map_err(|_| StorageError::InvalidQuery)?)
+        .fetch_one(&mut *tx)
+        .await?;
+    let first: Option<(i32, DateTime<Utc>)> = sqlx::query_as("SELECT m.height,h.block_time FROM projection.chain_members m JOIN projection.chain_headers h ON h.dataset_id=m.dataset_id AND h.generation=m.generation AND h.hash=m.hash WHERE m.dataset_id=$1 AND m.generation=$2 AND m.height<=$3 AND h.block_time>=$4 ORDER BY m.height LIMIT 1")
+        .bind(d.dataset_id).bind(g).bind(anchor).bind(since).fetch_optional(&mut *tx).await?;
+    let from_height = first.map_or(anchor + 1, |f| f.0);
+    let to_block_time: Option<DateTime<Utc>> = sqlx::query_scalar("SELECT h.block_time FROM projection.chain_members m JOIN projection.chain_headers h ON h.dataset_id=m.dataset_id AND h.generation=m.generation AND h.hash=m.hash WHERE m.dataset_id=$1 AND m.generation=$2 AND m.height=$3")
+        .bind(d.dataset_id).bind(g).bind(anchor).fetch_optional(&mut *tx).await?;
+    let blocks_on_branch: i64 = sqlx::query_scalar("SELECT count(DISTINCT height) FROM projection.chain_members WHERE dataset_id=$1 AND generation=$2 AND height BETWEEN $3 AND $4")
+        .bind(d.dataset_id).bind(g).bind(from_height).bind(anchor).fetch_one(&mut *tx).await?;
+    let range = |kind: Option<&str>| ProtocolQuery {
+        kind: kind.map(str::to_owned),
+        from_height: Some(from_height),
+        to_height: Some(anchor),
+        order: Some("block".into()),
+        ..ProtocolQuery::default()
+    };
+    let deposits = history_page(&mut tx, "deposits", &range(None), &c, None, SUMMARY_MAX).await?;
+    let outcomes = history_page(
+        &mut tx,
+        "activity",
+        &range(Some("bundle_outcome")),
+        &c,
+        None,
+        SUMMARY_MAX,
+    )
+    .await?;
+    let truncated = deposits.len() > SUMMARY_MAX as usize || outcomes.len() > SUMMARY_MAX as usize;
+    let deposited: u128 = deposits
+        .iter()
+        .filter_map(|i| match &i.data["value_sats"] {
+            Value::String(v) => v.parse::<u128>().ok(),
+            Value::Number(v) => v.as_u64().map(u128::from),
+            _ => None,
+        })
+        .sum();
+    let outcome = |name: &str| {
+        outcomes
+            .iter()
+            .filter(|i| i.data["state"].get(name).is_some())
+            .count() as i64
+    };
+    // A block counts as observed when the enforcer reported its merged-mining facts without conflicting samples.
+    let (bmm_observed_blocks, bmm_committed_blocks): (i64, i64) = sqlx::query_as("WITH cells AS (SELECT f.hash,f.slot,count(DISTINCT coalesce(f.data->>'bmm_commitment',''))=1 AS consistent,bool_or(f.data->>'bmm_commitment' IS NOT NULL) AS present
+          FROM projection.protocol_facts f JOIN projection.chain_members m ON m.dataset_id=f.dataset_id AND m.generation=f.generation AND m.hash=f.hash
+         WHERE f.dataset_id=$1 AND f.generation=$2 AND f.kind='slot_block' AND f.error IS NULL AND f.event_id<=$3 AND m.height BETWEEN $4 AND $5 GROUP BY f.hash,f.slot)
+        SELECT count(DISTINCT hash) FILTER (WHERE consistent),count(DISTINCT hash) FILTER (WHERE consistent AND present) FROM cells")
+        .bind(d.dataset_id).bind(g)
+        .bind(c.source_event_cut.as_ref().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0))
+        .bind(from_height).bind(anchor).fetch_one(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(SummaryResponse {
+        window: Some(SummaryWindow {
+            hours,
+            since,
+            from_height,
+            to_height: anchor,
+            from_block_time: first.map(|f| f.1),
+            to_block_time,
+            blocks: i64::from(anchor - from_height + 1),
+            blocks_on_branch,
+            deposits: deposits.len().min(SUMMARY_MAX as usize) as i64,
+            deposited_sats: deposited.to_string(),
+            deposit_quality: weakest_quality(&deposits),
+            payouts_succeeded: outcome("Succeeded"),
+            payouts_failed: outcome("Failed"),
+            bmm_observed_blocks,
+            bmm_committed_blocks,
+            truncated,
+        }),
+        context: c,
+    })
+}
+/// The least certain quality among items: a total is only as certain as its weakest part.
+fn weakest_quality(items: &[ProtocolItem]) -> Option<String> {
+    let rank = |q: &str| match q {
+        "observed" => 0,
+        "tip_matched" => 1,
+        _ => 2,
+    };
+    items
+        .iter()
+        .map(|i| i.quality.as_str())
+        .max_by_key(|q| rank(q))
+        .map(str::to_owned)
+}
 pub async fn list(
     pool: &PgPool,
     resource: &str,

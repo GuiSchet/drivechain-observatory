@@ -139,6 +139,21 @@ assert [x["id"] for x in pages("/api/v1/activity?order=block&scope=all&limit=1")
 assert [x["id"] for x in pages("/api/v1/deposits?limit=1")]==[x["id"] for x in get("/api/v1/deposits?order=block&limit=200")["items"]]
 error("/api/v1/activity?order=height",400)
 check("histories sort by block height with a stable cursor")
+for bad in ["0","169","x"]:error("/api/v1/summary?hours="+bad,400)
+old=get("/api/v1/summary")["window"]
+assert old["blocks"]==0 and old["from_height"]==old["to_height"]+1 and old["deposits"]==0,old
+# Bring the fixture's blocks into the period, then compare every figure with the lists over the same heights.
+sql("postgres","UPDATE projection.chain_headers SET block_time=now()-make_interval(mins=>(SELECT max(height) FROM projection.chain_headers)-height)")
+summary=get("/api/v1/summary?hours=24")
+w=summary["window"]
+assert w["blocks"]==w["to_height"]-w["from_height"]+1==w["blocks_on_branch"] and w["to_height"]==summary["context"]["anchor_height"],w
+span="from_height=%d&to_height=%d"%(w["from_height"],w["to_height"])
+deposits=pages("/api/v1/deposits?limit=1&"+span)
+assert w["deposits"]==len(deposits)==1 and w["deposited_sats"]==str(sum(int(x["data"]["value_sats"]) for x in deposits)),(w,deposits)
+assert w["payouts_succeeded"]==1 and w["payouts_failed"]==0 and not w["truncated"],w
+assert 0<=w["bmm_committed_blocks"]<=w["bmm_observed_blocks"]<=w["blocks"],w
+sql("postgres","UPDATE projection.chain_headers SET block_time=to_timestamp(%d+(height-%d)*600)"%(1790262000,fixture.ACTIVATION))
+check("the period summary counts every figure over the same block heights")
 def content(x):return {k:v for k,v in x["data"].items() if k not in ("observation_window","occurrences")}
 every=get("/api/v1/activity?scope=all&limit=200")["items"]
 changed=get("/api/v1/activity?changes=true&scope=all&limit=200")["items"]

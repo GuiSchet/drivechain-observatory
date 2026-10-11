@@ -59,7 +59,7 @@ function Row({ kind, icon: rowIcon, text, meta }: { kind: string; icon: ReactNod
 }
 
 /**
- * Plain-English activity, newest first by block; each row links to its lesson and its proof.
+ * Plain-English activity, newest first by block; each row links to its lesson and its evidence.
  * By default only changes are listed: a reading identical to the previous one is left out.
  * `withTreasury` also loads treasury readings, to show each deposit's before and after; readings
  * that match no listed deposit stay hidden.
@@ -83,7 +83,7 @@ export function ActivityFeed({ slot, kind, limit = 20, paged = false, compact = 
     return <>
       {!compact && <ConfidenceChip quality={all.length > 1 ? weakestQuality(all) : first.quality}/>}
       {lesson && !compact && <Link href={`/learn/${lesson}`}>What is this?</Link>}
-      {proof && <Link href={proof}>Proof</Link>}
+      {proof && <Link href={proof}>Evidence</Link>}
       {extra}
     </>;
   };

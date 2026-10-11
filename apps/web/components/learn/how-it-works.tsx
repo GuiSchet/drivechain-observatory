@@ -1,14 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useReducedMotion } from "motion/react";
 import { ArrowRight, Pause, Play } from "lucide-react";
-import { getJson } from "@/lib/api";
 import { object } from "@/lib/protocol";
 import { formatCoins, sats } from "@/lib/explain";
-import { activeSidechains, n, useNetworkParams, useObservatory, useProtocolPage } from "@/lib/live";
-import type { BmmMetrics } from "@/lib/types";
+import { activeSidechains, known, n, useBmmMetrics, useNetworkParams, useObservatory, useProtocolPage } from "@/lib/live";
 
 type Step = { title: string; body: ReactNode; fact: ReactNode; tag?: string; lesson: string; lessonTitle: string };
 
@@ -16,16 +13,16 @@ type Step = { title: string; body: ReactNode; fact: ReactNode; tag?: string; les
 function useExample() {
   const observatory = useObservatory(), { params } = useNetworkParams();
   const bundles = useProtocolPage("withdrawal-bundles", "limit=50");
-  const metrics = useQuery({ queryKey: ["protocol", "bmm", "metrics", "window_blocks=24"], queryFn: () => getJson<BmmMetrics>("/api/v1/bmm?window_blocks=24") });
+  const metrics = useBmmMetrics(24);
   const active = activeSidechains(observatory.data);
   const treasury = object(object(observatory.data?.state).treasury);
   const value = (slot: number) => sats(object(treasury[String(slot)]).value_sats);
-  const pending = (bundles.data?.items ?? []).filter(i => i.kind === "bundle" && active.some(s => s.slot === i.slot));
+  const pending = (bundles.data?.items ?? []).filter(i => i.kind === "bundle" && i.is_current !== false && active.some(s => s.slot === i.slot));
   const bySize = [...active].sort((a, b) => (value(b.slot) ?? BigInt(0)) > (value(a.slot) ?? BigInt(0)) ? 1 : -1);
   const sc = active.find(s => s.slot === pending[0]?.slot) ?? bySize[0];
   const bundle = sc ? object(object(pending.find(i => i.slot === sc.slot)?.data).bundle) : {};
   const row = metrics.data?.slots.find(r => r.slot === sc?.slot);
-  return { sc, treasury: sc ? value(sc.slot) : undefined, votes: typeof bundle.vote_count === "number" ? bundle.vote_count : undefined, hasBundle: !!sc && pending.some(i => i.slot === sc.slot), bmm: row, params, loaded: !!observatory.data };
+  return { sc, treasury: sc ? value(sc.slot) : undefined, votes: typeof bundle.vote_count === "number" ? bundle.vote_count : undefined, hasBundle: !!sc && pending.some(i => i.slot === sc.slot), bmm: row, params, loaded: known(observatory.data, "treasury") && known(observatory.data, "bundles") };
 }
 
 export function HowItWorks() {
@@ -42,7 +39,7 @@ export function HowItWorks() {
       body: <>You send coins to {name}&apos;s <strong>treasury</strong>: a single locked output on the main chain. It is an ordinary L1 transaction, so no vote is needed.</>,
       fact: coins ? <>Right now {name}&apos;s treasury holds <strong>{coins}</strong>.</> : loaded ? <>{name} has no coins locked yet.</> : null },
     { title: "Use them on the sidechain", lesson: "slots", lessonTitle: "Slots and sidechains", tag: "Declared",
-      body: <>{name}&apos;s own nodes see the deposit and credit the same amount to your sidechain address. From there you use what {name} offers. L1 never looks inside the sidechain: it only guards the locked coins.</>,
+      body: <>{name}&apos;s own nodes see the deposit and credit the same amount to your sidechain address. From there you use what {name} offers. L1 never looks inside the sidechain: it only holds the locked coins until miners approve a withdrawal.</>,
       fact: sc?.description ? <>{name} describes itself as “{sc.description}”. We don&apos;t watch the sidechains themselves, so this step has no live number.</> : <>We don&apos;t watch the sidechains themselves, so this step has no live number.</> },
     { title: "Miners keep it moving", lesson: "merged-mining", lessonTitle: "Blind merged mining",
       body: <>Each L1 block can seal one new {name} block. Sidechain users pay the L1 miner to include it, and the miner never runs sidechain software: that is <strong>blind merged mining</strong>.</>,

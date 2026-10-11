@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { StatusBanner } from "@/components/status-banner";
 import { Providers } from "@/components/providers";
 
 import "./globals.css";
@@ -17,7 +18,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
   return (
     <html lang="en">
       <body>
-        <Providers><SiteHeader />{children}</Providers>
+        <Providers><SiteHeader /><StatusBanner />{children}</Providers>
         <SiteFooter />
       </body>
     </html>

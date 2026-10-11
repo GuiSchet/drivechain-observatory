@@ -101,6 +101,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/protocol-messages", get(list))
         .route("/api/v1/bmm/history", get(list))
         .route("/api/v1/bmm", get(bmm))
+        .route("/api/v1/summary", get(summary))
         .route("/api/v1/bmm/commitments", get(list))
         .route("/api/v1/bmm/confirmed", get(list))
         .route("/api/v1/activity", get(list))
@@ -134,6 +135,13 @@ pub async fn bmm(
     PublicQuery(q): PublicQuery<pulse_storage::protocol::BmmQuery>,
 ) -> Result<Json<BmmMetricsResponse>, AppError> {
     Ok(Json(pulse_storage::bmm::metrics(&s.pool, q).await?))
+}
+#[utoipa::path(get,path="/api/v1/summary",params(pulse_storage::protocol::SummaryQuery),responses((status=200,body=SummaryResponse),(status=400,body=ApiError)),tag="pulse")]
+pub async fn summary(
+    State(s): State<AppState>,
+    PublicQuery(q): PublicQuery<pulse_storage::protocol::SummaryQuery>,
+) -> Result<Json<SummaryResponse>, AppError> {
+    Ok(Json(pulse_storage::protocol::summary(&s.pool, q).await?))
 }
 async fn provenance(
     State(s): State<AppState>,

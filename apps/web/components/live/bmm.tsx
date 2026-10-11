@@ -1,10 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { getAuctions, getJson } from "@/lib/api";
+import { getAuctions } from "@/lib/api";
 import { formatSats, short, sidechainLabel, timeAgo } from "@/lib/explain";
-import { n, useProtocolPage, useSidechainNames } from "@/lib/live";
-import type { BmmMetrics } from "@/lib/types";
+import { n, useBmmMetrics, useProtocolPage, useSidechainNames } from "@/lib/live";
 import { useUnit } from "@/lib/unit";
 import { LivePanel } from "@/components/learn/primitives";
 import { useNow } from "./basics";
@@ -42,14 +41,13 @@ const cellText: Record<string, string> = { present: "commitment in this block", 
 
 export function BmmCommitments({ slot }: { slot?: number }) {
   const names = useSidechainNames();
-  const query = slot == null ? "window_blocks=24" : `window_blocks=24&slot=${slot}`;
-  const metrics = useQuery({ queryKey: ["protocol", "bmm", "metrics", query], queryFn: () => getJson<BmmMetrics>(`/api/v1/bmm?${query}`) });
+  const metrics = useBmmMetrics(24, slot);
   const rows = metrics.data?.slots ?? [];
   const dataset = metrics.data?.context.meta.dataset_id;
   return <LivePanel title="BMM commitments, L1 block by L1 block" quality={rows.length ? "observed" : null}
     status={{ pending: metrics.isPending, error: metrics.isError && !rows.length, empty: !rows.length, emptyText: "No commitments have been observed yet." }}
     footer={<span className="legend"><i className="cell present"/> commitment (BMM Accept) <i className="cell observed_absent"/> none <i className="cell unknown_eligibility"/> not observed</span>}>
-    <p className="live-lede">The last 24 L1 blocks, oldest on the left. A lit cell means that L1 block committed to one block hash of that sidechain (BIP301 calls this "finding" the sidechain block). L1 only records the hash: whether that sidechain block exists and is valid is checked by sidechain nodes, not by L1. Select a cell to see its proof.</p>
+    <p className="live-lede">The last 24 L1 blocks, oldest on the left. A lit cell means that L1 block committed to one block hash of that sidechain (BIP301 calls this "finding" the sidechain block). L1 only records the hash: whether that sidechain block exists and is valid is checked by sidechain nodes, not by L1. Select a cell to see the record behind it.</p>
     <div className="commit-grid">{rows.map(row => <div className="commit-row" key={row.slot}>
       <span className="commit-name"><Link href={`/sidechains/${row.slot}`}>{sidechainLabel(row.slot, names)}</Link><small>{n(row.present)} of {n(row.covered)}</small></span>
       <span className="commit-cells">{[...row.cells].reverse().map(cell => {
@@ -65,7 +63,7 @@ export function ConfirmedFees() {
   const page = useProtocolPage("bmm/confirmed", "limit=6&scope=all");
   const items = page.data?.items ?? [];
   return <LivePanel title="Bids that were paid" status={{ pending: page.isPending, error: page.isError && !items.length, empty: !items.length,
-    emptyText: <p>No paid bid has been matched yet. A fee is shown only when the monitor saw the bid, found the matching commitment in a block, and could read the transaction's inputs. Otherwise the fee stays unknown rather than guessed.</p> }}>
+    emptyText: <p>No paid bid has been matched yet. A fee is shown only when the monitor saw the bid, found the matching commitment in a block, and could read the transaction's inputs. Otherwise the fee stays unknown rather than guessed. Some commitments have no on-chain bid at all: the miner may have built the sidechain block itself, or been paid over Lightning.</p> }}>
     <ul className="plain-list">{items.map(item => <li key={item.id}>{sidechainLabel(item.slot, names)}, block {n(item.height)}: {item.data && typeof item.data === "object" && "fee_sats" in item.data && item.data.fee_sats != null ? formatSats(item.data.fee_sats, unit) : "fee unknown"}</li>)}</ul>
   </LivePanel>;
 }
