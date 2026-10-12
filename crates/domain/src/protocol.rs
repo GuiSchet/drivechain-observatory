@@ -129,3 +129,33 @@ pub struct SummaryWindow {
     /// More records than one response holds: counts are lower bounds.
     pub truncated: bool,
 }
+/// One column of a dataset table and what it means.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DatasetColumn {
+    pub name: String,
+    pub description: String,
+}
+/// Records of one kind as typed columns, oldest first.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DatasetTable {
+    /// File name without extension, such as `deposits`.
+    pub name: String,
+    pub description: String,
+    pub columns: Vec<DatasetColumn>,
+    /// One cell per column, as text; null when unknown. Satoshi amounts are exact integers.
+    pub rows: Vec<Vec<Option<String>>>,
+    /// More records exist than the table holds: narrow the height range.
+    pub truncated: bool,
+}
+/// Everything the Observatory holds about one sidechain slot, read from a single build.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SidechainDataset {
+    pub context: ProtocolContext,
+    pub slot: i16,
+    pub from_height: Option<i32>,
+    pub to_height: Option<i32>,
+    pub generated_at: DateTime<Utc>,
+    /// Limits a reader must know before drawing conclusions from the tables.
+    pub notes: Vec<String>,
+    pub tables: Vec<DatasetTable>,
+}

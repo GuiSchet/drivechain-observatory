@@ -599,6 +599,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sidechains/{slot}/dataset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sidechain_dataset"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sidechains/{slot}/instances": {
         parameters: {
             query?: never;
@@ -960,6 +976,22 @@ export interface components {
             dataset_id: string;
             network_id: string;
         };
+        /** @description One column of a dataset table and what it means. */
+        DatasetColumn: {
+            description: string;
+            name: string;
+        };
+        /** @description Records of one kind as typed columns, oldest first. */
+        DatasetTable: {
+            columns: components["schemas"]["DatasetColumn"][];
+            description: string;
+            /** @description File name without extension, such as `deposits`. */
+            name: string;
+            /** @description One cell per column, as text; null when unknown. Satoshi amounts are exact integers. */
+            rows: (string | null)[][];
+            /** @description More records exist than the table holds: narrow the height range. */
+            truncated: boolean;
+        };
         EvidenceOccurrence: {
             capture_method: string;
             capture_seq: string;
@@ -1140,6 +1172,21 @@ export interface components {
             /** Format: uuid */
             run_id: string;
             status: string;
+        };
+        /** @description Everything the Observatory holds about one sidechain slot, read from a single build. */
+        SidechainDataset: {
+            context: components["schemas"]["ProtocolContext"];
+            /** Format: int32 */
+            from_height?: number | null;
+            /** Format: date-time */
+            generated_at: string;
+            /** @description Limits a reader must know before drawing conclusions from the tables. */
+            notes: string[];
+            /** Format: int32 */
+            slot: number;
+            tables: components["schemas"]["DatasetTable"][];
+            /** Format: int32 */
+            to_height?: number | null;
         };
         SidechainSummary: {
             /** Format: int32 */
@@ -3231,6 +3278,44 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    sidechain_dataset: {
+        parameters: {
+            query?: {
+                dataset?: string;
+                /** @description First L1 height to include. Snapshot readings filter by the tip they were read at. */
+                from_height?: number;
+                to_height?: number;
+                /** @description zip (default): one CSV per table plus manifest.json with row counts and SHA-256; json: the same tables in one document */
+                format?: string;
+            };
+            header?: never;
+            path: {
+                /** @description BIP300 slot, 0 to 255 */
+                slot: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON shown; format=zip returns application/zip */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SidechainDataset"];
+                };
+            };
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

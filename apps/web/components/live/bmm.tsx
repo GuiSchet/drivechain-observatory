@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { getAuctions } from "@/lib/api";
+import { getAuctions, getMeta } from "@/lib/api";
 import { formatSats, short, sidechainLabel, timeAgo } from "@/lib/explain";
 import { n, useBmmMetrics, useProtocolPage, useSidechainNames } from "@/lib/live";
 import { useUnit } from "@/lib/unit";
@@ -61,9 +61,13 @@ export function BmmCommitments({ slot }: { slot?: number }) {
 export function ConfirmedFees() {
   const unit = useUnit(), names = useSidechainNames();
   const page = useProtocolPage("bmm/confirmed", "limit=6&scope=all");
+  const meta = useQuery({ queryKey: ["meta"], queryFn: getMeta, staleTime: 60_000 });
   const items = page.data?.items ?? [];
+  const caps = meta.data?.current_run?.capabilities;
+  // Without this capability the monitor never looks for paid bids, so an empty list says nothing.
+  const collected = Array.isArray(caps) ? caps.includes("observed_bmm_confirmed_fees") : undefined;
   return <LivePanel title="Bids that were paid" status={{ pending: page.isPending, error: page.isError && !items.length, empty: !items.length,
-    emptyText: <p>No paid bid has been matched yet. A fee is shown only when the monitor saw the bid, found the matching commitment in a block, and could read the transaction's inputs. Otherwise the fee stays unknown rather than guessed. Some commitments have no on-chain bid at all: the miner may have built the sidechain block itself, or been paid over Lightning.</p> }}>
+    emptyText: collected === false ? <p>This deployment does not collect paid fees yet, so this list is empty whether or not bids were paid. The bids above, and the commitments in each block, are still observed. The data download for each sidechain marks which bids were followed by their commitment in the next block.</p> : <p>No paid bid has been matched yet. A fee is shown only when the monitor saw the bid, found the matching commitment in a block, and could read the transaction's inputs. Otherwise the fee stays unknown rather than guessed. Some commitments have no on-chain bid at all: the miner may have built the sidechain block itself, or been paid over Lightning.</p> }}>
     <ul className="plain-list">{items.map(item => <li key={item.id}>{sidechainLabel(item.slot, names)}, block {n(item.height)}: {item.data && typeof item.data === "object" && "fee_sats" in item.data && item.data.fee_sats != null ? formatSats(item.data.fee_sats, unit) : "fee unknown"}</li>)}</ul>
   </LivePanel>;
 }

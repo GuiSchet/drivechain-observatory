@@ -85,14 +85,14 @@ enum StreamMessage {
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Drivechain - Observatory API"),
-    paths(live, ready, meta, status, overview, sidechains, coverage, auctions, evidence, raw_evidence, blocks, block, protocol::observatory, protocol::list, protocol::bmm, protocol::summary),
+    paths(live, ready, meta, status, overview, sidechains, coverage, auctions, evidence, raw_evidence, blocks, block, protocol::observatory, protocol::list, protocol::bmm, protocol::summary, protocol::sidechain_dataset),
     components(schemas(
         ApiError,
         MetaResponse,
         OverviewResponse,
         SidechainsResponse,
         StatusResponse, CoverageResponse, BmmAuctionsResponse, EvidenceResponse, BlocksResponse, BlockResponse,
-        ProtocolPage, ObservatoryResponse, BmmMetricsResponse, SummaryResponse, SummaryWindow
+        ProtocolPage, ObservatoryResponse, BmmMetricsResponse, SummaryResponse, SummaryWindow, SidechainDataset, DatasetTable, DatasetColumn
     )),
     tags((name = "pulse", description = "Drivechain - Observatory public API"))
 )]

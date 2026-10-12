@@ -59,9 +59,22 @@ pub(super) async fn context(
     tx: &mut Transaction<'_, Postgres>,
     d: &Dataset,
 ) -> Result<ProtocolContext, StorageError> {
+    context_at(tx, d, None).await
+}
+/// The context of the published head, or of an earlier build of the same
+/// generation that a cursor pinned. Builds are never deleted and projection
+/// rows are versioned by build, so a pinned reader keeps its old results.
+async fn context_at(
+    tx: &mut Transaction<'_, Postgres>,
+    d: &Dataset,
+    pinned: Option<i64>,
+) -> Result<ProtocolContext, StorageError> {
     let mut meta = response_meta(tx, d).await?;
     let branch = blocks::branch(tx, d.dataset_id).await?;
-    let head=sqlx::query("SELECT b.* FROM projection.protocol_head h JOIN ops.protocol_builds b USING(build_id) WHERE h.dataset_id=$1 AND h.generation=$2").bind(d.dataset_id).bind(meta.projection_generation).fetch_optional(&mut **tx).await?;
+    let head = match pinned {
+        None => sqlx::query("SELECT b.* FROM projection.protocol_head h JOIN ops.protocol_builds b USING(build_id) WHERE h.dataset_id=$1 AND h.generation=$2").bind(d.dataset_id).bind(meta.projection_generation).fetch_optional(&mut **tx).await?,
+        Some(build) => Some(sqlx::query("SELECT b.* FROM ops.protocol_builds b WHERE b.dataset_id=$1 AND b.generation=$2 AND b.build_id=$3 AND b.build_id<=(SELECT h.build_id FROM projection.protocol_head h WHERE h.dataset_id=$1 AND h.generation=$2)").bind(d.dataset_id).bind(meta.projection_generation).bind(build).fetch_optional(&mut **tx).await?.ok_or(StorageError::StaleCursor)?),
+    };
     let mut state = "awaiting_data".to_owned();
     let mut build_id = None;
     let mut anchor_hash = None;
@@ -122,6 +135,11 @@ pub(super) async fn context(
     }
     if state == "available" && !errors.is_empty() {
         state = "partial".into()
+    }
+    // A pinned build that no longer describes the current branch and run
+    // would list nothing; restarting is the honest answer.
+    if pinned.is_some() && matches!(state.as_str(), "awaiting_data" | "catching_up") {
+        return Err(StorageError::StaleCursor);
     }
     meta.data_as_of_event_id = meta.data_as_of_event_id.map(|w| w.min(through));
     let semantics_version = if meta.projection_version >= 5 {
@@ -202,15 +220,40 @@ fn cursor(
     }
     let raw = hex::decode(encoded).map_err(|_| StorageError::InvalidQuery)?;
     let p: Cursor = serde_json::from_slice(&raw).map_err(|_| StorageError::InvalidQuery)?;
+    // Re-reads publish a new build every few seconds without changing the
+    // branch, so a cursor keeps the build it started on instead of matching
+    // the head; a build newer than the head was never published.
+    let build = |b: &Option<String>| b.as_deref().and_then(|v| v.parse::<i64>().ok());
     if p.dataset != c.meta.dataset_id
         || p.generation != c.meta.projection_generation
         || p.branch != c.branch.revision
-        || p.build != c.build_id
+        || build(&p.build).is_none_or(|b| build(&c.build_id).is_none_or(|head| b > head))
         || p.filters != filters(q, resource)
     {
         return Err(StorageError::StaleCursor);
     }
     Ok(Some(p))
+}
+/// The context a page reads from: the head, or the build its cursor pinned.
+async fn page_context(
+    tx: &mut Transaction<'_, Postgres>,
+    d: &Dataset,
+    q: &ProtocolQuery,
+    resource: &str,
+) -> Result<(ProtocolContext, Option<Cursor>), StorageError> {
+    let head = context(tx, d).await?;
+    let Some(page) = cursor(q, resource, &head)? else {
+        return Ok((head, None));
+    };
+    if page.build == head.build_id {
+        return Ok((head, Some(page)));
+    }
+    let build = page.build.as_deref().and_then(|v| v.parse().ok());
+    let pinned = context_at(tx, d, build).await?;
+    if pinned.branch.revision != page.branch {
+        return Err(StorageError::StaleCursor);
+    }
+    Ok((pinned, Some(page)))
 }
 fn encode_cursor(
     q: &ProtocolQuery,
@@ -429,19 +472,9 @@ async fn list_bounded(
     validate(&q, max)?;
     let mut tx = snapshot(pool).await?;
     let d = dataset(&mut tx, q.dataset).await?;
-    let c = context(&mut tx, &d).await?;
-    let page = cursor(&q, resource, &c)?;
+    let (c, page) = page_context(&mut tx, &d, &q, resource).await?;
     let limit = q.limit.unwrap_or(50);
-    let history = matches!(
-        resource,
-        "deposits"
-            | "withdrawal-bundles"
-            | "bundle-attempts"
-            | "sidechain-proposals"
-            | "sidechain-instances"
-            | "ctip/history"
-            | "activity"
-    );
+    let history = is_history(resource);
     let items = if history {
         history_page(&mut tx, resource, &q, &c, page.as_ref(), limit).await?
     } else {
@@ -515,23 +548,9 @@ async fn list_bounded(
     let more = items.len() > limit as usize;
     items.truncate(limit as usize);
     let next_cursor = if more {
-        items.last().map(|i| {
-            encode_cursor(
-                &q,
-                resource,
-                &c,
-                vec![
-                    if history && block_order(resource, &q) {
-                        order_height(i).to_string()
-                    } else if history {
-                        i.observed_at.map(|t| t.to_rfc3339()).unwrap_or_default()
-                    } else {
-                        i.height.unwrap_or(-1).to_string()
-                    },
-                    i.id.clone(),
-                ],
-            )
-        })
+        items
+            .last()
+            .map(|i| encode_cursor(&q, resource, &c, after_keys(resource, &q, i)))
     } else {
         None
     };
@@ -541,6 +560,76 @@ async fn list_bounded(
         items,
         next_cursor,
     })
+}
+/// Histories derive from observed readings; every other resource lists facts.
+fn is_history(resource: &str) -> bool {
+    matches!(
+        resource,
+        "deposits"
+            | "withdrawal-bundles"
+            | "bundle-attempts"
+            | "sidechain-proposals"
+            | "sidechain-instances"
+            | "ctip/history"
+            | "activity"
+    )
+}
+/// Where the page after `i` starts, in the order its resource is listed.
+fn after_keys(resource: &str, q: &ProtocolQuery, i: &ProtocolItem) -> Vec<String> {
+    let history = is_history(resource);
+    vec![
+        if history && block_order(resource, q) {
+            order_height(i).to_string()
+        } else if history {
+            i.observed_at.map(|t| t.to_rfc3339()).unwrap_or_default()
+        } else {
+            i.height.unwrap_or(-1).to_string()
+        },
+        i.id.clone(),
+    ]
+}
+/// Every item of a resource as of one context, read in bounded pages inside
+/// the caller's snapshot. Returns at most `cap` items and whether more exist.
+pub(super) async fn collect(
+    tx: &mut Transaction<'_, Postgres>,
+    resource: &str,
+    q: &ProtocolQuery,
+    c: &ProtocolContext,
+    cap: usize,
+) -> Result<(Vec<ProtocolItem>, bool), StorageError> {
+    const PAGE: u32 = 5_000;
+    let mut items = vec![];
+    let mut page: Option<Cursor> = None;
+    let truncated = loop {
+        let mut batch = if is_history(resource) {
+            history_page(tx, resource, q, c, page.as_ref(), PAGE).await?
+        } else {
+            facts_page(tx, resource, q, c, page.as_ref(), PAGE).await?
+        };
+        let more = batch.len() > PAGE as usize;
+        batch.truncate(PAGE as usize);
+        let after = batch.last().map(|i| after_keys(resource, q, i));
+        items.extend(batch);
+        if items.len() > cap {
+            items.truncate(cap);
+            break true;
+        }
+        match after.filter(|_| more) {
+            Some(after) => {
+                page = Some(Cursor {
+                    dataset: c.meta.dataset_id,
+                    generation: c.meta.projection_generation,
+                    branch: c.branch.revision.clone(),
+                    build: c.build_id.clone(),
+                    filters: Value::Null,
+                    after,
+                })
+            }
+            None => break items.len() == cap && more,
+        }
+    };
+    membership(tx, c, &mut items).await?;
+    Ok((items, truncated))
 }
 fn apply_filters<'a>(
     qb: &mut sqlx::QueryBuilder<'a, Postgres>,
@@ -678,7 +767,17 @@ async fn history_page(
         "coalesce((SELECT o.observed_at FROM ingest.event_observations o WHERE o.dataset_id=p.dataset_id AND o.observation_id=p.last_observation_id),e.observed_at)",
     );
     if let Some(search) = q.q.as_deref().filter(|s| !s.is_empty()) {
-        qb.push(" AND (p.entity_key=").push_bind(search).push(" OR coalesce(p.data->>'m6id',p.data#>>'{bundle,m6id}',p.data#>>'{proposal,description_hash}',p.data#>>'{sidechain,description_hash}')=").push_bind(search).push(" OR coalesce(p.data#>>'{outpoint,txid}',p.data#>>'{ctip,txid}',p.data#>>'{transition,txid}')=").push_bind(search).push(")");
+        // An M6 id is stored in transaction-id order but written reversed in
+        // the M3 coinbase message, the order pools and the enforcer show.
+        let onchain = (search.len() == 64)
+            .then(|| hex::decode(search).ok())
+            .flatten()
+            .map(|mut bytes| {
+                bytes.reverse();
+                hex::encode(bytes)
+            })
+            .unwrap_or_default();
+        qb.push(" AND (p.entity_key=").push_bind(search).push(" OR coalesce(p.data->>'m6id',p.data#>>'{bundle,m6id}',p.data#>>'{proposal,description_hash}',p.data#>>'{sidechain,description_hash}')=").push_bind(search).push(" OR coalesce(p.data->>'m6id',p.data#>>'{bundle,m6id}')=").push_bind(onchain).push(" OR coalesce(p.data#>>'{outpoint,txid}',p.data#>>'{ctip,txid}',p.data#>>'{transition,txid}')=").push_bind(search).push(")");
     }
     if latest {
         qb.push(" ORDER BY p.kind,p.entity_key,");

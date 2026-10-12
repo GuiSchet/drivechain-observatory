@@ -220,7 +220,63 @@ assert int(after[0]["data"]["occurrences"])==int(before[0]["data"]["occurrences"
 assert after[0]["observed_at"]>=before[0]["observed_at"] and after[0]["first_observed_at"]==before[0]["first_observed_at"]
 # The M6 identifier is the display-order bundle txid and is searchable as such.
 assert get("/api/v1/withdrawal-bundles?q="+fixture.BUNDLE_B)["items"],"bundle search"
+assert get("/api/v1/withdrawal-bundles?q="+bytes.fromhex(fixture.BUNDLE_B)[::-1].hex())["items"],"bundle search in M3 byte order"
 check("unchanged snapshots extend their history row; m6id searchable")
+# A cursor keeps the build it started on: re-reads publish builds without a new block.
+listing="/api/v1/activity?order=block&scope=all&limit=1"
+first=get(listing)
+whole=[x["id"] for x in get("/api/v1/activity?order=block&scope=all&limit=200")["items"]]
+f=writer();f.observe(event,9);commit(f)
+assert get(listing)["context"]["build_id"]!=first["context"]["build_id"],"a re-read publishes a new build"
+assert first["next_cursor"]
+items,cursor=first["items"],first["next_cursor"]
+while cursor:
+    page=get(listing+"&cursor="+cursor)
+    assert page["context"]["build_id"]==first["context"]["build_id"],page["context"]
+    items+=page["items"];cursor=page.get("next_cursor")
+assert [x["id"] for x in items]==whole,(items,whole)
+forged=json.loads(bytes.fromhex(first["next_cursor"]))
+forged["build"]=str(int(get(listing)["context"]["build_id"])+1000)
+error(listing+"&cursor="+json.dumps(forged,separators=(",",":")).encode().hex(),409)
+check("cursors continue on their own build; a build newer than the head is refused")
+# One sidechain's records as typed tables from one build, in JSON and as a ZIP of CSVs.
+import csv,hashlib,io,zipfile
+data=get("/api/v1/sidechains/9/dataset?format=json")
+tables={t["name"]:t for t in data["tables"]}
+assert list(tables)==["sidechain","deposits","treasury","withdrawals","bmm_commitments","bmm_bids"],list(tables)
+def column(name,col):
+    i=[c["name"] for c in tables[name]["columns"]].index(col)
+    return [r[i] for r in tables[name]["rows"]]
+assert all(len(r)==len(t["columns"]) for t in data["tables"] for r in t["rows"]) and not any(t["truncated"] for t in data["tables"])
+deposits=pages("/api/v1/deposits?slot=9&limit=1")
+assert column("deposits","txid")==[x["data"]["outpoint"]["txid"] for x in reversed(deposits)]
+assert column("deposits","value_sats")==["1000"] and column("deposits","sidechain_address_hex")==["abcd"] and column("deposits","sidechain_address")==[None]
+assert column("sidechain","instance_id")==[fixture.INSTANCE] and column("sidechain","ack_count")==["3"]
+assert len(column("bmm_commitments","height"))==len(pages("/api/v1/bmm/commitments?slot=9&limit=200"))
+assert column("bmm_commitments","committed").count("true")==1
+assert column("bmm_bids","bid_sats")==["18446744073709551615"] and column("bmm_bids","committed_next_block")==[None]
+outcome=column("withdrawals","row").index("outcome")
+assert column("withdrawals","outcome")[outcome]=="Succeeded"
+assert column("withdrawals","m6id_onchain")[outcome]==bytes.fromhex(fixture.BUNDLE_A)[::-1].hex()
+votes=column("withdrawals","row").index("votes")
+assert column("withdrawals","m6id_txid_order")[votes]==fixture.BUNDLE_B and column("withdrawals","votes_needed")[votes]==str(fixture.CONSTANTS["withdrawal_bundle_inclusion_threshold"])
+# The fixture run collects confirmed fees, so no note says they are missing.
+assert "observed_bmm_confirmed_fees" in fixture.CAPS and not any("confirmed merged-mining fees" in n for n in data["notes"]),data["notes"]
+with urllib.request.urlopen(BASE+"/api/v1/sidechains/9/dataset",timeout=15) as r:
+    assert r.headers["Content-Type"]=="application/zip" and "slot9" in r.headers["Content-Disposition"],r.headers
+    archive=zipfile.ZipFile(io.BytesIO(r.read()))
+manifest=json.loads(archive.read("manifest.json"))
+assert sorted(archive.namelist())==sorted([t+".csv" for t in tables]+["manifest.json"]),archive.namelist()
+for entry in manifest["files"]:
+    body=archive.read(entry["name"])
+    assert hashlib.sha256(body).hexdigest()==entry["sha256"],entry
+    rows=list(csv.reader(io.StringIO(body.decode())))
+    assert rows[0]==[c["name"] for c in entry["columns"]] and len(rows)-1==entry["rows"],entry
+assert manifest["slot"]==9 and manifest["network"]=="betanet" and manifest["notes"]==data["notes"],manifest
+narrow=get("/api/v1/sidechains/9/dataset?format=json&from_height=%d&to_height=%d"%(fixture.ACTIVATION+5,fixture.ACTIVATION+5))
+assert [t["rows"] for t in narrow["tables"] if t["name"]=="bmm_commitments"][0][0][0]==str(fixture.ACTIVATION+5)
+for bad in ["256/dataset","9/dataset?format=xml","9/dataset?from_height=9&to_height=1"]:error("/api/v1/sidechains/"+bad,400)
+check("a sidechain dataset matches the lists and its ZIP files match the manifest")
 if os.environ.get("PULSE_BROWSER_TESTS")=="1":
     subprocess.run(["node","scripts/test-official-browser.mjs"],cwd=ROOT,check=True)
 # Node observations do not promote the enforcer branch.

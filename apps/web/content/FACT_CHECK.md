@@ -62,6 +62,7 @@ Status: ✅ verified · ⚠️ verified with a caveat stated in the lesson.
 | An M4 is optional in each block | BIP300 M4; enforcer treats a block without M4 as abstain | ✅ lesson says "may carry" |
 | M4 per block: upvote one bundle per sidechain (others with votes lose one), abstain (no change), alarm (all lose one); no M4 = abstain; votes never below 0 | BIP300 M4; enforcer `handle_m4_votes`, `downvoted_others_for_upvote`, `positive_votes_proposals_for_alarm` (only bundles with `vote_count > 0`); RepeatPrevious handling L506-534 | ✅ |
 | Miners vote on the M6 id, a "blinded" txid without inputs and with the treasury output replaced by a fee `OP_RETURN` | BIP300 D2 field 2, "Withdrawing in bundles"; L2L spec `m6_to_id` | ✅ |
+| The M6 id is shown in the byte order of the M3 coinbase message; the API stores it reversed (txid order) | Coinbase of betanet block 970,438: `OP_RETURN d45aa943 09 aa769fec…ced4`; enforcer proto sends `m6id` as `ConsensusHex`; monitor `convert.rs` `m6id_display` reverses it; ecpool.tech shows `aa769fec…` | ✅ verified 2026-10-12 |
 | M6 returns the remainder to a new treasury output | BIP300 M6 (first output is `OP_DRIVECHAIN`) | ✅ |
 | Bundles expire when older than the max age | Enforcer `handle_failed_m6ids` (`age > withdrawal_bundle_max_age`) | ⚠️ BIP300 also removes bundles that cannot succeed; lesson says "dropped once it can no longer pass in time", true for both |
 | "ACK the bundle's hash over 3-6 months" | BIP300 "Withdrawing in bundles" (quoted) | ✅ |

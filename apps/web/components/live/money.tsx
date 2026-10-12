@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getJson } from "@/lib/api";
-import { apiQuery, object, at } from "@/lib/protocol";
+import { apiQuery, object, at, onChainM6id } from "@/lib/protocol";
 import { groupActivity, readingTip } from "@/lib/activity";
 import type { ProtocolItem, ProtocolPage } from "@/lib/types";
 import { blockNumber, declarationOf, depositAddress, formatCoinPair, formatCoins, formatSats, sats, short, sidechainLabel, timeAgo } from "@/lib/explain";
@@ -181,9 +181,10 @@ export function WithdrawalVotes({ slot }: { slot?: number }) {
       const tip = at(item.data, "observation_window", "reference_tip_height");
       const age = typeof tip === "number" && height != null ? tip - height : undefined;
       const treasury = object(object(object(observatory.data?.state).treasury)[String(item.slot)]);
-      return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(typeof b.m6id === "string" ? b.m6id : "unknown")} · proposed in block ${n(height)}${item.is_current == null ? " · not confirmed in the latest complete reading" : ""}`}
+      const m6id = typeof b.m6id === "string" ? b.m6id : undefined;
+      return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(m6id ? onChainM6id(m6id) : "unknown")} · proposed in block ${n(height)}${item.is_current == null ? " · not confirmed in the latest complete reading" : ""}`}
         votes={votes} threshold={params.withdrawalThreshold} age={age} maxAge={params.withdrawalMaxAge}
-        footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the evidence →</Link>}</p>
+        footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {m6id && <>The M6 id is shown as written in the coinbase vote message (M3), as mining pools show it; reversed, as a transaction id, it reads <span className="hash">{short(m6id)}</span>. </>}{item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the evidence →</Link>}</p>
           <VoteHistory item={item} threshold={params.withdrawalThreshold}/></>}/>;
     })}</div>
   </LivePanel>;

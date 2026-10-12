@@ -11,6 +11,7 @@ import { ConfidenceChip, GoDeeper, LivePanel, Term } from "@/components/learn/pr
 import { ActivityFeed } from "@/components/live/activity";
 import { TreasuryHistory, WithdrawalOutcomes, WithdrawalVotes } from "@/components/live/money";
 import { BmmBids, BmmCommitments } from "@/components/live/bmm";
+import { SidechainDownload } from "@/components/live/trust";
 
 function useBmmRows() {
   const metrics = useBmmMetrics(24);
@@ -106,6 +107,8 @@ export function SidechainStory({ slot }: { slot: number }) {
       </GoDeeper>
     </>}
 
+    <h2 className="story-h2">Take the data with you</h2>
+    <SidechainDownload slot={slot} name={sc?.title ?? `slot #${slot}`}/>
     <h2 className="story-h2">Sidechains that have used this slot</h2>
     <LivePanel title={`Instances in slot #${slot}`} status={{ pending: instances.isPending, error: instances.isError && !history.size, empty: !history.size, emptyText: "No sidechain has been recorded in this slot." }}>
       <ul className="plain-list">{[...history.values()].map((h, i) => <li key={i}><strong>{h.title ?? "Unnamed"}</strong>: proposed in block {typeof h.proposal === "number" ? n(h.proposal) : "unknown"}, active from block {typeof h.activation === "number" ? n(h.activation) : "unknown"}{typeof h.ended === "number" ? `, last seen active at block ${n(h.ended)}` : h.current ? ", active now" : ""}.</li>)}</ul>

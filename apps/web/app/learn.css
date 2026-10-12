@@ -317,7 +317,8 @@
 .worker-healthy .status-dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
 .worker-degraded .status-dot, .worker-retrying .status-dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
 .download-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.download-list li { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-radius: 10px; background: var(--panel-raised); }
+.download-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 14px; border-radius: 10px; background: var(--panel-raised); }
+.download-list select { max-width: 100%; }
 .download-list li span { flex: 1; }
 .download-list a { color: var(--orange-strong); text-decoration: underline; font-size: 13px; }
 .lesson-list .confidence { margin-right: 6px; }
