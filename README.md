@@ -91,6 +91,11 @@ See [deploy/README.md](deploy/README.md) for exact environment and upgrade rules
 - `/api/v1/datasets/{dataset_id}/events/{event_id}` and `/raw`
 - `/api/v1/observatory`, `/api/v1/observations`, `/api/v1/chain-info`
 - `/api/v1/sidechains/{slot}` and its `/activity` and `/instances`
+- `/api/v1/sidechains/{slot}/dataset` (`format=zip`, default, or `json`;
+  optional `from_height`/`to_height`): everything recorded for one slot,
+  read from one build, as typed CSV tables plus a `manifest.json` with row
+  counts, SHA-256 and column meanings. Each table holds up to 250,000 rows
+  and reports truncation; at most two datasets are built at a time.
 - `/api/v1/sidechain-proposals` and `/{id}`, `/api/v1/sidechain-instances` and
   `/{id}` and `/{id}/ctip`, `/api/v1/deposits`, `/api/v1/ctip/history`
 - `/api/v1/withdrawal-bundles` and `/{id}` (pending bundles and block outcomes),
@@ -135,8 +140,9 @@ There is no local protocol rules engine; voting, expiry and historical BMM
 eligibility are not inferred. Fees cover only previously observed matching bids.
 
 Lists paginate with bounded limits and cursors tied to dataset, filters,
-projection/build and branch revision. A 409 cursor reset requires restarting
-pagination. Evidence links retain their dataset. History time filters default
+projection/build and branch revision. A cursor keeps reading the build it started on, so
+re-reads that publish new builds do not interrupt it; a 409 cursor reset
+(new block, branch or filters) requires restarting pagination. Evidence links retain their dataset. History time filters default
 to occurrence time; explicit block filters exclude unanchored observations.
 Exports retain filters and report the 10,000-row truncation boundary.
 
