@@ -20,6 +20,10 @@
 .live-pill { margin-left: auto; }
 .live-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--muted); white-space: nowrap; position: relative; }
 .live-pill strong { color: var(--text); font-weight: 600; }
+/* The pill never pushes a phone screen sideways: the network name gives way first (it stays in the tooltip), then the text truncates. */
+.live-pill { max-width: 100%; min-width: 0; box-sizing: border-box; }
+.live-pill .pill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 480px) { .live-pill .pill-network { display: none; } }
 .live-pill .status-dot { flex-shrink: 0; }
 .live-pill.health-live .status-dot { background: var(--green); box-shadow: 0 0 10px var(--green); }
 .live-pill.health-delayed { border-color: #765524; color: #ffc77d; }
@@ -119,9 +123,9 @@
 .live-note { margin: 12px 0 0; font-size: 13px; color: var(--muted); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .stat { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 12px; background: var(--panel-raised); min-width: 0; }
-.stat span { font-size: 12px; color: var(--muted); }
+.stat span { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .stat strong { font-size: clamp(18px, 2.2vw, 24px); letter-spacing: -0.02em; overflow-wrap: anywhere; }
-.stat small { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.stat small { font-size: 12px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
 .stat small a { color: var(--orange-strong); }
 .stat-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 4px; }
 .stat-meta .confidence { padding: 2px 8px; font-size: 11px; }

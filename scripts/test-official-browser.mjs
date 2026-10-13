@@ -172,7 +172,20 @@ try {
   for(const path of ['/','/learn/slots','/learn/deposits','/sidechains','/live?view=tech','/sidechains/9?view=tech','/sidechains?view=tech']){
     await page.goto(base+path);
     await page.locator('main').first().waitFor();
-    assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth)),`${path} scrolls horizontally on a phone`);
+    // Name the text that sticks out, so a failure on another machine's fonts can be read from the log.
+    const wide=await page.evaluate(()=>{
+      const W=window.innerWidth;if(document.documentElement.scrollWidth<=W)return null;
+      const out=[],walk=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT),range=document.createRange();
+      for(let t;(t=walk.nextNode());){
+        if(!t.textContent.trim())continue;
+        range.selectNodeContents(t);
+        if(range.getBoundingClientRect().right<=W+0.5)continue;
+        let clipped=false;for(let p=t.parentElement;p&&!clipped;p=p.parentElement)clipped=getComputedStyle(p).overflowX!=='visible';
+        if(!clipped)out.push(`«${t.textContent.slice(0,60)}» in ${t.parentElement.tagName.toLowerCase()}.${[...t.parentElement.classList].join('.')}`);
+      }
+      return out.slice(0,3).join(' | ')||'an element wider than the screen';
+    });
+    assert.equal(wide,null,`${path} scrolls horizontally on a phone: ${wide}`);
   }
   await page.screenshot({path:artifacts+'/mobile-sidechains.png',fullPage:true});
   assert.deepEqual(errors,[]);
