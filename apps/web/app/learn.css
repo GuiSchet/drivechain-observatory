@@ -620,7 +620,8 @@
 .now-panel { min-width: 0; }
 .now-panel .live-panel { margin: 14px 0; padding: 16px; }
 .now-panel .commit-row { grid-template-columns: 96px minmax(0, 1fr); }
-.now-panel .commit-grid { overflow-x: visible; }
+/* Tighter cells so 24 blocks fit the side column; on a phone the grid scrolls inside its panel. */
+.now-panel .commit-cells { gap: 2px; }
 .aside-title { margin: 16px 0 0; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .page-shell:not(.live-wide) .now-panel .aside-title { display: none; }
 .live-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 0 24px; }
