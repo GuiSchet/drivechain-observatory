@@ -57,9 +57,8 @@ export function MiningSection({ slot, name, stats, technical }: { slot: number; 
       {technical && <Stat label="Current streak" value={`${n(bmm.streak)} blocks`} hint={bmm.last_commit_height != null ? `last commitment in block ${n(bmm.last_commit_height)}` : "no commitment observed"}/>}
       {technical && <Stat label="Longest run without one" value={bmm.longest_gap ? `${n(bmm.longest_gap.blocks)} blocks` : "none"} hint={bmm.longest_gap ? `blocks ${n(bmm.longest_gap.from_height)}–${n(bmm.longest_gap.to_height)}` : "every observed block committed"}/>}
     </div>}
-    <div className="window-picker" role="group" aria-label="Blocks shown">{WINDOWS.map(w =>
-      <button key={w} type="button" aria-pressed={window === w} onClick={() => setWindow(w)}>{n(w)} blocks</button>)}</div>
-    <BmmCommitments slot={slot} window={window}/>
+    <BmmCommitments slot={slot} window={window} controls={<div className="window-picker" role="group" aria-label="Blocks shown">{WINDOWS.map(w =>
+      <button key={w} type="button" aria-pressed={window === w} onClick={() => setWindow(w)}>{n(w)} blocks</button>)}</div>}/>
     <BmmBids slot={slot}/>
     <LivePanel title="Bids for each block" status={{ pending: !shown, error: false }}
       footer={b ? <>{n(b.count)} bids seen on {n(b.parent_blocks)} blocks since monitoring began; median {formatSats(b.median_sats, unit)}, highest {formatSats(b.max_sats, unit)}.{b.next_block_observed ? <> The next block committed to the bid&apos;s sidechain block for {n(b.committed_next_block)} of the {n(b.next_block_observed)} bids whose next block was observed ({percent(b.committed_next_block, b.next_block_observed, 0)}). That shows which bid won, not that its fee was paid.</> : null}</> : undefined}>

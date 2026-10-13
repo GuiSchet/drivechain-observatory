@@ -61,10 +61,9 @@ export function LiveActivity({ kind }: { kind?: string }) {
     <PageHead eyebrow="LIVE ON BETANET"/><h1>What is happening now</h1>
     <p className="lede">L1 and its drivechains as exact figures: every block, bid, vote and treasury change, each with its evidence. <Link className="text-link" href="/search">Search</Link> · <Link className="text-link" href="/learn/how-we-know">how the data is collected</Link></p>
     <NetworkPulse technical/>
-    <div className="live-grid">
-      <div className="live-main">{chips}{activity}</div>
-      <NowPanel/>
-    </div>
+    {chips}
+    {activity}
+    <NowPanel/>
     <div className="live-panels">
       <BmmMarket/>
       <BlockPace/>
