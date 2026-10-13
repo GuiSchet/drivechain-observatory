@@ -96,6 +96,18 @@ See [deploy/README.md](deploy/README.md) for exact environment and upgrade rules
   read from one build, as typed CSV tables plus a `manifest.json` with row
   counts, SHA-256 and column meanings. Each table holds up to 250,000 rows
   and reports truncation; at most two datasets are built at a time.
+- `/api/v1/sidechains/{slot}/stats` (`window_blocks=144`, default, or `1008`):
+  figures computed from the same records as the dataset: deposit count, total,
+  median and recent counts; treasury balance after each deposit and paid
+  withdrawal; BMM commitment rates over 24/144/1008 blocks and since
+  activation, streak and longest gap; bid statistics and whether the next
+  block committed to each bid; each pending withdrawal's votes needed, blocks
+  left and vote pace; and one row per block of the window. A result is reused
+  for 15 seconds.
+- `/api/v1/network` (`window_blocks=144`, default, `1008` or `2016`): block
+  times and intervals, difficulty (block work × 65535 / 2^48), the retarget
+  period and its estimated adjustment, an estimated hashrate, and the
+  merged-mining bids seen for each block, from the selected chain's headers.
 - `/api/v1/sidechain-proposals` and `/{id}`, `/api/v1/sidechain-instances` and
   `/{id}` and `/{id}/ctip`, `/api/v1/deposits`, `/api/v1/ctip/history`
 - `/api/v1/withdrawal-bundles` and `/{id}` (pending bundles and block outcomes),

@@ -35,74 +35,17 @@ pub async fn sidechain(
     let generated_at: DateTime<Utc> = sqlx::query_scalar("SELECT now()")
         .fetch_one(&mut *tx)
         .await?;
-    let query = |kind: Option<&str>, order: Option<&str>| ProtocolQuery {
-        slot: Some(slot),
-        kind: kind.map(str::to_owned),
-        from_height: q.from_height,
-        to_height: q.to_height,
-        order: order.map(str::to_owned),
-        ..ProtocolQuery::default()
-    };
-    let (parameters, _) = collect(&mut tx, "chain-info", &ProtocolQuery::default(), &c, 1).await?;
-    let constants = parameters
-        .first()
-        .map(|p| p.data["bip300_constants"].clone())
-        .unwrap_or(Value::Null);
-    let mut tables = vec![];
-    let (instances, cut) = collect(
-        &mut tx,
-        "sidechain-instances",
-        &query(None, None),
-        &c,
-        TABLE_MAX,
-    )
-    .await?;
-    let (proposals, cut2) = collect(
-        &mut tx,
-        "sidechain-proposals",
-        &query(None, None),
-        &c,
-        TABLE_MAX,
-    )
-    .await?;
-    tables.push(sidechain_table(instances, proposals, cut || cut2));
-    let (deposits, cut) = collect(
-        &mut tx,
-        "deposits",
-        &query(None, Some("block")),
-        &c,
-        TABLE_MAX,
-    )
-    .await?;
-    tables.push(deposit_table(deposits, cut));
-    let (treasury, cut) = collect(
-        &mut tx,
-        "ctip/history",
-        &query(None, Some("block")),
-        &c,
-        TABLE_MAX,
-    )
-    .await?;
-    tables.push(treasury_table(treasury, cut));
-    let mut changes = query(Some("bundle,bundle_outcome"), Some("block"));
-    changes.changes = Some(true);
-    let (withdrawals, cut) = collect(&mut tx, "activity", &changes, &c, TABLE_MAX).await?;
-    tables.push(withdrawal_table(withdrawals, &constants, cut));
-    let (commitments, cut) = collect(
-        &mut tx,
-        "bmm/commitments",
-        &query(None, None),
-        &c,
-        TABLE_MAX,
-    )
-    .await?;
-    tables.push(commitment_table(commitments, cut));
-    tables.push(bid_table(&mut tx, &c, slot, &q).await?);
-    let confirmed_fees: bool = sqlx::query_scalar("SELECT coalesce((SELECT r.capabilities ? 'observed_bmm_confirmed_fees' FROM ingest.extractor_runs r JOIN ingest.extractor_status s USING(run_id) WHERE s.dataset_id=$1 AND s.source='enforcer'),false)")
-        .bind(d.dataset_id)
-        .fetch_one(&mut *tx)
-        .await?;
+    let r = records(&mut tx, &c, slot, q.from_height, q.to_height).await?;
     tx.commit().await?;
+    let confirmed_fees = r.confirmed_fees;
+    let tables = vec![
+        sidechain_table(r.instances.0, r.proposals.0, r.instances.1 || r.proposals.1),
+        deposit_table(r.deposits.0, r.deposits.1),
+        treasury_table(r.treasury.0, r.treasury.1),
+        withdrawal_table(r.withdrawals.0, &r.constants, r.withdrawals.1),
+        commitment_table(r.commitments.0, r.commitments.1),
+        bid_table(r.bids.0, r.bids.1),
+    ];
     let mut notes = vec![
         "Treasury, withdrawal votes and sidechain rows are separate official enforcer responses, each read at the tip in its reference columns; they are not atomic state at one block.".to_owned(),
         "m6id_onchain is the byte order of the M3 message in the coinbase and of the enforcer API; m6id_txid_order is the same id reversed, as the Observatory stores it.".to_owned(),
@@ -123,6 +66,88 @@ pub async fn sidechain(
         generated_at,
         notes,
         tables,
+    })
+}
+
+/// A bid for the block after `height`, however many times it was sampled.
+pub(crate) struct Bid {
+    pub height: Option<i32>,
+    pub hash: Option<String>,
+    pub txid: Option<String>,
+    pub bid_sats: Option<String>,
+    pub critical_hash: Option<String>,
+    pub first_seen: Option<DateTime<Utc>>,
+    pub last_seen: Option<DateTime<Utc>>,
+    pub samples: i64,
+    /// Whether block height+1 committed to the critical hash; None when that block was not observed.
+    pub committed: Option<bool>,
+}
+/// A list and whether it was cut at [`TABLE_MAX`].
+pub(crate) type Rows<T> = (Vec<T>, bool);
+/// Everything recorded for one slot, newest first, from the build of `c`.
+pub(crate) struct Records {
+    pub constants: Value,
+    pub instances: Rows<ProtocolItem>,
+    pub proposals: Rows<ProtocolItem>,
+    pub deposits: Rows<ProtocolItem>,
+    pub treasury: Rows<ProtocolItem>,
+    /// Each change in a bundle's votes, and each outcome.
+    pub withdrawals: Rows<ProtocolItem>,
+    pub commitments: Rows<ProtocolItem>,
+    /// Oldest first.
+    pub bids: Rows<Bid>,
+    pub confirmed_fees: bool,
+}
+pub(crate) async fn records(
+    tx: &mut Transaction<'_, Postgres>,
+    c: &ProtocolContext,
+    slot: i16,
+    from_height: Option<i32>,
+    to_height: Option<i32>,
+) -> Result<Records, StorageError> {
+    let query = |kind: Option<&str>, order: Option<&str>| ProtocolQuery {
+        slot: Some(slot),
+        kind: kind.map(str::to_owned),
+        from_height,
+        to_height,
+        order: order.map(str::to_owned),
+        ..ProtocolQuery::default()
+    };
+    let (parameters, _) = collect(tx, "chain-info", &ProtocolQuery::default(), c, 1).await?;
+    let constants = parameters
+        .first()
+        .map(|p| p.data["bip300_constants"].clone())
+        .unwrap_or(Value::Null);
+    let instances = collect(tx, "sidechain-instances", &query(None, None), c, TABLE_MAX).await?;
+    let proposals = collect(tx, "sidechain-proposals", &query(None, None), c, TABLE_MAX).await?;
+    let deposits = collect(tx, "deposits", &query(None, Some("block")), c, TABLE_MAX).await?;
+    let treasury = collect(
+        tx,
+        "ctip/history",
+        &query(None, Some("block")),
+        c,
+        TABLE_MAX,
+    )
+    .await?;
+    let mut changes = query(Some("bundle,bundle_outcome"), Some("block"));
+    changes.changes = Some(true);
+    let withdrawals = collect(tx, "activity", &changes, c, TABLE_MAX).await?;
+    let commitments = collect(tx, "bmm/commitments", &query(None, None), c, TABLE_MAX).await?;
+    let bids = bids(tx, c, slot, from_height, to_height).await?;
+    let confirmed_fees: bool = sqlx::query_scalar("SELECT coalesce((SELECT r.capabilities ? 'observed_bmm_confirmed_fees' FROM ingest.extractor_runs r JOIN ingest.extractor_status s USING(run_id) WHERE s.dataset_id=$1 AND s.source='enforcer'),false)")
+        .bind(c.meta.dataset_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    Ok(Records {
+        constants,
+        instances,
+        proposals,
+        deposits,
+        treasury,
+        withdrawals,
+        commitments,
+        bids,
+        confirmed_fees,
     })
 }
 
@@ -505,12 +530,13 @@ fn commitment_table(items: Vec<ProtocolItem>, truncated: bool) -> DatasetTable {
     )
 }
 
-async fn bid_table(
+async fn bids(
     tx: &mut Transaction<'_, Postgres>,
     c: &ProtocolContext,
     slot: i16,
-    q: &DatasetQuery,
-) -> Result<DatasetTable, StorageError> {
+    from_height: Option<i32>,
+    to_height: Option<i32>,
+) -> Result<Rows<Bid>, StorageError> {
     let build = c.build_id.as_ref().and_then(|v| v.parse::<i64>().ok());
     let cut = c
         .source_event_cut
@@ -534,8 +560,8 @@ async fn bid_table(
         .bind(cut)
         .bind(build)
         .bind(i32::from(slot))
-        .bind(q.from_height)
-        .bind(q.to_height)
+        .bind(from_height)
+        .bind(to_height)
         .bind(TABLE_MAX as i64 + 1)
         .fetch_all(&mut **tx)
         .await?;
@@ -543,23 +569,41 @@ async fn bid_table(
     let rows = rows
         .into_iter()
         .take(TABLE_MAX)
-        .map(|r| -> Result<Vec<Option<String>>, StorageError> {
-            Ok(vec![
-                r.try_get::<Option<i32>, _>("height")?
-                    .map(|h| h.to_string()),
-                r.try_get("hash")?,
-                r.try_get("txid")?,
-                r.try_get("bid_sats")?,
-                r.try_get("critical_hash")?,
-                time(r.try_get("first_seen")?),
-                time(r.try_get("last_seen")?),
-                Some(r.try_get::<i64, _>("samples")?.to_string()),
-                r.try_get::<Option<bool>, _>("committed")?
-                    .map(|b| b.to_string()),
-            ])
+        .map(|r| -> Result<Bid, StorageError> {
+            Ok(Bid {
+                height: r.try_get("height")?,
+                hash: r.try_get("hash")?,
+                txid: r.try_get("txid")?,
+                bid_sats: r.try_get("bid_sats")?,
+                critical_hash: r.try_get("critical_hash")?,
+                first_seen: r.try_get("first_seen")?,
+                last_seen: r.try_get("last_seen")?,
+                samples: r.try_get("samples")?,
+                committed: r.try_get("committed")?,
+            })
         })
         .collect::<Result<_, _>>()?;
-    Ok(table(
+    Ok((rows, truncated))
+}
+
+fn bid_table(bids: Vec<Bid>, truncated: bool) -> DatasetTable {
+    let rows = bids
+        .into_iter()
+        .map(|b| {
+            vec![
+                b.height.map(|h| h.to_string()),
+                b.hash,
+                b.txid,
+                b.bid_sats,
+                b.critical_hash,
+                time(b.first_seen),
+                time(b.last_seen),
+                Some(b.samples.to_string()),
+                b.committed.map(|b| b.to_string()),
+            ]
+        })
+        .collect();
+    table(
         "bmm_bids",
         "Merged-mining bids (BMM requests) for this slot that the monitor saw while the next block was being mined.",
         &[
@@ -584,5 +628,5 @@ async fn bid_table(
         ],
         rows,
         truncated,
-    ))
+    )
 }

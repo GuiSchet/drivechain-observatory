@@ -1271,6 +1271,7 @@ dependencies = [
  "pulse-source",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "thiserror",
  "utoipa",
