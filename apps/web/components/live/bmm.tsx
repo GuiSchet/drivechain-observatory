@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getAuctions, getMeta } from "@/lib/api";
 import { formatSats, short, sidechainLabel, timeAgo } from "@/lib/explain";
@@ -39,14 +40,14 @@ export function BmmBids({ slot }: { slot?: number }) {
 
 const cellText: Record<string, string> = { present: "commitment in this block", observed_absent: "no commitment in this block", unknown_eligibility: "not observed" };
 
-export function BmmCommitments({ slot, window = 24 }: { slot?: number; window?: 24 | 144 | 1008 }) {
+export function BmmCommitments({ slot, window = 24, controls }: { slot?: number; window?: 24 | 144 | 1008; controls?: ReactNode }) {
   const names = useSidechainNames();
   const metrics = useBmmMetrics(window, slot);
   const rows = metrics.data?.slots ?? [];
   const dataset = metrics.data?.context.meta.dataset_id;
   // Long windows keep every block in view by narrowing the cells.
   const dense = window > 24 ? `dense-${window}` : "";
-  return <LivePanel title="BMM commitments, L1 block by L1 block" quality={rows.length ? "observed" : null}
+  return <LivePanel title="BMM commitments, L1 block by L1 block" controls={controls} quality={rows.length ? "observed" : null}
     status={{ pending: metrics.isPending, error: metrics.isError && !rows.length, empty: !rows.length, emptyText: "No commitments have been observed yet." }}
     footer={<span className="legend"><i className="cell present"/> commitment (BMM Accept) <i className="cell observed_absent"/> none <i className="cell unknown_eligibility"/> not observed</span>}>
     <p className="live-lede">The last {n(window)} L1 blocks, oldest on the left. A lit cell means that L1 block committed to one block hash of that sidechain (BIP301 calls this "finding" the sidechain block). L1 only records the hash: whether that sidechain block exists and is valid is checked by sidechain nodes, not by L1. Select a cell to see the record behind it.</p>

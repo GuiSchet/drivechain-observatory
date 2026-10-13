@@ -34,18 +34,20 @@ function PendingWithdrawals() {
   </LivePanel>;
 }
 
-/** What is open right now: bids for the next block, withdrawals in vote, recent merged mining and the period's totals. */
+/** What is open right now: bids for the next block, withdrawals in vote, recent merged mining and the period's totals,
+ * paired so that panels of similar height share a row when there is room for two columns:
+ * bids beside the BMM map, votes beside the period totals. */
 export function NowPanel() {
   const [window, setWindow] = useState<24 | 144>(24), [hours, setHours] = useState<24 | 168>(24);
-  return <aside className="now-panel" aria-label="Right now">
+  return <section className="now-panel" aria-label="Right now">
     <h2 className="aside-title">Right now</h2>
-    <BmmBids/>
-    <PendingWithdrawals/>
-    <div className="window-picker" role="group" aria-label="Blocks shown">{([24, 144] as const).map(w =>
-      <button key={w} type="button" aria-pressed={window === w} onClick={() => setWindow(w)}>{w} blocks</button>)}</div>
-    <BmmCommitments window={window}/>
-    <div className="window-picker" role="group" aria-label="Period">{([24, 168] as const).map(h =>
-      <button key={h} type="button" aria-pressed={hours === h} onClick={() => setHours(h)}>{h === 24 ? "24 hours" : "7 days"}</button>)}</div>
-    <DaySummary hours={hours}/>
-  </aside>;
+    <div className="now-grid">
+      <BmmBids/>
+      <BmmCommitments window={window} controls={<div className="window-picker" role="group" aria-label="Blocks shown">{([24, 144] as const).map(w =>
+        <button key={w} type="button" aria-pressed={window === w} onClick={() => setWindow(w)}>{w} blocks</button>)}</div>}/>
+      <PendingWithdrawals/>
+      <DaySummary hours={hours} controls={<div className="window-picker" role="group" aria-label="Period">{([24, 168] as const).map(h =>
+        <button key={h} type="button" aria-pressed={hours === h} onClick={() => setHours(h)}>{h === 24 ? "24 hours" : "7 days"}</button>)}</div>}/>
+    </div>
+  </section>;
 }
