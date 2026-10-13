@@ -3,13 +3,13 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getJson } from "@/lib/api";
-import { apiQuery, object, at } from "@/lib/protocol";
+import { apiQuery, object, at, onChainM6id } from "@/lib/protocol";
 import { groupActivity, readingTip } from "@/lib/activity";
-import type { ProtocolItem, ProtocolPage } from "@/lib/types";
+import type { BundleProjection, ProtocolItem, ProtocolPage } from "@/lib/types";
 import { blockNumber, declarationOf, depositAddress, formatCoinPair, formatCoins, formatSats, sats, short, sidechainLabel, timeAgo } from "@/lib/explain";
 import { activeSidechains, known, n, observatoryStatus, proofHref, snapshotOf, useCoverageGaps, useNetworkParams, useObservatory, useProtocolPage, useSidechainNames, weakestQuality } from "@/lib/live";
 import { useUnit } from "@/lib/unit";
-import { ConfidenceChip, GoDeeper, LivePanel, Stat } from "@/components/learn/primitives";
+import { ConfidenceChip, CopyHash, GoDeeper, LivePanel, Method, Stat } from "@/components/learn/primitives";
 import { ReadingsChart } from "./readings-chart";
 import { ActivityFeed } from "./activity";
 import { useNow } from "./basics";
@@ -61,7 +61,7 @@ function Meter({ value, max, label }: { value?: number; max?: number; label: str
   return <div className="meter" role="img" aria-label={label}><div style={{ width: `${pct}%` }}/></div>;
 }
 
-export function VoteCard({ title, subtitle, votes, threshold, age, maxAge, footer }: { title: string; subtitle: string; votes?: number; threshold?: number; age?: number; maxAge?: number; footer?: React.ReactNode }) {
+export function VoteCard({ title, subtitle, votes, threshold, age, maxAge, footer, expiryNote = true }: { title: string; subtitle: string; votes?: number; threshold?: number; age?: number; maxAge?: number; footer?: React.ReactNode; expiryNote?: boolean }) {
   const left = age != null && maxAge != null ? maxAge - age : undefined;
   return <article className="vote-card">
     <h4>{title}</h4><p className="vote-sub">{subtitle}</p>
@@ -69,7 +69,7 @@ export function VoteCard({ title, subtitle, votes, threshold, age, maxAge, foote
     <Meter value={votes} max={threshold} label={`${n(votes)} votes; it needs ${atLeast(threshold)}`}/>
     <div className="vote-row"><span>Age</span><strong>{n(age)} blocks</strong><span>limit {n(maxAge)} blocks</span></div>
     <Meter value={age} max={maxAge} label={`Age ${n(age)} of ${n(maxAge)} blocks`}/>
-    {left != null && left >= 0 && <p className="vote-note">If it does not pass within the next {n(left)} blocks, it expires. Votes can also go down, so this is a reading, not a forecast.</p>}
+    {expiryNote && left != null && left >= 0 && <p className="vote-note">If it does not pass within the next {n(left)} blocks, it expires. Votes can also go down, so this is a reading, not a forecast.</p>}
     {footer}
   </article>;
 }
@@ -163,7 +163,37 @@ export function DepositFeed() {
 }
 
 /** Pending withdrawal bundles as the enforcer reports them, against the observed thresholds. */
-export function WithdrawalVotes({ slot }: { slot?: number }) {
+/**
+ * Where a pending bundle stands at the pace its votes have come so far. A pace is a reading of the past:
+ * every block can add or remove one vote.
+ */
+export function ProjectionNote({ p, technical = false }: { p: BundleProjection; technical?: boolean }) {
+  const rate = p.rate_recent ?? p.rate_since_proposal, recent = p.rate_recent != null;
+  const pace = rate == null ? null : rate.toFixed(rate < 1 ? 3 : 2);
+  return <div className="projection">
+    <p className="vote-note">
+      {p.needed === 0 ? <>It already has the votes it needs; it can be paid in the next blocks.</>
+        : <>It needs <strong>{n(p.needed)}</strong> more votes and has <strong>{n(p.blocks_left)}</strong> blocks left (it expires after block {n(p.expires_after_height)}). </>}
+      {p.needed !== 0 && (p.can_still_pass === false
+        ? <>Even if every remaining block voted for it, it could not pass: it will expire.</>
+        : rate == null ? null
+        : rate <= 0 ? <>Its votes have not grown {recent ? "over the last readings" : "since it was proposed"}, so at this pace it would not pass.</>
+        : <>Votes have come at {pace} per block {recent ? "over about the last 144 blocks" : "since it was proposed"}. At that pace it would pass in about {n(p.blocks_to_pass_at_rate)} blocks, {p.passes_at_rate ? "before" : "after"} it expires.</>)}
+      {" "}<Method source="The enforcer's vote count for this bundle, read at the chain tip." how="Pace: change in votes per block over the readings of about the last 144 blocks, or votes divided by age without them. Blocks to pass: votes needed divided by the pace." limits="A miner can vote for, against or abstain in each block; the pace can change at any time."/>
+    </p>
+    {technical && <dl className="mini-facts">
+      <dt>Votes</dt><dd>{n(p.votes)} (needs more than {n(p.threshold)})</dd>
+      <dt>Age</dt><dd>{n(p.age)} of {n(p.max_age)} blocks, read at tip {n(p.read_at_tip_height)}</dd>
+      <dt>Pace since proposal</dt><dd>{p.rate_since_proposal != null ? `${p.rate_since_proposal.toFixed(4)} votes/block` : "unknown"}</dd>
+      <dt>Pace, last ~144 blocks</dt><dd>{p.rate_recent != null ? `${p.rate_recent.toFixed(4)} votes/block` : "not enough readings"}</dd>
+      <dt>Blocks to pass at pace</dt><dd>{p.blocks_to_pass_at_rate != null ? n(p.blocks_to_pass_at_rate) : "never at this pace"}</dd>
+      <dt>M6 id (M3 order)</dt><dd><CopyHash value={p.m6id_onchain} full/></dd>
+      <dt>M6 id (txid order)</dt><dd><CopyHash value={p.m6id_txid_order} full/></dd>
+    </dl>}
+  </div>;
+}
+
+export function WithdrawalVotes({ slot, projections, technical = false }: { slot?: number; projections?: BundleProjection[]; technical?: boolean }) {
   const observatory = useObservatory(), { params } = useNetworkParams(), names = useSidechainNames(), unit = useUnit();
   const bundles = useProtocolPage("withdrawal-bundles", slot == null ? "limit=50" : `slot=${slot}&limit=50`);
   // The list holds each bundle's latest reading, also of bundles since paid or expired: keep the ones still pending.
@@ -181,17 +211,20 @@ export function WithdrawalVotes({ slot }: { slot?: number }) {
       const tip = at(item.data, "observation_window", "reference_tip_height");
       const age = typeof tip === "number" && height != null ? tip - height : undefined;
       const treasury = object(object(object(observatory.data?.state).treasury)[String(item.slot)]);
-      return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(typeof b.m6id === "string" ? b.m6id : "unknown")} · proposed in block ${n(height)}${item.is_current == null ? " · not confirmed in the latest complete reading" : ""}`}
-        votes={votes} threshold={params.withdrawalThreshold} age={age} maxAge={params.withdrawalMaxAge}
-        footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the evidence →</Link>}</p>
-          <VoteHistory item={item} threshold={params.withdrawalThreshold}/></>}/>;
+      const m6id = typeof b.m6id === "string" ? b.m6id : undefined;
+      const projection = projections?.find(p => p.m6id_txid_order === m6id);
+      return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(m6id ? onChainM6id(m6id) : "unknown")} · proposed in block ${n(height)}${item.is_current == null ? " · not confirmed in the latest complete reading" : ""}`}
+        votes={votes} threshold={params.withdrawalThreshold} age={projection?.age ?? age} maxAge={params.withdrawalMaxAge} expiryNote={!projection}
+        footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {m6id && <>The M6 id is shown as written in the coinbase vote message (M3), as mining pools show it; reversed, as a transaction id, it reads <span className="hash">{short(m6id)}</span>. </>}{item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the evidence →</Link>}</p>
+          {projection && <ProjectionNote p={projection} technical={technical}/>}
+          <VoteHistory item={item} threshold={params.withdrawalThreshold} showThreshold={technical}/></>}/>;
     })}</div>
   </LivePanel>;
 }
 
-export function WithdrawalOutcomes({ slot }: { slot?: number }) {
+export function WithdrawalOutcomes({ slot, paged = false }: { slot?: number; paged?: boolean }) {
   return <LivePanel title="Withdrawal history">
-    <ActivityFeed kind="bundle_outcome" slot={slot} limit={6}/>
+    <ActivityFeed kind="bundle_outcome" slot={slot} limit={6} paged={paged}/>
   </LivePanel>;
 }
 
@@ -239,7 +272,7 @@ export function DepositStory({ slot, compact = false }: { slot?: number; compact
 }
 
 /** How one pending bundle's vote count changed between readings; nothing is inferred between them. */
-function VoteHistory({ item, threshold }: { item: ProtocolItem; threshold?: number }) {
+function VoteHistory({ item, threshold, showThreshold = false }: { item: ProtocolItem; threshold?: number; showThreshold?: boolean }) {
   const page = useProtocolPage("activity", `kind=bundle&slot=${item.slot}&changes=true&order=block&limit=200`, item.slot != null);
   const gaps = useCoverageGaps(), dataset = page.data?.context.meta.dataset_id;
   const points = (page.data?.items ?? []).filter(i => i.entity_id === item.entity_id).flatMap(i => {
@@ -248,6 +281,8 @@ function VoteHistory({ item, threshold }: { item: ProtocolItem; threshold?: numb
       label: <><strong>{n(votes)} votes</strong> read at tip {n(tip)}</> }] : [];
   });
   if (points.length < 2) return null;
-  return <ReadingsChart label="Votes at each reading of this withdrawal" points={points} gaps={gaps} zero={false} yFormat={y => n(Math.round(y))}
+  // With the threshold drawn the axis must reach it, which flattens small changes; the technical view shows it.
+  const line = showThreshold && threshold != null ? { y: threshold + 1, label: `passes at ${n(threshold + 1)}` } : undefined;
+  return <ReadingsChart label="Votes at each reading of this withdrawal" points={points} gaps={gaps} zero={false} reference={line} yFormat={y => n(Math.round(y))}
     note={<>Votes at each reading, from {n(points[points.length - 1].y)} to {n(points[0].y)}; the axis shows only that range{threshold != null ? ` (it needs more than ${n(threshold)} to pass)` : ""}.</>}/>;
 }

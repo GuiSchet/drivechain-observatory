@@ -1,7 +1,9 @@
 pub mod blocks;
 pub mod bmm;
+pub mod dataset;
 pub mod protocol;
 pub mod provenance;
+pub mod stats;
 use blocks::branch;
 use chrono::{DateTime, Utc};
 use pulse_domain::*;

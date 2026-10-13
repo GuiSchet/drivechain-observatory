@@ -1,7 +1,17 @@
 "use client";
 import Link from "next/link";
+import { useViewMode } from "@/lib/view-mode";
+import { GoDeeper } from "@/components/learn/primitives";
 import { ActivityFeed } from "@/components/live/activity";
+import { ActivityTable } from "@/components/live/activity-table";
+import { BranchCheck } from "@/components/live/basics";
+import { BlockTable } from "@/components/live/block-table";
+import { BlockPace, BmmMarket } from "@/components/live/network-panels";
+import { NetworkPulse } from "@/components/live/network-pulse";
+import { NowPanel } from "@/components/live/now-panel";
 import { BlockTimeline } from "@/components/live/timeline";
+import { QualitySummary } from "@/components/live/trust";
+import { PageHead } from "@/components/view-toggle";
 
 type Filter = { label: string; kind?: string; withTreasury?: boolean; readings?: boolean };
 
@@ -25,15 +35,41 @@ const notes: Record<string, string> = {
 };
 
 export function LiveActivity({ kind }: { kind?: string }) {
+  const { technical } = useViewMode();
   const key = kind && kind in filters ? kind : "blocks", f = filters[key];
-  return <main className="page-shell">
-    <div className="eyebrow">LIVE ON BETANET</div><h1>What is happening now</h1>
-    <p className="lede">Betanet block by block, newest first. For each L1 block: what it contained, and what our readings found had changed while it was the newest block. Every line links to the record behind it. Looking for something specific? <Link className="text-link" href="/search">Search a block, transaction or sidechain</Link>.</p>
-    <nav className="filter-chips" aria-label="Filter activity">{Object.entries(filters).map(([k, { label }]) =>
-      <Link key={k} href={k === "blocks" ? "/live" : `/live?kind=${k}`} className={k === key ? "active" : ""} aria-current={k === key ? "page" : undefined}>{label}</Link>)}</nav>
-    {key === "blocks" ? <BlockTimeline/> : <>
+  const chips = <nav className="filter-chips" aria-label="Filter activity">{Object.entries(filters).map(([k, { label }]) =>
+    <Link key={k} href={k === "blocks" ? "/live" : `/live?kind=${k}`} className={k === key ? "active" : ""} aria-current={k === key ? "page" : undefined}>{label}</Link>)}</nav>;
+  const activity = key === "blocks"
+    ? (technical ? <BlockTable/> : <BlockTimeline/>)
+    : <>
       <p className="live-note">{notes[key]}</p>
-      <ActivityFeed key={key} kind={f.kind} withTreasury={f.withTreasury} changes={!f.readings} order={f.readings ? "observed" : "block"} limit={f.readings ? 25 : 60} paged/>
-    </>}
+      {technical
+        ? <ActivityTable key={key} kind={f.kind} changes={!f.readings} order={f.readings ? "observed" : "block"} limit={f.readings ? 50 : 60}/>
+        : <ActivityFeed key={key} kind={f.kind} withTreasury={f.withTreasury} changes={!f.readings} order={f.readings ? "observed" : "block"} limit={f.readings ? 25 : 60} paged/>}
+    </>;
+  if (!technical) return <main className="page-shell">
+    <PageHead eyebrow="LIVE ON BETANET"/><h1>What is happening now</h1>
+    <p className="lede">Betanet block by block, newest first. For each L1 block: what it contained, and what our readings found had changed while it was the newest block. Every line links to the record behind it. Looking for something specific? <Link className="text-link" href="/search">Search a block, transaction or sidechain</Link>.</p>
+    <NetworkPulse technical={false}/>
+    {chips}
+    {activity}
+    <GoDeeper summary="bids, votes and merged mining right now">
+      <NowPanel/>
+    </GoDeeper>
+  </main>;
+  return <main className="page-shell live-wide">
+    <PageHead eyebrow="LIVE ON BETANET"/><h1>What is happening now</h1>
+    <p className="lede">L1 and its drivechains as exact figures: every block, bid, vote and treasury change, each with its evidence. <Link className="text-link" href="/search">Search</Link> · <Link className="text-link" href="/learn/how-we-know">how the data is collected</Link></p>
+    <NetworkPulse technical/>
+    <div className="live-grid">
+      <div className="live-main">{chips}{activity}</div>
+      <NowPanel/>
+    </div>
+    <div className="live-panels">
+      <BmmMarket/>
+      <BlockPace/>
+    </div>
+    <QualitySummary/>
+    <BranchCheck/>
   </main>;
 }

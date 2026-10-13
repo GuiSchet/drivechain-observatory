@@ -14,6 +14,10 @@ export function exact(value: unknown): string {
   if (typeof value !== "string" || !/^\d+$/.test(value)) return "Unknown";
   return BigInt(value).toLocaleString("en-US");
 }
+/** An M6 id in the byte order of the M3 coinbase message, the order the enforcer and mining pools show; the API stores it reversed, as a transaction id. */
+export function onChainM6id(stored: string): string {
+  return /^[0-9a-f]{64}$/i.test(stored) ? stored.match(/../g)!.reverse().join("") : stored;
+}
 export function short(value: string): string { return value.length > 28 ? value.slice(0, 12) + "…" + value.slice(-10) : value; }
 export function label(value: string): string { return value.replaceAll("_", " "); }
 export function title(item: ProtocolItem, unit = "sats"): string {
@@ -22,8 +26,8 @@ export function title(item: ProtocolItem, unit = "sats"): string {
     const sidechain = object(d)[item.kind === "instance" ? "sidechain" : "proposal"];
     return text(at(sidechain, "declaration", "declaration", "V0", "title"), `Sidechain #${item.slot ?? "?"}`);
   }
-  if (item.kind === "bundle") return `Withdrawal · ${short(text(at(d, "bundle", "m6id"), text(object(d).m6id)))}`;
-  if (item.kind === "bundle_outcome") return `Withdrawal ${label(Object.keys(object(object(d).state))[0] ?? "outcome").toLowerCase()} · ${short(text(object(d).m6id))}`;
+  if (item.kind === "bundle") return `Withdrawal · ${short(onChainM6id(text(at(d, "bundle", "m6id"), text(object(d).m6id))))}`;
+  if (item.kind === "bundle_outcome") return `Withdrawal ${label(Object.keys(object(object(d).state))[0] ?? "outcome").toLowerCase()} · ${short(onChainM6id(text(object(d).m6id)))}`;
   if (item.kind === "deposit") return `Deposit · ${exact(object(d).value_sats)} ${unit}`;
   if (item.kind === "ctip") return object(d).ctip === null ? "No CTIP observed" : `Treasury · ${exact(at(d, "ctip", "value_sats"))} ${unit}`;
   return label(item.kind);

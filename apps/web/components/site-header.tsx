@@ -24,7 +24,7 @@ export function SiteHeader() {
       <nav className="main-nav" aria-label="Primary navigation">{nav.map(([href, title]) =>
         <Link key={href} href={href} className={active(href) ? "active" : ""} aria-current={active(href) ? "page" : undefined}>{title}</Link>)}</nav>
       <span className={`live-pill health-${level}`} tabIndex={0} aria-describedby={tip} role="status">
-        <span className="status-dot"/>{level !== "offline" && block ? <span>{prefix}{networkLabel(status?.meta.network_id)} · block <strong>{block.height.toLocaleString("en-US")}</strong> · {timeAgo(block.observed_at, now)}</span> : <span>{level === "offline" ? "API unavailable" : "Connecting…"}</span>}
+        <span className="status-dot"/>{level !== "offline" && block ? <span className="pill-text">{prefix}<span className="pill-network">{networkLabel(status?.meta.network_id)} · </span>block <strong>{block.height.toLocaleString("en-US")}</strong> · {timeAgo(block.observed_at, now)}</span> : <span>{level === "offline" ? "API unavailable" : "Connecting…"}</span>}
         <span role="tooltip" id={tip} className="term-tip">{state}</span>
       </span>
     </div>

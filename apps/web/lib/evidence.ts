@@ -1,4 +1,4 @@
-import { array, object, short } from "./protocol";
+import { array, object, onChainM6id, short } from "./protocol";
 import { blockNumber, formatCoins, formatSats, sidechainLabel, type SidechainNames } from "./explain";
 
 /** A recorded event, said in words: a title, a few sentences, and what it points to. */
@@ -48,7 +48,7 @@ export function summarizeEvidence(kind: string, payloadJson: string, names: Side
         `This is the enforcer's report of ${blockNumber(height)} for ${who}: everything that block contained for this sidechain.`,
         body.bmm_commitment ? `Merged mining: the block commits to the sidechain block hash ${short(String(body.bmm_commitment))}. L1 records only this hash; it does not check the sidechain block.` : "Merged mining: the block has no commitment for this sidechain.",
         deposits.length ? `Deposits: ${deposits.map(d => `${formatCoins(d.value_sats)} (${formatSats(d.value_sats, unit)}), creating treasury output #${String(d.sequence_number ?? "?")}`).join("; ")}.` : "Deposits: none.",
-        others.length ? `Withdrawals: ${others.map(e => { const [k, b] = Object.entries(e)[0] ?? ["event", {}]; const m6 = str(object(b).m6id); return `bundle ${m6 ? short(m6) : k} ${bundleState(object(b))}`; }).join("; ")}.` : "Withdrawals: no withdrawal events.",
+        others.length ? `Withdrawals: ${others.map(e => { const [k, b] = Object.entries(e)[0] ?? ["event", {}]; const m6 = str(object(b).m6id); return `bundle ${m6 ? short(onChainM6id(m6)) : k} ${bundleState(object(b))}`; }).join("; ")}.` : "Withdrawals: no withdrawal events.",
       ];
       return { title: `Enforcer report for ${who}, ${blockNumber(height)}`, lines, block, slot, lesson: deposits.length ? "deposits" : others.length ? "withdrawals" : "merged-mining", reading: false };
     }
@@ -90,7 +90,7 @@ export function summarizeEvidence(kind: string, payloadJson: string, names: Side
     case "WithdrawalBundleProposals": {
       const list = array(body.proposals).map(p => object(p));
       return { title: `Reading: ${who}'s pending withdrawals`, slot, lesson: "withdrawals", reading: true, lines: list.length
-        ? list.map(p => `Bundle ${short(String(p.m6id ?? "unknown"))}: ${num(p.vote_count)?.toLocaleString("en-US") ?? "unknown"} votes, proposed in ${blockNumber(num(p.proposal_height))}.`).concat("These are the votes at the moment of this reading, not every vote in between.")
+        ? list.map(p => `Bundle ${short(onChainM6id(String(p.m6id ?? "unknown")))}: ${num(p.vote_count)?.toLocaleString("en-US") ?? "unknown"} votes, proposed in ${blockNumber(num(p.proposal_height))}.`).concat("These are the votes at the moment of this reading, not every vote in between.")
         : [`No withdrawal bundle of ${who} was being voted on at the moment of this reading.`] };
     }
     case "BmmRequests": {

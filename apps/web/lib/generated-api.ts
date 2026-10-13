@@ -330,6 +330,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["network"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/observation-failures": {
         parameters: {
             query?: never;
@@ -599,6 +615,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sidechains/{slot}/dataset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sidechain_dataset"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sidechains/{slot}/instances": {
         parameters: {
             query?: never;
@@ -608,6 +640,22 @@ export interface paths {
         };
         /** Read sidechains/{slot}/instances from the local Observatory dataset */
         get: operations["sidechains_slot_instances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sidechains/{slot}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sidechain_stats"];
         put?: never;
         post?: never;
         delete?: never;
@@ -757,6 +805,27 @@ export interface components {
             message: string;
             request_id?: string | null;
         };
+        BidStats: {
+            /** Format: int64 */
+            committed_next_block: number;
+            /**
+             * Format: int64
+             * @description Distinct bids the monitor saw, and the parent blocks they were made on.
+             */
+            count: number;
+            /** Format: int32 */
+            last_parent_height?: number | null;
+            last_sats?: string | null;
+            max_sats?: string | null;
+            median_sats?: string | null;
+            /**
+             * Format: int64
+             * @description Bids whose next block was observed, and how many of those committed to the bid's critical hash.
+             */
+            next_block_observed: number;
+            /** Format: int64 */
+            parent_blocks: number;
+        };
         BlockFact: {
             /** Format: int32 */
             contract: number;
@@ -851,6 +920,14 @@ export interface components {
             /** @description present, observed_absent, uncovered, inactive, unknown_eligibility. */
             state: string;
         };
+        BmmGap: {
+            /** Format: int32 */
+            blocks: number;
+            /** Format: int32 */
+            from_height: number;
+            /** Format: int32 */
+            to_height: number;
+        };
         BmmMetricsResponse: {
             context: components["schemas"]["ProtocolContext"];
             /** Format: int32 */
@@ -875,6 +952,38 @@ export interface components {
             rate?: number | null;
             /** Format: int32 */
             slot: number;
+        };
+        BmmStats: {
+            /** Format: int32 */
+            blocks_since_last_commit?: number | null;
+            /** Format: int32 */
+            last_commit_height?: number | null;
+            longest_gap?: null | components["schemas"]["BmmGap"];
+            since_activation?: null | components["schemas"]["BmmWindowStats"];
+            /**
+             * Format: int32
+             * @description Consecutive committing blocks ending at the anchor.
+             */
+            streak: number;
+            /** @description 24, 144 and 1008 blocks. */
+            windows: components["schemas"]["BmmWindowStats"][];
+        };
+        BmmWindowStats: {
+            /**
+             * Format: int32
+             * @description Newest L1 blocks counted; for `since_activation`, the blocks from activation through the anchor.
+             */
+            blocks: number;
+            /**
+             * Format: int32
+             * @description Blocks whose merged-mining facts for this slot were observed.
+             */
+            covered: number;
+            /**
+             * Format: int32
+             * @description Observed blocks that committed to a block of this sidechain.
+             */
+            present: number;
         };
         BranchCoverage: {
             branch_revision: string;
@@ -916,6 +1025,51 @@ export interface components {
             tip_height?: number | null;
             /** Format: int32 */
             verified_from_height?: number | null;
+        };
+        /** @description Where a pending withdrawal bundle stands against the threshold, at the pace votes have come so far. */
+        BundleProjection: {
+            /** Format: int64 */
+            age?: number | null;
+            /** Format: int64 */
+            blocks_left?: number | null;
+            /** Format: int64 */
+            blocks_to_pass_at_rate?: number | null;
+            /** @description At most one vote per block: false when even every remaining block cannot reach the threshold. */
+            can_still_pass?: boolean | null;
+            /** Format: int64 */
+            expires_after_height?: number | null;
+            m6id_onchain?: string | null;
+            m6id_txid_order?: string | null;
+            /** Format: int64 */
+            max_age?: number | null;
+            /** Format: int64 */
+            needed?: number | null;
+            passes_at_rate?: boolean | null;
+            /** Format: int32 */
+            proposal_height?: number | null;
+            quality: string;
+            /**
+             * Format: double
+             * @description Change in votes over the readings of about the last 144 blocks, per block.
+             */
+            rate_recent?: number | null;
+            /**
+             * Format: double
+             * @description Votes divided by age.
+             */
+            rate_since_proposal?: number | null;
+            /**
+             * Format: int32
+             * @description The tip where this vote count was first read; `age` runs to the anchor while the reading is still current.
+             */
+            read_at_tip_height?: number | null;
+            /**
+             * Format: int64
+             * @description Votes must exceed the threshold, so `needed` is threshold + 1 - votes.
+             */
+            threshold?: number | null;
+            /** Format: int64 */
+            votes?: number | null;
         };
         CoverageResponse: {
             branch: components["schemas"]["BranchState"];
@@ -959,6 +1113,44 @@ export interface components {
             /** Format: uuid */
             dataset_id: string;
             network_id: string;
+        };
+        /** @description One column of a dataset table and what it means. */
+        DatasetColumn: {
+            description: string;
+            name: string;
+        };
+        /** @description Records of one kind as typed columns, oldest first. */
+        DatasetTable: {
+            columns: components["schemas"]["DatasetColumn"][];
+            description: string;
+            /** @description File name without extension, such as `deposits`. */
+            name: string;
+            /** @description One cell per column, as text; null when unknown. Satoshi amounts are exact integers. */
+            rows: (string | null)[][];
+            /** @description More records exist than the table holds: narrow the height range. */
+            truncated: boolean;
+        };
+        DepositStats: {
+            /** Format: int64 */
+            count: number;
+            /** Format: int32 */
+            first_height?: number | null;
+            /**
+             * Format: int64
+             * @description Deposits whose miner-set block time is within the last 1, 7 and 30 days of `generated_at`.
+             */
+            last_24h: number;
+            /** Format: int64 */
+            last_30d: number;
+            /** Format: int64 */
+            last_7d: number;
+            /** Format: date-time */
+            last_block_time?: string | null;
+            /** Format: int32 */
+            last_height?: number | null;
+            max_sats?: string | null;
+            median_sats?: string | null;
+            total_sats: string;
         };
         EvidenceOccurrence: {
             capture_method: string;
@@ -1020,6 +1212,60 @@ export interface components {
             /** Format: int32 */
             decimals: number;
             symbol: string;
+        };
+        NetworkBlock: {
+            /** Format: int32 */
+            bid_slots?: number | null;
+            bid_total_sats?: string | null;
+            /**
+             * Format: int32
+             * @description Merged-mining bids the monitor saw for this block (made on its parent), across slots; null when it saw none.
+             */
+            bids?: number | null;
+            /** Format: date-time */
+            block_time?: string | null;
+            block_work?: string | null;
+            chain_work?: string | null;
+            /**
+             * Format: double
+             * @description block_work × 65535 / 2^48, the usual difficulty scale.
+             */
+            difficulty?: number | null;
+            hash: string;
+            /** Format: int32 */
+            height: number;
+            /**
+             * Format: int64
+             * @description Seconds since the previous block by miner-set timestamps; can be negative.
+             */
+            interval_seconds?: number | null;
+            top_bid_sats?: string | null;
+        };
+        /** @description L1 block pace, difficulty and estimated hashrate from the selected chain's headers. */
+        NetworkResponse: {
+            /**
+             * Format: int32
+             * @description Selected headers in the window; fewer than `window_blocks` when the chain is shorter or headers are missing.
+             */
+            blocks: number;
+            branch: components["schemas"]["BranchState"];
+            /**
+             * Format: double
+             * @description Work of the window's blocks after the first, divided by the time between the first and the last.
+             */
+            hashrate_hps?: number | null;
+            /** Format: double */
+            interval_mean_seconds?: number | null;
+            /** Format: double */
+            interval_median_seconds?: number | null;
+            meta: components["schemas"]["ResponseMeta"];
+            notes: string[];
+            retarget?: null | components["schemas"]["RetargetEpoch"];
+            /** @description Newest first. */
+            series: components["schemas"]["NetworkBlock"][];
+            tip?: null | components["schemas"]["NetworkBlock"];
+            /** Format: int32 */
+            window_blocks: number;
         };
         ObservatoryResponse: {
             context: components["schemas"]["ProtocolContext"];
@@ -1130,6 +1376,32 @@ export interface components {
             projection_version: number;
             pulse_revision: string;
         };
+        RetargetEpoch: {
+            /** Format: int32 */
+            blocks_into_epoch: number;
+            /** Format: int32 */
+            blocks_remaining: number;
+            /** Format: int32 */
+            epoch_start_height: number;
+            /** Format: date-time */
+            epoch_start_time?: string | null;
+            /**
+             * Format: double
+             * @description target spacing / mean spacing, limited to 0.25–4 like the retarget rule; noisy early in an epoch.
+             */
+            estimated_adjustment?: number | null;
+            /** Format: int32 */
+            interval_blocks: number;
+            /**
+             * Format: double
+             * @description Mean seconds per block in this epoch so far.
+             */
+            mean_spacing_seconds?: number | null;
+            /** Format: int32 */
+            next_retarget_height: number;
+            /** Format: int64 */
+            target_spacing_seconds: number;
+        };
         RunInfo: {
             capabilities: unknown;
             enforcer_commit: string;
@@ -1140,6 +1412,49 @@ export interface components {
             /** Format: uuid */
             run_id: string;
             status: string;
+        };
+        /** @description Everything the Observatory holds about one sidechain slot, read from a single build. */
+        SidechainDataset: {
+            context: components["schemas"]["ProtocolContext"];
+            /** Format: int32 */
+            from_height?: number | null;
+            /** Format: date-time */
+            generated_at: string;
+            /** @description Limits a reader must know before drawing conclusions from the tables. */
+            notes: string[];
+            /** Format: int32 */
+            slot: number;
+            tables: components["schemas"]["DatasetTable"][];
+            /** Format: int32 */
+            to_height?: number | null;
+        };
+        /** @description Figures about one sidechain slot, all computed from the records of a single build. */
+        SidechainStats: {
+            /**
+             * Format: int32
+             * @description Activation height of the sidechain now in the slot, if one is active.
+             */
+            activation_height?: number | null;
+            bids: components["schemas"]["BidStats"];
+            bmm: components["schemas"]["BmmStats"];
+            context: components["schemas"]["ProtocolContext"];
+            deposits: components["schemas"]["DepositStats"];
+            /** Format: date-time */
+            generated_at: string;
+            /** @description Limits a reader must know before drawing conclusions from these figures. */
+            notes: string[];
+            series: components["schemas"]["StatsBlock"][];
+            /** Format: int32 */
+            slot: number;
+            treasury: components["schemas"]["TreasuryStats"];
+            /** @description More records exist than one computation reads; counts are lower bounds. */
+            truncated: boolean;
+            /**
+             * Format: int32
+             * @description The `window_blocks` newest L1 blocks, newest first.
+             */
+            window_blocks: number;
+            withdrawals: components["schemas"]["WithdrawalStats"];
         };
         SidechainSummary: {
             /** Format: int32 */
@@ -1158,6 +1473,22 @@ export interface components {
             meta: components["schemas"]["ResponseMeta"];
             sidechains: components["schemas"]["SidechainSummary"][];
             state: string;
+        };
+        /** @description One L1 block for one slot. */
+        StatsBlock: {
+            /** @description Whether this block committed to the critical hash of one of those bids. */
+            bid_committed?: boolean | null;
+            /**
+             * Format: int32
+             * @description Bids seen on the parent block, that is, offered for this block.
+             */
+            bids: number;
+            /** @description null when the block's merged-mining facts were not observed. */
+            committed?: boolean | null;
+            hash?: string | null;
+            /** Format: int32 */
+            height: number;
+            top_bid_sats?: string | null;
         };
         StatusResponse: {
             branch: components["schemas"]["BranchState"];
@@ -1236,6 +1567,37 @@ export interface components {
         };
         /** @enum {string} */
         SyncMode: "bootstrap" | "catching_up" | "following" | "interrupted" | "incompatible";
+        TreasuryStats: {
+            quality?: string | null;
+            /** Format: int32 */
+            read_at_tip_height?: number | null;
+            sequence?: string | null;
+            /** @description Each deposit and paid withdrawal replaced the treasury output; oldest first. */
+            steps: components["schemas"]["TreasuryStep"][];
+            /** @description The latest treasury reading; null when no reading exists or the treasury is empty. */
+            value_sats?: string | null;
+        };
+        TreasuryStep: {
+            /** @description deposit or withdrawal. */
+            change: string;
+            /** @description The deposited amount; null for a withdrawal, whose amount L1 records do not state here. */
+            delta_sats?: string | null;
+            /** Format: int32 */
+            height?: number | null;
+            sequence?: string | null;
+            txid?: string | null;
+            /** @description From a treasury reading of this output, or from the previous known value plus a deposit; null when unknown. */
+            value_after_sats?: string | null;
+        };
+        WithdrawalStats: {
+            /** Format: int64 */
+            failed: number;
+            pending: components["schemas"]["BundleProjection"][];
+            /** Format: int64 */
+            submitted: number;
+            /** Format: int64 */
+            succeeded: number;
+        };
         WorkerStatus: {
             /** Format: int32 */
             consecutive_failures: number;
@@ -2294,6 +2656,37 @@ export interface operations {
             };
         };
     };
+    network: {
+        parameters: {
+            query?: {
+                dataset?: string;
+                /** @description Blocks to measure pace and hashrate over: 144 (default), 1008 or 2016. */
+                window_blocks?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     observationfailures: {
         parameters: {
             query?: {
@@ -3240,6 +3633,44 @@ export interface operations {
             };
         };
     };
+    sidechain_dataset: {
+        parameters: {
+            query?: {
+                dataset?: string;
+                /** @description First L1 height to include. Snapshot readings filter by the tip they were read at. */
+                from_height?: number;
+                to_height?: number;
+                /** @description zip (default): one CSV per table plus manifest.json with row counts and SHA-256; json: the same tables in one document */
+                format?: string;
+            };
+            header?: never;
+            path: {
+                /** @description BIP300 slot, 0 to 255 */
+                slot: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON shown; format=zip returns application/zip */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SidechainDataset"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     sidechains_slot_instances: {
         parameters: {
             query?: {
@@ -3297,6 +3728,40 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    sidechain_stats: {
+        parameters: {
+            query?: {
+                dataset?: string;
+                /** @description Blocks in `series`: 144 (default) or 1008. */
+                window_blocks?: number;
+            };
+            header?: never;
+            path: {
+                /** @description BIP300 slot, 0 to 255 */
+                slot: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SidechainStats"];
+                };
+            };
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

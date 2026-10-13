@@ -92,6 +92,9 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/sidechains/{slot}", get(sidechain))
         .route("/api/v1/sidechains/{slot}/activity", get(slot_activity))
         .route("/api/v1/sidechains/{slot}/instances", get(slot_instances))
+        .route("/api/v1/sidechains/{slot}/dataset", get(sidechain_dataset))
+        .route("/api/v1/sidechains/{slot}/stats", get(sidechain_stats))
+        .route("/api/v1/network", get(network))
         .route("/api/v1/deposits", get(list))
         .route("/api/v1/withdrawal-bundles", get(list))
         .route("/api/v1/withdrawal-bundles/{id}", get(bundle))
@@ -282,8 +285,10 @@ async fn instance_ctip(
     // Official snapshots are unanchored. The capture-time instance identity is
     // evidence; an inferred activation/ending height interval is not.
     q.instance_id = Some(id);
+    // A later page reads the build its cursor pinned, which may precede the head.
+    let first_page = q.cursor.is_none();
     let result = pulse_storage::protocol::list(&s.pool, "ctip/history", q).await?;
-    if result.context.build_id != found.context.build_id
+    if (first_page && result.context.build_id != found.context.build_id)
         || result.context.branch.revision != found.context.branch.revision
     {
         return Err(StorageError::StaleCursor.into());
@@ -372,4 +377,179 @@ async fn export(
             .map_err(|_| StorageError::InvalidQuery)?,
     );
     Ok(response)
+}
+
+/// Datasets read many rows in one snapshot; a few at a time keep the pool free for pages.
+static DATASET_BUILDS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+#[derive(Deserialize)]
+pub(crate) struct DatasetFormat {
+    format: Option<String>,
+}
+fn csv_table(t: &DatasetTable) -> String {
+    let mut text = t
+        .columns
+        .iter()
+        .map(|c| csv_cell(&c.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    text.push_str("\r\n");
+    for row in &t.rows {
+        text.push_str(
+            &row.iter()
+                .map(|v| v.as_deref().map(csv_cell).unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        text.push_str("\r\n");
+    }
+    text
+}
+fn dataset_zip(d: &SidechainDataset) -> Result<Vec<u8>, AppError> {
+    use sha2::Digest as _;
+    use std::io::Write as _;
+    let failed = |_| AppError::from(StorageError::InvalidProjection);
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+    let mut files = vec![];
+    for t in &d.tables {
+        let name = format!("{}.csv", t.name);
+        let text = csv_table(t);
+        files.push(json!({
+            "name": name,
+            "description": t.description,
+            "rows": t.rows.len(),
+            "truncated": t.truncated,
+            "sha256": format!("{:x}", sha2::Sha256::digest(text.as_bytes())),
+            "columns": t.columns,
+        }));
+        zip.start_file(name, options).map_err(failed)?;
+        zip.write_all(text.as_bytes())
+            .map_err(|_| StorageError::InvalidProjection)?;
+    }
+    let c = &d.context;
+    let manifest = json!({
+        "about": "One sidechain slot as recorded by Drivechain - Observatory. Every file was read from the same build.",
+        "network": c.meta.network_id,
+        "dataset_id": c.meta.dataset_id,
+        "slot": d.slot,
+        "from_height": d.from_height,
+        "to_height": d.to_height,
+        "generated_at": d.generated_at,
+        "build_id": c.build_id,
+        "anchor_height": c.anchor_height,
+        "anchor_hash": c.anchor_hash,
+        "state": c.state,
+        "notes": d.notes,
+        "files": files,
+        "context": c,
+    });
+    zip.start_file("manifest.json", options).map_err(failed)?;
+    zip.write_all(
+        &serde_json::to_vec_pretty(&manifest).map_err(|_| StorageError::InvalidProjection)?,
+    )
+    .map_err(|_| StorageError::InvalidProjection)?;
+    Ok(zip.finish().map_err(failed)?.into_inner())
+}
+#[utoipa::path(get,path="/api/v1/sidechains/{slot}/dataset",params(("slot"=i16,Path,description="BIP300 slot, 0 to 255"),pulse_storage::dataset::DatasetQuery,("format"=Option<String>,Query,description="zip (default): one CSV per table plus manifest.json with row counts and SHA-256; json: the same tables in one document")),responses((status=200,body=SidechainDataset,description="JSON shown; format=zip returns application/zip"),(status=400,body=ApiError)),tag="pulse")]
+pub async fn sidechain_dataset(
+    State(s): State<AppState>,
+    Path(slot): Path<i16>,
+    PublicQuery(f): PublicQuery<DatasetFormat>,
+    PublicQuery(q): PublicQuery<pulse_storage::dataset::DatasetQuery>,
+) -> Result<Response, AppError> {
+    let format = f.format.as_deref().unwrap_or("zip");
+    if !matches!(format, "zip" | "json") {
+        return Err(StorageError::InvalidQuery.into());
+    }
+    let _permit = DATASET_BUILDS
+        .acquire()
+        .await
+        .map_err(|_| StorageError::InvalidProjection)?;
+    let d = pulse_storage::dataset::sidechain(&s.pool, slot, q).await?;
+    let truncated = d.tables.iter().any(|t| t.truncated);
+    let name = format!(
+        "observatory-{}-slot{}-{}.{format}",
+        d.context.meta.network_id,
+        slot,
+        d.context
+            .anchor_height
+            .map_or("pending".into(), |h| h.to_string())
+    );
+    let mut response = if format == "json" {
+        Json(&d).into_response()
+    } else {
+        (
+            [(axum::http::header::CONTENT_TYPE, "application/zip")],
+            dataset_zip(&d)?,
+        )
+            .into_response()
+    };
+    for (header, value) in [
+        ("x-pulse-truncated", truncated.to_string()),
+        (
+            "x-pulse-revision",
+            d.context.meta.pulse_revision.to_string(),
+        ),
+    ] {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static(header),
+            HeaderValue::from_str(&value).map_err(|_| StorageError::InvalidProjection)?,
+        );
+    }
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename=\"{name}\""))
+            .map_err(|_| StorageError::InvalidQuery)?,
+    );
+    Ok(response)
+}
+
+/// Stats read as many rows as a dataset; pages ask for them often, so a result is reused for a few seconds.
+const STATS_TTL: std::time::Duration = std::time::Duration::from_secs(15);
+type StatsKey = (Option<Uuid>, i16, Option<u32>);
+type StatsEntry = (std::time::Instant, std::sync::Arc<SidechainStats>);
+static STATS_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<StatsKey, StatsEntry>>,
+> = std::sync::LazyLock::new(Default::default);
+static STATS_BUILDS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+fn cached_stats(key: &StatsKey) -> Option<std::sync::Arc<SidechainStats>> {
+    let cache = STATS_CACHE.lock().ok()?;
+    cache
+        .get(key)
+        .filter(|(at, _)| at.elapsed() < STATS_TTL)
+        .map(|(_, v)| v.clone())
+}
+#[utoipa::path(get,path="/api/v1/sidechains/{slot}/stats",params(("slot"=i16,Path,description="BIP300 slot, 0 to 255"),pulse_storage::stats::StatsQuery),responses((status=200,body=SidechainStats),(status=400,body=ApiError)),tag="pulse")]
+pub async fn sidechain_stats(
+    State(s): State<AppState>,
+    Path(slot): Path<i16>,
+    PublicQuery(q): PublicQuery<pulse_storage::stats::StatsQuery>,
+) -> Result<Json<std::sync::Arc<SidechainStats>>, AppError> {
+    let key = (q.dataset, slot, q.window_blocks);
+    if let Some(hit) = cached_stats(&key) {
+        return Ok(Json(hit));
+    }
+    let _permit = STATS_BUILDS
+        .acquire()
+        .await
+        .map_err(|_| StorageError::InvalidProjection)?;
+    // Another request may have computed it while this one waited.
+    if let Some(hit) = cached_stats(&key) {
+        return Ok(Json(hit));
+    }
+    let stats = std::sync::Arc::new(pulse_storage::stats::sidechain(&s.pool, slot, q).await?);
+    if let Ok(mut cache) = STATS_CACHE.lock() {
+        cache.retain(|_, (at, _)| at.elapsed() < STATS_TTL);
+        cache.insert(key, (std::time::Instant::now(), stats.clone()));
+    }
+    Ok(Json(stats))
+}
+#[utoipa::path(get,path="/api/v1/network",params(pulse_storage::stats::NetworkQuery),responses((status=200,body=NetworkResponse),(status=400,body=ApiError)),tag="pulse")]
+pub async fn network(
+    State(s): State<AppState>,
+    PublicQuery(q): PublicQuery<pulse_storage::stats::NetworkQuery>,
+) -> Result<Json<NetworkResponse>, AppError> {
+    Ok(Json(pulse_storage::stats::network(&s.pool, q).await?))
 }

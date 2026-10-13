@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useId, useState, type ReactNode } from "react";
-import { BookOpen, CheckCircle2, ExternalLink, FlaskConical, Lightbulb, Radio, XCircle } from "lucide-react";
+import { BookOpen, Check, CheckCircle2, Copy, ExternalLink, FlaskConical, Info, Lightbulb, Radio, XCircle } from "lucide-react";
 import { glossary, type TermId } from "@/content/glossary";
 import { references, type RefId } from "@/content/references";
 import { confidenceOf, confidenceText } from "@/lib/explain";
@@ -66,8 +66,48 @@ export function CheckYourself({ question, choices }: { question: string; choices
 }
 
 /** A labelled number with a short explanation underneath; `quality` and `proof` describe this value alone. */
-export function Stat({ label, value, hint, quality, proof }: { label: string; value: ReactNode; hint?: ReactNode; quality?: string | null; proof?: string }) {
-  return <div className="stat"><span>{label}</span><strong>{value}</strong>{hint && <small>{hint}</small>}
+export function Stat({ label, value, hint, quality, proof, method }: { label: string; value: ReactNode; hint?: ReactNode; quality?: string | null; proof?: string; method?: ReactNode }) {
+  return <div className="stat"><span>{label}{method}</span><strong>{value}</strong>{hint && <small>{hint}</small>}
     {(quality !== undefined || proof) && <div className="stat-meta">{quality !== undefined && <ConfidenceChip quality={quality}/>}{proof && <Link className="proof-link" href={proof}>evidence</Link>}</div>}
   </div>;
+}
+
+/** A value shown as code with a copy button, e.g. an address or a username. */
+export function CopyText({ value, label, className = "donate-address" }: { value: string; label: string; className?: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  return <div className={className}>
+    <code>{value}</code>
+    <button onClick={async () => { try { await navigator.clipboard.writeText(value); setState("copied"); } catch { setState("failed"); } }}>
+      {state === "copied" ? <><Check size={15}/> Copied</> : <><Copy size={15}/> {label}</>}
+    </button>
+    {state === "failed" && <small role="status">Copy is unavailable here; select the text instead.</small>}
+  </div>;
+}
+
+/** A hash or id in a dense table: shortened unless `full`, with a small copy button. */
+export function CopyHash({ value, full = false, href }: { value: string | null | undefined; full?: boolean; href?: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return <span className="muted">—</span>;
+  const shown = full || value.length <= 20 ? value : `${value.slice(0, 10)}…${value.slice(-8)}`;
+  return <span className="copy-hash">
+    {href ? <Link className="hash" href={href} title={value}>{shown}</Link> : <span className="hash" title={value}>{shown}</span>}
+    <button type="button" aria-label={copied ? "Copied" : `Copy ${value}`} title={copied ? "Copied" : "Copy"}
+      onClick={async () => { try { await navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard unavailable */ } }}>
+      {copied ? <Check size={12}/> : <Copy size={12}/>}
+    </button>
+  </span>;
+}
+
+/** How a figure is obtained: its source, the calculation, and what it cannot tell. */
+export function Method({ source, how, limits }: { source: ReactNode; how?: ReactNode; limits?: ReactNode }) {
+  const tip = useId();
+  return <span className="method" tabIndex={0} aria-describedby={tip} aria-label="How this is measured">
+    <Info size={13} aria-hidden="true"/>
+    <span role="tooltip" id={tip} className="term-tip">
+      <strong>How this is measured</strong>
+      <span className="method-row"><em>Source</em> {source}</span>
+      {how && <span className="method-row"><em>Calculation</em> {how}</span>}
+      {limits && <span className="method-row"><em>Limits</em> {limits}</span>}
+    </span>
+  </span>;
 }

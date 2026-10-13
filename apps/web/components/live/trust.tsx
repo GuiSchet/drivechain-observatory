@@ -1,11 +1,12 @@
 "use client";
+import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiBaseUrl, getCoverage, getMeta } from "@/lib/api";
 import { object } from "@/lib/protocol";
 import { short, timeAgo } from "@/lib/explain";
-import { n, useProtocolPage, useStatus } from "@/lib/live";
+import { activeSidechains, n, useObservatory, useProtocolPage, useStatus } from "@/lib/live";
 import { references, ENFORCER_COMMIT } from "@/content/references";
-import { LivePanel, Stat } from "@/components/learn/primitives";
+import { GoDeeper, LivePanel, Stat } from "@/components/learn/primitives";
 import { useNow } from "./basics";
 
 const workerText: Record<string, string> = {
@@ -73,9 +74,48 @@ export function Builds() {
 }
 
 const exports: [string, string][] = [["activity", "All activity"], ["deposits", "Deposits"], ["withdrawal-bundles", "Withdrawals"], ["ctip/history", "Treasury readings"], ["bmm/commitments", "Merged-mining commitments"], ["events", "Raw events"]];
+const datasetFiles: [string, string][] = [
+  ["sidechain.csv", "The sidechain in the slot and any proposal for it, with miner approvals."],
+  ["deposits.csv", "Every deposit: block, transaction, amount and sidechain address."],
+  ["treasury.csv", "Every reading of the treasury output, with the tip it was read at."],
+  ["withdrawals.csv", "Each change in a withdrawal's votes, the votes needed and its expiry, and each outcome."],
+  ["bmm_commitments.csv", "Every block: whether it committed to a sidechain block, and to which."],
+  ["bmm_bids.csv", "Every bid seen, and whether the next block committed to the block it paid for."],
+  ["manifest.json", "Row counts, the SHA-256 of each file, what every column means, and the limits of the data."],
+];
+/** The address of one sidechain's complete dataset. */
+export function datasetHref(slot: number, format: "zip" | "json" = "zip"): string {
+  return `${apiBaseUrl}/api/v1/sidechains/${slot}/dataset${format === "json" ? "?format=json" : ""}`;
+}
+function DatasetLinks({ slot, label }: { slot: number; label: string }) {
+  return <li><span>{label}</span><a href={datasetHref(slot)}>ZIP of CSV</a><a href={datasetHref(slot, "json")}>JSON</a></li>;
+}
+function DatasetContents() {
+  return <GoDeeper summary="what is in the download">
+    <dl className="mini-facts">{datasetFiles.map(([file, text]) => <Fragment key={file}><dt className="hash">{file}</dt><dd>{text}</dd></Fragment>)}</dl>
+    <p>All files are read from the same moment of the data, so they agree with each other. Amounts are exact satoshis. Each row names the evidence it came from.</p>
+  </GoDeeper>;
+}
+/** Everything recorded for one slot, as one download. */
+export function SidechainDownload({ slot, name }: { slot: number; name: string }) {
+  return <LivePanel title={`Take ${name}'s data with you`}>
+    <p className="live-lede">Everything this site records for slot #{slot}, complete from the start of the network, in files any spreadsheet opens.</p>
+    <ul className="download-list"><DatasetLinks slot={slot} label={`All of ${name}'s records`}/></ul>
+    <DatasetContents/>
+  </LivePanel>;
+}
 export function Downloads() {
+  const sidechains = activeSidechains(useObservatory().data);
+  const [slot, setSlot] = useState<number>();
+  const chosen = sidechains.find(s => s.slot === slot) ?? sidechains[0];
   return <LivePanel title="Take the data with you">
-    <p className="live-lede">Every list on this site can be downloaded, up to 10,000 records per file. The file says if it was cut short.</p>
+    <p className="live-lede">Download everything recorded for one sidechain, complete and from one moment of the data:</p>
+    {chosen && <ul className="download-list">
+      <li><span className="picker"><label htmlFor="dataset-slot">Sidechain </label><select id="dataset-slot" value={chosen.slot} onChange={e => setSlot(Number(e.target.value))}>{sidechains.map(s => <option key={s.slot} value={s.slot}>#{s.slot} {s.title ?? "Unnamed"}</option>)}</select></span>
+        <a href={datasetHref(chosen.slot)}>ZIP of CSV</a><a href={datasetHref(chosen.slot, "json")}>JSON</a></li>
+    </ul>}
+    <DatasetContents/>
+    <p className="live-lede">Or download one list across all sidechains, up to 10,000 records per file. The file says if it was cut short; the longest lists already are, so use the sidechain downloads for complete history.</p>
     <ul className="download-list">{exports.map(([resource, label]) => <li key={resource}><span>{label}</span>
       <a href={`${apiBaseUrl}/api/v1/export?resource=${encodeURIComponent(resource)}&format=csv`}>CSV</a>
       <a href={`${apiBaseUrl}/api/v1/export?resource=${encodeURIComponent(resource)}&format=json`}>JSON</a></li>)}</ul>
