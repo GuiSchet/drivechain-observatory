@@ -114,7 +114,7 @@ try {
   await page.goto(base);
   await page.locator('.stat',{hasText:'Active sidechains'}).getByText('Updating…').waitFor();
   assert.equal(await page.locator('.stat',{hasText:'Withdrawals being voted on'}).locator('strong').innerText(),'Updating…');
-  await page.unroute('**/api/v1/observatory');
+  await page.unroute('**/api/v1/observatory',{behavior:'ignoreErrors'});
   // A family that failed to read is unknown, even when the rest of the state is fine.
   await page.route('**/api/v1/observatory',async route=>{
     const real=await (await route.fetch()).json();
@@ -123,7 +123,7 @@ try {
   });
   await page.goto(base);
   assert.equal(await page.locator('.stat',{hasText:'Coins locked in treasuries'}).locator('strong').innerText(),'Unknown');
-  await page.unroute('**/api/v1/observatory');
+  await page.unroute('**/api/v1/observatory',{behavior:'ignoreErrors'});
   // A stale sync says so in words on every page, even with the live connection open.
   await page.route('**/api/v1/status',async route=>{
     const real=await (await route.fetch()).json();
@@ -132,7 +132,7 @@ try {
   await page.goto(base+'/learn/blocks');
   await page.locator('.status-banner',{hasText:'may be behind the network'}).waitFor();
   await page.locator('.live-pill.health-delayed',{hasText:'Delayed'}).waitFor();
-  await page.unroute('**/api/v1/status');
+  await page.unroute('**/api/v1/status',{behavior:'ignoreErrors'});
 
   // Replaced technical views redirect to the page that now covers them.
   for(const [from,to] of [['/bmm','/learn/merged-mining'],['/explorer','/search'],['/about/data','/learn/how-we-know'],['/pegs','/learn/deposits']]){
@@ -140,9 +140,36 @@ try {
     assert.equal(new URL(page.url()).pathname,to,`${from} must redirect to ${to}`);
   }
 
-  // Lessons fit a phone screen.
+  // The technical view shows the same records densely; the choice persists and a shared link's ?view= wins.
+  const stats=await api('/api/v1/sidechains/9/stats');
+  await page.goto(base+'/live');
+  await page.locator('.timeline-blocks').waitFor();
+  await page.getByRole('button',{name:'Technical'}).click();
+  await page.locator('.block-table').waitFor();
+  await page.getByRole('heading',{name:'Right now'}).waitFor();
+  await page.getByRole('heading',{name:'Time between blocks'}).waitFor();
+  const tableTip=(await page.locator('.block-table tbody tr').first().locator('td').nth(1).innerText()).replace(/\D/g,'');
+  assert.equal(Number(tableTip),tip.height,'the block table starts at the newest block');
+  await page.reload();
+  await page.locator('.block-table').waitFor();
+  await page.goto(base+'/live?view=guided');
+  await page.locator('.timeline-blocks').waitFor();
+  assert.equal(await page.locator('.block-table').count(),0,'?view=guided overrides the stored choice');
+  await page.goto(base+'/sidechains/9');
+  await page.getByRole('heading',{name:'Facts at a glance'}).waitFor();
+  await page.getByRole('heading',{name:'Every withdrawal bundle'}).waitFor();
+  await page.locator('.kpi-grid .stat',{hasText:'Deposits'}).locator('strong').getByText(String(stats.deposits.count),{exact:true}).waitFor();
+  // The paid withdrawal's payout transaction is the id of the transaction the enforcer reported.
+  const payout=stats.treasury.steps.find(s=>s.change==='withdrawal').txid;
+  await page.locator(`.data-table [title="${payout}"]`).waitFor();
+  await page.goto(base+'/sidechains');
+  await page.locator('.data-table',{hasText:'BMM, 144 blocks'}).waitFor();
+  await page.getByRole('button',{name:'Guided'}).click();
+  await page.locator('.sidechain-cards').waitFor();
+
+  // Lessons and both views fit a phone screen.
   await page.setViewportSize({width:390,height:844});
-  for(const path of ['/','/learn/slots','/learn/deposits','/sidechains']){
+  for(const path of ['/','/learn/slots','/learn/deposits','/sidechains','/live?view=tech','/sidechains/9?view=tech','/sidechains?view=tech']){
     await page.goto(base+path);
     await page.locator('main').first().waitFor();
     assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth)),`${path} scrolls horizontally on a phone`);
