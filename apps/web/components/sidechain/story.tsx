@@ -33,7 +33,7 @@ export function SidechainStory({ slot }: { slot: number }) {
   // Activating over an earlier instance needs the higher "used slot" threshold.
   const replaced = sc?.activationHeight != null && [...history.values()].some(h => typeof h.activation === "number" && h.activation < sc.activationHeight!);
   const needed = replaced ? params.usedThreshold : params.unusedThreshold;
-  const name = sc?.title ?? `slot #${slot}`, s = stats.data;
+  const name = sc?.title ?? `slot #${slot}`, s = stats.data, failed = stats.isError && !s;
   const sections: [string, string][] = sc
     ? [["summary", "Summary"], ["treasury", "Treasury & deposits"], ["withdrawals", "Withdrawals"], ["mining", "Merged mining"], ["identity", "Identity"], ["data", "Data"]]
     : [["identity", "Slot history"], ["data", "Data"]];
@@ -45,7 +45,8 @@ export function SidechainStory({ slot }: { slot: number }) {
       : !observatory.isPending && (complete
         ? <p className="lede">No sidechain is active in this slot right now. Any earlier sidechains in it are listed below. <Link className="text-link" href="/learn/slots">What is a slot?</Link></p>
         : <p className="lede">The latest reading of active sidechains is incomplete, so we can&apos;t say yet whether this slot is in use. Earlier sidechains in it are listed below.</p>)}
-    {sc && <SidechainKpis sc={sc} stats={s} technical={technical}/>}
+    {sc && <SidechainKpis sc={sc} stats={s} failed={failed} technical={technical}/>}
+    {sc && failed && <p className="inline-notice" role="status">This sidechain&apos;s figures did not load: the Observatory API took too long or failed. Panels that need them show &quot;Unavailable&quot;. <button type="button" onClick={() => stats.refetch()} disabled={stats.isFetching}>{stats.isFetching ? "Retrying…" : "Try again"}</button></p>}
     <SectionNav sections={sections}/>
 
     {sc && <>
@@ -56,7 +57,7 @@ export function SidechainStory({ slot }: { slot: number }) {
             <dt>Declaration hash</dt><dd><CopyHash value={sc.descriptionHash} full/></dd>
             <dt>Proposed / activated</dt><dd>block {n(sc.proposalHeight)} / block {n(sc.activationHeight)} ({n(sc.activationHeight != null && sc.proposalHeight != null ? sc.activationHeight - sc.proposalHeight : undefined)} blocks)</dd>
             <dt>Approvals</dt><dd>{n(sc.voteCount)}, needed more than {n(needed)} ({replaced ? "used slot" : "empty slot"})</dd>
-            <dt>Treasury</dt><dd>{treasury === null ? "no output yet" : treasury ? <>{formatSats(object(treasury).value_sats, unit)}, output #{String(object(treasury).sequence_number ?? "?")}{s?.treasury.read_at_tip_height != null ? `, read at tip ${n(s.treasury.read_at_tip_height)}` : ""}</> : "unknown"}</dd>
+            <dt>Treasury</dt><dd>{treasury === null ? "no output yet" : treasury ? <>{formatSats(object(treasury).value_sats, unit)}, output #{String(object(treasury).sequence_number ?? "?")}{s?.treasury.read_at_tip_height != null ? `, first read at tip ${n(s.treasury.read_at_tip_height)}${s.treasury.confirmed_at_tip_height != null && s.treasury.confirmed_at_tip_height !== s.treasury.read_at_tip_height ? `, still the value at tip ${n(s.treasury.confirmed_at_tip_height)}` : ""}` : ""}</> : "unknown"}</dd>
             <dt>Figures as of</dt><dd>{s ? <>block {n(s.context.anchor_height)} · build {s.context.build_id ?? "?"} · computed {utc(s.generated_at)}</> : "loading"}</dd>
           </dl>
           {s && <GoDeeper summary="the limits of these figures"><ul className="plain-list">{s.notes.map(note => <li key={note}>{note}</li>)}</ul></GoDeeper>}
@@ -72,7 +73,7 @@ export function SidechainStory({ slot }: { slot: number }) {
       </section>
       <section id="treasury" className="sc-section">
         <h2 className="story-h2">Coins in and out</h2>
-        <TreasurySection slot={slot} name={name} stats={s} technical={technical}/>
+        <TreasurySection slot={slot} name={name} stats={s} failed={failed} technical={technical}/>
       </section>
       <section id="withdrawals" className="sc-section">
         <h2 className="story-h2">Withdrawals</h2>
@@ -82,7 +83,7 @@ export function SidechainStory({ slot }: { slot: number }) {
       <section id="mining" className="sc-section">
         <h2 className="story-h2">Merged mining</h2>
         <p className="section-lede">L1 records a commitment to a sidechain block hash. It does not see or check what is inside that block; sidechain nodes do. <Link className="text-link" href="/learn/merged-mining">How BMM works</Link></p>
-        <MiningSection slot={slot} name={name} stats={s} technical={technical}/>
+        <MiningSection slot={slot} name={name} stats={s} failed={failed} technical={technical}/>
       </section>
     </>}
 

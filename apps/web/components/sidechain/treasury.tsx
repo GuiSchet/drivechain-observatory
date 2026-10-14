@@ -75,10 +75,10 @@ function DepositTable({ slot, stats }: { slot: number; stats?: SidechainStats })
   </>;
 }
 
-export function TreasurySection({ slot, name, stats, technical }: { slot: number; name: string; stats?: SidechainStats; technical: boolean }) {
+export function TreasurySection({ slot, name, stats, failed = false, technical }: { slot: number; name: string; stats?: SidechainStats; failed?: boolean; technical: boolean }) {
   const unit = useUnit(), d = stats?.deposits;
   return <>
-    <LivePanel title={`${name}'s treasury, block by block`} status={{ pending: !stats, error: false, empty: !!stats && !stats.treasury.steps.length, emptyText: "Nothing has been deposited into this sidechain yet." }}>
+    <LivePanel title={`${name}'s treasury, block by block`} status={{ pending: !stats, error: failed, empty: !!stats && !stats.treasury.steps.length, emptyText: "Nothing has been deposited into this sidechain yet." }}>
       {d && <div className="stat-grid">
         <Stat label="Deposits" value={n(d.count)} hint={d.last_30d ? `${n(d.last_30d)} in the last 30 days, ${n(d.last_7d)} in the last 7` : "none in the last 30 days"}/>
         <Stat label="Deposited in total" value={formatCoins(d.total_sats, !technical)} hint={formatSats(d.total_sats, unit)}/>

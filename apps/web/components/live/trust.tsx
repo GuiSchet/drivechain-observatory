@@ -109,13 +109,13 @@ export function Downloads() {
   const [slot, setSlot] = useState<number>();
   const chosen = sidechains.find(s => s.slot === slot) ?? sidechains[0];
   return <LivePanel title="Take the data with you">
-    <p className="live-lede">Download everything recorded for one sidechain, complete and from one moment of the data:</p>
+    <p className="live-lede">Download everything the Observatory has recorded for one sidechain, from one moment of the data. Block records (deposits, withdrawal outcomes, merged-mining commitments) start at activation; readings (treasury values, vote counts, bids) start when the monitor began reading them, and gaps are listed in the coverage report:</p>
     {chosen && <ul className="download-list">
       <li><span className="picker"><label htmlFor="dataset-slot">Sidechain </label><select id="dataset-slot" value={chosen.slot} onChange={e => setSlot(Number(e.target.value))}>{sidechains.map(s => <option key={s.slot} value={s.slot}>#{s.slot} {s.title ?? "Unnamed"}</option>)}</select></span>
         <a href={datasetHref(chosen.slot)}>ZIP of CSV</a><a href={datasetHref(chosen.slot, "json")}>JSON</a></li>
     </ul>}
     <DatasetContents/>
-    <p className="live-lede">Or download one list across all sidechains, up to 10,000 records per file. The file says if it was cut short; the longest lists already are, so use the sidechain downloads for complete history.</p>
+    <p className="live-lede">Or download one list across all sidechains, up to 10,000 records per file. The file says if it was cut short; the longest lists already are, so use the sidechain downloads for everything recorded.</p>
     <ul className="download-list">{exports.map(([resource, label]) => <li key={resource}><span>{label}</span>
       <a href={`${apiBaseUrl}/api/v1/export?resource=${encodeURIComponent(resource)}&format=csv`}>CSV</a>
       <a href={`${apiBaseUrl}/api/v1/export?resource=${encodeURIComponent(resource)}&format=json`}>JSON</a></li>)}</ul>

@@ -3,9 +3,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getJson, getOverview, getStatus } from "./api";
 import { object, at } from "./protocol";
 import { declarationOf, type SidechainNames } from "./explain";
-import type { BmmMetrics, Observatory, ProtocolItem, ProtocolPage } from "./types";
+import type { Auctions, BmmMetrics, Observatory, ProtocolItem, ProtocolPage } from "./types";
 
 // Query keys starting with "protocol" are refreshed by the live stream.
+
+/** Whether a bid sample's list can be counted: an empty list means "none seen" only when the
+ * sample was read; when it is unavailable, awaited or unreadable, the count is unknown. */
+export function bidsKnown(a: Auctions | undefined): boolean {
+  return a != null && (a.requests.length > 0 || a.state === "available" || a.state === "no_observed_bids");
+}
 
 export function useOverview() {
   return useQuery({ queryKey: ["overview"], queryFn: getOverview });

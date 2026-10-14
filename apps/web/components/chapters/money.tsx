@@ -59,7 +59,7 @@ export function Deposits() {
       <Analogy>The treasury is one big jar per sidechain. Each deposit pours the old jar and your coins into a new, larger jar.</Analogy>
     </Section>
     <Section title="Depositing (M5)">
-      <p>A <Term id="m5">deposit</Term> is an ordinary L1 transaction. It spends the current treasury output together with your coins and creates a new treasury output holding more than before. Right after it, an output records the sidechain address that should receive the coins. BIP300 itself does not require that output; the LayerTwo Labs specification and the enforcer Betanet runs do.</p>
+      <p>A <Term id="m5">deposit</Term> is an ordinary L1 transaction. It spends the current treasury output together with your coins and creates a new treasury output holding more than before. A sidechain that has never received a deposit has no treasury output yet: its first deposit creates one from your coins alone. Right after it, an output records the sidechain address that should receive the coins. BIP300 itself does not require that output; the LayerTwo Labs specification and the enforcer Betanet runs do.</p>
       <p>No vote is needed: once the transaction is in a block, the deposit is done on L1. The amount deposited is exactly how much the treasury grew.</p>
     </Section>
     <TreasuryDiagram/>
