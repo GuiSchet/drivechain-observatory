@@ -19,9 +19,12 @@ const atLeast = (threshold: number | undefined) => `at least ${n(threshold != nu
 
 export function ParamsPanel({ show }: { show: ("activation" | "withdrawal")[] }) {
   const { params, isPending, isError } = useNetworkParams();
-  return <LivePanel title="The rules Betanet is running" quality={params.item?.quality ?? null} proof={proofHref(params.item, params.dataset)}
+  // The enforcer reports its build's parameters when asked (GetChainInfo); no block states them,
+  // so a reading made at a block is shown as a reading, not as a fact observed in that block.
+  const quality = params.item?.quality === "observed" ? "tip_matched" : params.item?.quality ?? null;
+  return <LivePanel title="The rules Betanet is running" quality={quality} proof={proofHref(params.item, params.dataset)}
     status={{ pending: isPending, error: isError && !params.item, empty: !params.item, emptyText: "The enforcer has not reported its parameters yet." }}>
-    <p className="live-lede">These numbers come straight from the enforcer. The rule is always <strong>more than</strong> the threshold, before the proposal is older than the maximum age.</p>
+    <p className="live-lede">These numbers are the parameters the enforcer software reports for this network{params.item?.height != null ? `, last read at block ${n(params.item.height)}` : ""}; they belong to its build, not to any block. The rule is always <strong>more than</strong> the threshold, before the proposal is older than the maximum age.</p>
     <div className="stat-grid">
       {show.includes("activation") && <>
         <Stat label="New sidechain, empty slot" value={`> ${n(params.unusedThreshold)} votes`} hint={`${atLeast(params.unusedThreshold)} within ${n(params.unusedMaxAge)} blocks`}/>
@@ -140,7 +143,7 @@ export function TreasuryHistory({ fixedSlot }: { fixedSlot?: number }) {
   const noneFunded = known(observatory.data, "treasury") ? "No sidechain has a treasury output yet." : "The latest treasury readings are incomplete; the history returns with the next complete reading.";
   return <LivePanel title="A treasury, output by output" status={{ pending: observatory.isPending || (slot != null && history.isPending), error: history.isError && !rows.length, empty: fixedSlot == null ? !funded.length : !rows.length, emptyText: fixedSlot == null ? noneFunded : "No treasury output has been read for this sidechain yet." }}>
     {fixedSlot == null && <label className="picker">Sidechain <select value={slot ?? ""} onChange={e => setPicked(Number(e.target.value))}>{funded.map(s => <option key={s.slot} value={s.slot}>{s.title ?? `#${s.slot}`} (#{s.slot})</option>)}</select></label>}
-    <p className="live-lede">Every deposit or withdrawal replaces the treasury output with a new one, and the output number goes up by one. These are the outputs the monitor has read so far.</p>
+    <p className="live-lede">The first deposit creates a sidechain&apos;s treasury output, number 0. Every later deposit or withdrawal replaces it with a new one, and the output number goes up by one. These are the outputs the monitor has read so far.</p>
     <ReadingsChart label="Treasury value at each reading" gaps={gaps} yFormat={y => formatCoins(BigInt(Math.round(y * 1e8)).toString(), true)}
       points={chartReadings.map(i => {
         const c = object(object(i.data).ctip), v = sats(c.value_sats), tip = readingTip(i);
@@ -183,7 +186,7 @@ export function ProjectionNote({ p, technical = false }: { p: BundleProjection; 
     </p>
     {technical && <dl className="mini-facts">
       <dt>Votes</dt><dd>{n(p.votes)} (needs more than {n(p.threshold)})</dd>
-      <dt>Age</dt><dd>{n(p.age)} of {n(p.max_age)} blocks, read at tip {n(p.read_at_tip_height)}</dd>
+      <dt>Age</dt><dd>{n(p.age)} of {n(p.max_age)} blocks at tip {n(p.confirmed_at_tip_height ?? p.read_at_tip_height)}{p.confirmed_at_tip_height != null && p.confirmed_at_tip_height !== p.read_at_tip_height ? ` (this vote count was first read at tip ${n(p.read_at_tip_height)})` : ""}</dd>
       <dt>Pace since proposal</dt><dd>{p.rate_since_proposal != null ? `${p.rate_since_proposal.toFixed(4)} votes/block` : "unknown"}</dd>
       <dt>Pace, last ~144 blocks</dt><dd>{p.rate_recent != null ? `${p.rate_recent.toFixed(4)} votes/block` : "not enough readings"}</dd>
       <dt>Blocks to pass at pace</dt><dd>{p.blocks_to_pass_at_rate != null ? n(p.blocks_to_pass_at_rate) : "never at this pace"}</dd>
@@ -213,7 +216,7 @@ export function WithdrawalVotes({ slot, projections, technical = false }: { slot
       const treasury = object(object(object(observatory.data?.state).treasury)[String(item.slot)]);
       const m6id = typeof b.m6id === "string" ? b.m6id : undefined;
       const projection = projections?.find(p => p.m6id_txid_order === m6id);
-      return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(m6id ? onChainM6id(m6id) : "unknown")} · proposed in block ${n(height)}${item.is_current == null ? " · not confirmed in the latest complete reading" : ""}`}
+      return <VoteCard key={item.id} title={`Withdrawal from ${sidechainLabel(item.slot, names)}`} subtitle={`M6 id ${short(m6id ? onChainM6id(m6id) : "unknown")} · proposed in block ${n(height)}${item.is_current == null ? " · no complete reading of this sidechain's bundles yet" : ""}`}
         votes={votes} threshold={params.withdrawalThreshold} age={projection?.age ?? age} maxAge={params.withdrawalMaxAge} expiryNote={!projection}
         footer={<><p className="vote-note">{treasury.value_sats ? <>The treasury it would pay from holds {formatSats(treasury.value_sats, unit)}. </> : null}The amounts inside a bundle are not visible on L1 until it is paid. {m6id && <>The M6 id is shown as written in the coinbase vote message (M3), as mining pools show it; reversed, as a transaction id, it reads <span className="hash">{short(m6id)}</span>. </>}{item.evidence[0] && dataset && <Link href={`/datasets/${dataset}/events/${item.evidence[0].event_id}`}>See the evidence →</Link>}</p>
           {projection && <ProjectionNote p={projection} technical={technical}/>}

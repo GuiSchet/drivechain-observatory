@@ -43,7 +43,7 @@ function CommitmentTable({ slot }: { slot: number }) {
   </table></div>;
 }
 
-export function MiningSection({ slot, name, stats, technical }: { slot: number; name: string; stats?: SidechainStats; technical: boolean }) {
+export function MiningSection({ slot, name, stats, failed = false, technical }: { slot: number; name: string; stats?: SidechainStats; failed?: boolean; technical: boolean }) {
   const unit = useUnit();
   const [window, setWindow] = useState<(typeof WINDOWS)[number]>(24);
   const long = useSidechainStats(window === 1008 ? slot : undefined, 1008);
@@ -60,7 +60,7 @@ export function MiningSection({ slot, name, stats, technical }: { slot: number; 
     <BmmCommitments slot={slot} window={window} controls={<div className="window-picker" role="group" aria-label="Blocks shown">{WINDOWS.map(w =>
       <button key={w} type="button" aria-pressed={window === w} onClick={() => setWindow(w)}>{n(w)} blocks</button>)}</div>}/>
     <BmmBids slot={slot}/>
-    <LivePanel title="Bids for each block" status={{ pending: !shown, error: false }}
+    <LivePanel title="Bids for each block" status={{ pending: !shown, error: !shown && (failed || long.isError) }}
       footer={b ? <>{n(b.count)} bids seen on {n(b.parent_blocks)} blocks since monitoring began; median {formatSats(b.median_sats, unit)}, highest {formatSats(b.max_sats, unit)}.{b.next_block_observed ? <> The next block committed to the bid&apos;s sidechain block for {n(b.committed_next_block)} of the {n(b.next_block_observed)} bids whose next block was observed ({percent(b.committed_next_block, b.next_block_observed, 0)}). That shows which bid won, not that its fee was paid.</> : null}</> : undefined}>
       {shown && <BidChart stats={window === 24 ? { ...shown, series: shown.series.slice(0, 24) } : shown}/>}
     </LivePanel>

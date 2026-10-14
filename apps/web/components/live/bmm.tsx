@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getAuctions, getMeta } from "@/lib/api";
 import { formatSats, short, sidechainLabel, timeAgo } from "@/lib/explain";
-import { n, useBmmMetrics, useProtocolPage, useSidechainNames } from "@/lib/live";
+import { bidsKnown, n, useBmmMetrics, useProtocolPage, useSidechainNames } from "@/lib/live";
 import { useUnit } from "@/lib/unit";
 import { LivePanel } from "@/components/learn/primitives";
 import { useNow } from "./basics";
@@ -33,7 +33,7 @@ export function BmmBids({ slot }: { slot?: number }) {
     <p className="live-lede">{a ? auctionState[a.state] ?? a.state.replaceAll("_", " ") : null} {a?.observed_at && <>Sampled {timeAgo(a.observed_at, now)}.</>}</p>
     {bids.length ? <div className="table-scroll"><table className="friendly-table"><thead><tr><th>Sidechain</th><th>Bid to the miner</th><th>Side block (h*)</th><th>Bid transaction</th></tr></thead>
       <tbody>{bids.map((b, i) => <tr key={b.txid + i}><td><Link href={`/sidechains/${b.slot}`}>{sidechainLabel(b.slot, names)}</Link></td><td><strong>{formatSats(b.bid_sats, unit)}</strong></td><td className="hash">{short(b.critical_hash)}</td><td className="hash">{short(b.txid)}</td></tr>)}</tbody></table></div>
-      : a ? <p className="live-empty">No bids in this sample.</p> : null}
+      : bidsKnown(a) ? <p className="live-empty">No bids in this sample.</p> : null}
     {a?.parent_hash && <p className="live-note">Every bid names the block it builds on ({short(a.parent_hash)}); it can only be accepted in the very next block.</p>}
   </LivePanel>;
 }

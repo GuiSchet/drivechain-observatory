@@ -199,7 +199,10 @@ pub struct TreasuryStats {
     /// The latest treasury reading; null when no reading exists or the treasury is empty.
     pub value_sats: Option<String>,
     pub sequence: Option<String>,
+    /// The tip where this treasury value was first read.
     pub read_at_tip_height: Option<i32>,
+    /// The tip of the latest complete reading that still found this value.
+    pub confirmed_at_tip_height: Option<i32>,
     pub quality: Option<String>,
     /// Each deposit and paid withdrawal replaced the treasury output; oldest first.
     pub steps: Vec<TreasuryStep>,
@@ -270,8 +273,11 @@ pub struct BundleProjection {
     pub m6id_txid_order: Option<String>,
     pub proposal_height: Option<i32>,
     pub votes: Option<i64>,
-    /// The tip where this vote count was first read; `age` runs to the anchor while the reading is still current.
+    /// The tip where this vote count was first read.
     pub read_at_tip_height: Option<i32>,
+    /// The tip of the latest complete reading that still found this vote count; `age`,
+    /// `blocks_left` and the rates are measured at this tip.
+    pub confirmed_at_tip_height: Option<i32>,
     pub quality: String,
     /// Votes must exceed the threshold, so `needed` is threshold + 1 - votes.
     pub threshold: Option<i64>,
@@ -316,9 +322,25 @@ pub struct NetworkResponse {
     /// Work of the window's blocks after the first, divided by the time between the first and the last.
     pub hashrate_hps: Option<f64>,
     pub retarget: Option<RetargetEpoch>,
+    /// The same pace measured only over the window's blocks of the current epoch; set when the
+    /// window reaches back past a retarget that changed difficulty, so the window figures mix two
+    /// difficulties and describe neither.
+    pub current_epoch: Option<EpochPace>,
     /// Newest first.
     pub series: Vec<NetworkBlock>,
     pub notes: Vec<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct EpochPace {
+    /// The epoch's first block.
+    pub from_height: i32,
+    /// Blocks of the window inside the epoch.
+    pub blocks: u32,
+    /// Difficulty of the epoch divided by the difficulty before it.
+    pub difficulty_change: Option<f64>,
+    pub interval_mean_seconds: Option<f64>,
+    pub interval_median_seconds: Option<f64>,
+    pub hashrate_hps: Option<f64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct NetworkBlock {

@@ -38,7 +38,7 @@ export function TreasuryDiagram() {
   return <figure className="diagram">
     <svg viewBox="0 0 640 190" role="img" aria-labelledby="td-title td-desc">
       <title id="td-title">A deposit replaces the treasury output</title>
-      <desc id="td-desc">A deposit transaction spends the old treasury output plus the user's coins and creates one new treasury output holding the sum.</desc>
+      <desc id="td-desc">A deposit transaction spends the old treasury output plus the user's coins and creates one new treasury output holding the sum. A first deposit has no old treasury to spend.</desc>
       <defs><marker id="td-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="currentColor"/></marker></defs>
       <g className="td-box"><rect x="20" y="24" width="170" height="56" rx="10"/><text x="105" y="48" textAnchor="middle" className="dd-strong">Old treasury</text><text x="105" y="68" textAnchor="middle" className="dd-small">100 coins</text></g>
       <g className="td-user"><rect x="20" y="110" width="170" height="56" rx="10"/><text x="105" y="134" textAnchor="middle" className="dd-strong">Your coins</text><text x="105" y="154" textAnchor="middle" className="dd-small">+ 5 coins</text></g>
@@ -48,7 +48,7 @@ export function TreasuryDiagram() {
       <path className="td-flow" d="M424 95 H 450" markerEnd="url(#td-arrow)"/>
       <g className="td-box td-new"><rect x="454" y="66" width="170" height="58" rx="10"/><text x="539" y="91" textAnchor="middle" className="dd-strong">New treasury</text><text x="539" y="111" textAnchor="middle" className="dd-small">105 coins</text></g>
     </svg>
-    <figcaption>Illustrative amounts. There is always exactly one treasury output per sidechain.</figcaption>
+    <figcaption>Illustrative amounts. A sidechain has at most one treasury output: none until its first deposit, then exactly one.</figcaption>
   </figure>;
 }
 

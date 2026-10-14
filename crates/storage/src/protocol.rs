@@ -485,51 +485,11 @@ async fn list_bounded(
     if history {
         let state = current_state(&mut tx, &c).await?;
         for i in &mut items {
-            if i.hash.is_none() {
-                // Snapshot membership and exact block state are unknown.
-                i.is_current = None;
-                continue;
-            }
-            if i.membership != "selected" {
+            if i.hash.is_some() && i.membership != "selected" {
                 i.is_current = Some(false);
                 continue;
             }
-            if let Some(state) = &state {
-                let id = i.entity_id.as_deref().unwrap_or_default();
-                let slot = i.slot.and_then(|s| u8::try_from(s).ok());
-                i.is_current = match i.kind.as_str() {
-                    "proposal" => {
-                        if state.proposals.values().any(|p| p.id == id) {
-                            Some(true)
-                        } else if state.proposals_complete || i.data["status"] != "pending" {
-                            Some(false)
-                        } else {
-                            None
-                        }
-                    }
-                    "bundle" => {
-                        if state.bundles.values().any(|p| p.attempt_id == id) {
-                            Some(true)
-                        } else if slot.is_some_and(|s| state.bundle_complete.contains(&s))
-                            || i.data["status"] != "pending"
-                        {
-                            Some(false)
-                        } else {
-                            None
-                        }
-                    }
-                    "instance" => {
-                        if state.active.values().any(|a| a.instance_id() == id) {
-                            Some(true)
-                        } else if state.active_complete || i.data["status"] != "active" {
-                            Some(false)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-            }
+            i.is_current = state.as_ref().and_then(|state| current_of(state, i));
         }
     }
     if resource == "sidechain-instances" {
@@ -590,6 +550,54 @@ fn after_keys(resource: &str, q: &ProtocolQuery, i: &ProtocolItem) -> Vec<String
 }
 /// Every item of a resource as of one context, read in bounded pages inside
 /// the caller's snapshot. Returns at most `cap` items and whether more exist.
+/// Whether an entity is established in the latest complete readings; null if unknown.
+/// A reading with no block (a vote or treasury read) is matched by its entity alone,
+/// since its own status says nothing about the anchor.
+pub(super) fn current_of(
+    state: &pulse_source::observations::State,
+    i: &ProtocolItem,
+) -> Option<bool> {
+    let id = i.entity_id.as_deref().unwrap_or_default();
+    let slot = i.slot.and_then(|s| u8::try_from(s).ok());
+    let block_fact = i.hash.is_some();
+    let (found, complete, status_says_ended) = match i.kind.as_str() {
+        "proposal" => (
+            state.proposals.values().any(|p| p.id == id),
+            state.proposals_complete,
+            i.data["status"] != "pending",
+        ),
+        "bundle" => (
+            state.bundles.values().any(|p| p.attempt_id == id),
+            slot.is_some_and(|s| state.bundle_complete.contains(&s)),
+            i.data["status"] != "pending",
+        ),
+        "instance" => (
+            state.active.values().any(|a| a.instance_id() == id),
+            state.active_complete,
+            i.data["status"] != "active",
+        ),
+        _ => return None,
+    };
+    if found {
+        Some(true)
+    } else if complete || (block_fact && status_says_ended) {
+        Some(false)
+    } else {
+        None
+    }
+}
+/// The tip of the latest complete reading behind `key` (for example `ctip:9`), if any.
+pub(super) fn reading_tip(state: &pulse_source::observations::State, key: &str) -> Option<i64> {
+    let tip = &state.observation_windows.get(key)?["reference_tip_height"];
+    tip.as_i64().or_else(|| tip.as_str()?.parse().ok())
+}
+/// A 64-hex id with its bytes reversed: M6 ids are stored in transaction-id order
+/// but written reversed in the M3 coinbase message, the order the site shows.
+fn reversed_id(text: &str) -> Option<String> {
+    let mut bytes = (text.len() == 64).then(|| hex::decode(text).ok())??;
+    bytes.reverse();
+    Some(hex::encode(bytes))
+}
 pub(super) async fn collect(
     tx: &mut Transaction<'_, Postgres>,
     resource: &str,
@@ -769,14 +777,7 @@ async fn history_page(
     if let Some(search) = q.q.as_deref().filter(|s| !s.is_empty()) {
         // An M6 id is stored in transaction-id order but written reversed in
         // the M3 coinbase message, the order pools and the enforcer show.
-        let onchain = (search.len() == 64)
-            .then(|| hex::decode(search).ok())
-            .flatten()
-            .map(|mut bytes| {
-                bytes.reverse();
-                hex::encode(bytes)
-            })
-            .unwrap_or_default();
+        let onchain = reversed_id(search).unwrap_or_default();
         qb.push(" AND (p.entity_key=").push_bind(search).push(" OR coalesce(p.data->>'m6id',p.data#>>'{bundle,m6id}',p.data#>>'{proposal,description_hash}',p.data#>>'{sidechain,description_hash}')=").push_bind(search).push(" OR coalesce(p.data->>'m6id',p.data#>>'{bundle,m6id}')=").push_bind(onchain).push(" OR coalesce(p.data#>>'{outpoint,txid}',p.data#>>'{ctip,txid}',p.data#>>'{transition,txid}')=").push_bind(search).push(")");
     }
     if latest {
@@ -907,9 +908,12 @@ async fn facts_page(
         "coalesce(lo.observed_at,e.observed_at)",
     );
     if let Some(search) = q.q.as_deref().filter(|s| !s.is_empty()) {
-        qb.push(" AND (f.search_terms @> ARRAY[")
-            .push_bind(search)
-            .push("]::text[] OR f.hash=")
+        // An M6 id may be pasted in either byte order; see `reversed_id`.
+        let mut terms = vec![search.to_owned()];
+        terms.extend(reversed_id(search));
+        qb.push(" AND (f.search_terms && ")
+            .push_bind(terms)
+            .push("::text[] OR f.hash=")
             .push_bind(search)
             .push(" OR f.entity_key=")
             .push_bind(search);
@@ -998,7 +1002,7 @@ async fn events_page(
         qb.push(format!(" AND {time}<=")).push_bind(t);
     }
     if let Some(search) = q.q.as_deref().filter(|s| !s.is_empty()) {
-        qb.push(" AND (encode(e.block_hash,'hex')=").push_bind(search).push(" OR EXISTS(SELECT 1 FROM projection.protocol_facts f WHERE f.dataset_id=e.dataset_id AND f.generation=").push_bind(c.meta.projection_generation).push(" AND f.event_id=e.source_event_id AND f.search_terms @> ARRAY[").push_bind(search).push("]::text[])");
+        qb.push(" AND (encode(e.block_hash,'hex')=").push_bind(search).push(" OR EXISTS(SELECT 1 FROM projection.protocol_facts f WHERE f.dataset_id=e.dataset_id AND f.generation=").push_bind(c.meta.projection_generation).push(" AND f.event_id=e.source_event_id AND f.search_terms && ").push_bind([search.to_owned()].into_iter().chain(reversed_id(search)).collect::<Vec<_>>()).push("::text[])");
         if let Ok(id) = search.parse::<i64>() {
             qb.push(" OR e.source_event_id=")
                 .push_bind(id)
@@ -1084,4 +1088,19 @@ async fn membership(
         .into();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reversed_id;
+    #[test]
+    fn m6_ids_reverse_only_when_complete() {
+        // Thunder's pending bundle: M3 (shown) order and transaction-id (stored) order.
+        let shown = "aa769fec72ddc7e59fb6dc480d62ba19236804598d053b6c50522cae30b0ced4";
+        let stored = "d4ceb030ae2c52506c3b058d5904682319ba620d48dcb69fe5c7dd72ec9f76aa";
+        assert_eq!(reversed_id(shown).as_deref(), Some(stored));
+        assert_eq!(reversed_id(stored).as_deref(), Some(shown));
+        assert_eq!(reversed_id("aa76"), None);
+        assert_eq!(reversed_id(&"z".repeat(64)), None);
+    }
 }

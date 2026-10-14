@@ -11,19 +11,31 @@ export type HealthLevel = "live" | "delayed" | "degraded" | "offline" | "connect
 
 // Node and enforcer tips differ for a moment after every block; only a split that lasts is reported.
 const SPLIT_POLLS = 3;
+// The branch is provisional for a moment after every block too (header not yet read, or the
+// block still being processed); only one that lasts this long is reported.
+const PROVISIONAL_POLLS = 6;
+const provisionalText: Record<string, string> = {
+  missing_parent: "An earlier block of the chain is missing, so recent data is not certified.",
+  tip_header_missing: "The newest block was seen but its header has not arrived, so recent data is not certified yet.",
+};
 
 /** One verdict on the data on screen, from the browser's live connection and the API's own sync status. */
 export function useHealth() {
   const status = useStatus(), stream = useStreamState(), s = status.data;
-  const [splitPolls, setSplitPolls] = useState(0);
-  const joint = s?.branch.joint_source_status;
+  const [splitPolls, setSplitPolls] = useState(0), [provisionalPolls, setProvisionalPolls] = useState(0);
+  const joint = s?.branch.joint_source_status, branchStatus = s?.branch.status;
   useEffect(() => { if (joint) setSplitPolls(p => joint === "different_tips" ? p + 1 : 0); }, [joint, status.dataUpdatedAt]);
+  useEffect(() => { if (branchStatus) setProvisionalPolls(p => branchStatus === "provisional" ? p + 1 : 0); }, [branchStatus, status.dataUpdatedAt]);
 
   const degraded: string[] = [], delayed: string[] = [];
   if (s) {
     if (s.sync_mode === "incompatible") degraded.push("The monitor's data uses a format this site does not support, so synchronization has stopped.");
     if (s.branch.status === "ambiguous") degraded.push("The chain branch is ambiguous, so recent data is not certified.");
     if (splitPolls >= SPLIT_POLLS) degraded.push("The node and the enforcer report different chain tips.");
+    if (s.branch.status === "provisional" && provisionalPolls >= PROVISIONAL_POLLS) {
+      const text = provisionalText[s.branch.basis] ?? "The chain branch has not been confirmed for a while, so recent data is not certified yet.";
+      (s.branch.basis === "missing_parent" ? degraded : delayed).push(text);
+    }
     // A stale sync is reported by the API as interrupted and unreachable too; one sentence covers all three.
     if (s.sync_stale || s.sync_mode === "interrupted") delayed.push("Synchronization has stopped or fallen behind, so the data shown is not advancing.");
     else if (!s.source_reachable) delayed.push("The monitor's sources are unreachable or have not answered recently.");
