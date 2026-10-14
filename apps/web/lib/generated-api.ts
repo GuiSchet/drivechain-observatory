@@ -1036,6 +1036,12 @@ export interface components {
             blocks_to_pass_at_rate?: number | null;
             /** @description At most one vote per block: false when even every remaining block cannot reach the threshold. */
             can_still_pass?: boolean | null;
+            /**
+             * Format: int32
+             * @description The tip of the latest complete reading that still found this vote count; `age`,
+             *     `blocks_left` and the rates are measured at this tip.
+             */
+            confirmed_at_tip_height?: number | null;
             /** Format: int64 */
             expires_after_height?: number | null;
             m6id_onchain?: string | null;
@@ -1060,7 +1066,7 @@ export interface components {
             rate_since_proposal?: number | null;
             /**
              * Format: int32
-             * @description The tip where this vote count was first read; `age` runs to the anchor while the reading is still current.
+             * @description The tip where this vote count was first read.
              */
             read_at_tip_height?: number | null;
             /**
@@ -1151,6 +1157,29 @@ export interface components {
             max_sats?: string | null;
             median_sats?: string | null;
             total_sats: string;
+        };
+        EpochPace: {
+            /**
+             * Format: int32
+             * @description Blocks of the window inside the epoch.
+             */
+            blocks: number;
+            /**
+             * Format: double
+             * @description Difficulty of the epoch divided by the difficulty before it.
+             */
+            difficulty_change?: number | null;
+            /**
+             * Format: int32
+             * @description The epoch's first block.
+             */
+            from_height: number;
+            /** Format: double */
+            hashrate_hps?: number | null;
+            /** Format: double */
+            interval_mean_seconds?: number | null;
+            /** Format: double */
+            interval_median_seconds?: number | null;
         };
         EvidenceOccurrence: {
             capture_method: string;
@@ -1249,6 +1278,7 @@ export interface components {
              */
             blocks: number;
             branch: components["schemas"]["BranchState"];
+            current_epoch?: null | components["schemas"]["EpochPace"];
             /**
              * Format: double
              * @description Work of the window's blocks after the first, divided by the time between the first and the last.
@@ -1568,8 +1598,16 @@ export interface components {
         /** @enum {string} */
         SyncMode: "bootstrap" | "catching_up" | "following" | "interrupted" | "incompatible";
         TreasuryStats: {
+            /**
+             * Format: int32
+             * @description The tip of the latest complete reading that still found this value.
+             */
+            confirmed_at_tip_height?: number | null;
             quality?: string | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description The tip where this treasury value was first read.
+             */
             read_at_tip_height?: number | null;
             sequence?: string | null;
             /** @description Each deposit and paid withdrawal replaced the treasury output; oldest first. */

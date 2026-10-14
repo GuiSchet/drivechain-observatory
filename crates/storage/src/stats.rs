@@ -76,7 +76,7 @@ pub async fn sidechain(
         .await?;
     let r = records(&mut tx, &c, slot, None, None).await?;
     // The latest reading of each bundle, to tell which are still pending.
-    let (latest_bundles, bundles_cut) = collect(
+    let (mut latest_bundles, bundles_cut) = collect(
         &mut tx,
         "withdrawal-bundles",
         &ProtocolQuery {
@@ -87,7 +87,19 @@ pub async fn sidechain(
         1_000,
     )
     .await?;
+    let state = protocol::current_state(&mut tx, &c).await?;
     tx.commit().await?;
+    if let Some(state) = &state {
+        for i in &mut latest_bundles {
+            i.is_current = protocol::current_of(state, i);
+        }
+    }
+    // The tip of the latest complete reading that still holds a value, per family.
+    let confirmed = |key: &str| {
+        state
+            .as_ref()
+            .and_then(|s| protocol::reading_tip(s, &format!("{key}:{slot}")))
+    };
     let truncated = [
         r.instances.1,
         r.deposits.1,
@@ -116,7 +128,18 @@ pub async fn sidechain(
         .and_then(|h| i32::try_from(h).ok());
 
     let deposits = deposit_stats(&r.deposits.0, generated_at);
-    let treasury = treasury_stats(&r.treasury.0, &r.deposits.0, &r.withdrawals.0);
+    let treasury_current = state.as_ref().and_then(|s| {
+        let ctip = s.treasury.get(&u8::try_from(slot).ok()?)?.as_ref()?;
+        // Protobuf omits a zero sequence number.
+        Some(ctip.sequence_number.unwrap_or(0))
+    });
+    let treasury = treasury_stats(
+        &r.treasury.0,
+        &r.deposits.0,
+        &r.withdrawals.0,
+        treasury_current.and(confirmed("ctip")),
+        treasury_current,
+    );
     let committed = commitments_by_height(&r.commitments.0);
     let bmm = bmm_stats(
         &committed,
@@ -124,7 +147,12 @@ pub async fn sidechain(
         activation_height.max(Some(d.activation_height)),
     );
     let bids = bid_stats(&r.bids.0);
-    let withdrawals = withdrawal_stats(&latest_bundles, &r.withdrawals.0, &r.constants, anchor);
+    let withdrawals = withdrawal_stats(
+        &latest_bundles,
+        &r.withdrawals.0,
+        &r.constants,
+        confirmed("withdrawal_bundle_proposals"),
+    );
     let series = series(&committed, &r.commitments.0, &r.bids.0, anchor, window);
 
     let mut notes = vec![
@@ -200,8 +228,15 @@ fn treasury_stats(
     readings: &[ProtocolItem],
     deposits: &[ProtocolItem],
     withdrawals: &[ProtocolItem],
+    confirmed_tip: Option<i64>,
+    current_sequence: Option<u64>,
 ) -> TreasuryStats {
     let latest = readings.iter().max_by_key(|i| (tip_of(i), i.observed_at));
+    let read_at = latest.and_then(tip_of);
+    // The latest complete reading confirms this value only if it read the same output.
+    let still_read = latest
+        .and_then(|i| sats(&i.data["ctip"]["sequence_number"]))
+        .is_some_and(|s| current_sequence == Some(s));
     let read: HashMap<u64, u64> = readings
         .iter()
         .filter_map(|i| {
@@ -282,7 +317,12 @@ fn treasury_stats(
         value_sats: latest.and_then(|i| i.data["ctip"]["value_sats"].as_str().map(str::to_owned)),
         sequence: latest
             .and_then(|i| sats(&i.data["ctip"]["sequence_number"]).map(|s| s.to_string())),
-        read_at_tip_height: latest.and_then(tip_of).and_then(|h| i32::try_from(h).ok()),
+        read_at_tip_height: read_at.and_then(|h| i32::try_from(h).ok()),
+        confirmed_at_tip_height: still_read
+            .then(|| confirmed_tip.max(read_at))
+            .flatten()
+            .or(read_at)
+            .and_then(|h| i32::try_from(h).ok()),
         quality: latest.map(|i| i.quality.clone()),
         steps,
     }
@@ -424,7 +464,7 @@ fn withdrawal_stats(
     latest: &[ProtocolItem],
     changes: &[ProtocolItem],
     constants: &Value,
-    anchor: Option<i32>,
+    confirmed_tip: Option<i64>,
 ) -> WithdrawalStats {
     let threshold = int(&constants["withdrawal_bundle_inclusion_threshold"]);
     let max_age = int(&constants["withdrawal_bundle_max_age"]);
@@ -441,10 +481,12 @@ fn withdrawal_stats(
             let b = &i.data["bundle"];
             let votes = int(&b["vote_count"]);
             let proposal = int(&b["proposal_height"]);
-            // A reading keeps the tip where its value was first seen; one still current at the anchor holds there too.
+            // A reading keeps the tip where its value was first seen. While the latest complete
+            // reading still lists the bundle, its value held at that reading's tip too; the tip
+            // is not extrapolated past it, since votes may change in blocks not yet read.
             let read_at = tip_of(i);
             let tip = if i.is_current == Some(true) {
-                anchor.map(i64::from).max(read_at)
+                confirmed_tip.max(read_at)
             } else {
                 read_at
             };
@@ -486,6 +528,7 @@ fn withdrawal_stats(
                 proposal_height: proposal.and_then(|h| i32::try_from(h).ok()),
                 votes,
                 read_at_tip_height: read_at.and_then(|h| i32::try_from(h).ok()),
+                confirmed_at_tip_height: tip.and_then(|h| i32::try_from(h).ok()),
                 quality: i.quality.clone(),
                 threshold,
                 needed,
@@ -574,6 +617,64 @@ const TARGET_SPACING: i64 = 600;
 fn difficulty(work: &str) -> Option<f64> {
     let w: f64 = work.parse().ok()?;
     Some(w * 65535.0 / 2f64.powi(48))
+}
+
+/// Mean and median interval and estimated hashrate of blocks, newest first. The oldest
+/// block only supplies the time the next one's interval starts from.
+fn pace(series: &[NetworkBlock]) -> (Option<f64>, Option<f64>, Option<f64>) {
+    let mut intervals: Vec<i64> = series.iter().filter_map(|b| b.interval_seconds).collect();
+    let mean = (!intervals.is_empty())
+        .then(|| intervals.iter().sum::<i64>() as f64 / intervals.len() as f64);
+    intervals.sort_unstable();
+    let median = match intervals.len() {
+        0 => None,
+        n if n % 2 == 1 => Some(intervals[n / 2] as f64),
+        n => Some((intervals[n / 2 - 1] + intervals[n / 2]) as f64 / 2.0),
+    };
+    let hashrate = match (series.first(), series.last()) {
+        (Some(newest), Some(oldest)) if newest.height > oldest.height => {
+            let seconds = newest
+                .block_time
+                .zip(oldest.block_time)
+                .map(|(a, b)| (a - b).num_seconds());
+            let work: f64 = series[..series.len() - 1]
+                .iter()
+                .filter_map(|b| b.block_work.as_deref()?.parse::<f64>().ok())
+                .sum();
+            seconds.filter(|s| *s > 0).map(|s| work / s as f64)
+        }
+        _ => None,
+    };
+    (mean, median, hashrate)
+}
+
+/// The pace of the window's current-epoch blocks, when the window also holds blocks of an
+/// earlier difficulty. The block before the epoch bounds the first interval and the hashrate span.
+fn epoch_pace(series: &[NetworkBlock], epoch_start: i32) -> Option<EpochPace> {
+    let inside = series
+        .iter()
+        .take_while(|b| b.height >= epoch_start)
+        .count();
+    let before = series.get(inside)?;
+    let work = |b: &NetworkBlock| b.block_work.as_deref()?.parse::<f64>().ok();
+    let change = work(&series[0])
+        .zip(work(before))
+        .map(|(now, then)| now / then);
+    if inside == 0 || change.is_some_and(|c| (c - 1.0).abs() < 1e-9) {
+        return None;
+    }
+    let mut epoch: Vec<NetworkBlock> = series[..=inside].to_vec();
+    // The interval into the block before the epoch belongs to the earlier difficulty.
+    epoch[inside].interval_seconds = None;
+    let (interval_mean_seconds, interval_median_seconds, hashrate_hps) = pace(&epoch);
+    Some(EpochPace {
+        from_height: epoch_start,
+        blocks: inside as u32,
+        difficulty_change: change,
+        interval_mean_seconds,
+        interval_median_seconds,
+        hashrate_hps,
+    })
 }
 
 pub async fn network(pool: &PgPool, q: NetworkQuery) -> Result<NetworkResponse, StorageError> {
@@ -700,29 +801,10 @@ pub async fn network(pool: &PgPool, q: NetworkQuery) -> Result<NetworkResponse, 
     tx.commit().await?;
     // The extra block only supplies the first interval.
     series.truncate(window as usize);
-    let mut intervals: Vec<i64> = series.iter().filter_map(|b| b.interval_seconds).collect();
-    let interval_mean_seconds = (!intervals.is_empty())
-        .then(|| intervals.iter().sum::<i64>() as f64 / intervals.len() as f64);
-    intervals.sort_unstable();
-    let interval_median_seconds = match intervals.len() {
-        0 => None,
-        n if n % 2 == 1 => Some(intervals[n / 2] as f64),
-        n => Some((intervals[n / 2 - 1] + intervals[n / 2]) as f64 / 2.0),
-    };
-    let hashrate_hps = match (series.first(), series.last()) {
-        (Some(newest), Some(oldest)) if newest.height > oldest.height => {
-            let seconds = newest
-                .block_time
-                .zip(oldest.block_time)
-                .map(|(a, b)| (a - b).num_seconds());
-            let work: f64 = series[..series.len() - 1]
-                .iter()
-                .filter_map(|b| b.block_work.as_deref()?.parse::<f64>().ok())
-                .sum();
-            seconds.filter(|s| *s > 0).map(|s| work / s as f64)
-        }
-        _ => None,
-    };
+    let (interval_mean_seconds, interval_median_seconds, hashrate_hps) = pace(&series);
+    let current_epoch = retarget
+        .as_ref()
+        .and_then(|r| epoch_pace(&series, r.epoch_start_height));
     Ok(NetworkResponse {
         meta,
         branch,
@@ -733,6 +815,7 @@ pub async fn network(pool: &PgPool, q: NetworkQuery) -> Result<NetworkResponse, 
         interval_median_seconds,
         hashrate_hps,
         retarget,
+        current_epoch,
         series,
         notes: vec![
             "Block times are set by miners and need not increase, so intervals can be negative and the hashrate is an estimate.".to_owned(),
@@ -753,6 +836,148 @@ mod tests {
         assert_eq!(median(vec![4, 1, 3, 2]), Some(2));
         assert_eq!(median(vec![1, 2]), Some(1));
         assert_eq!(median(vec![3, 5]), Some(4));
+    }
+    /// Thunder's pending bundle at the audited anchor 973,751: its 660 votes were first read
+    /// at tip 973,749 and the latest complete reading, at 973,751, still found them.
+    fn thunder_bundle(is_current: Option<bool>) -> ProtocolItem {
+        let mut item: ProtocolItem = serde_json::from_value(serde_json::json!({
+            "id": "-1:00000000000000229642:0:0",
+            "entity_id": "9:d4ceb030ae2c52506c3b058d5904682319ba620d48dcb69fe5c7dd72ec9f76aa:observed:970438",
+            "kind": "bundle", "slot": 9, "hash": null, "height": null,
+            "observed_at": null, "first_observed_at": null, "block_time": null,
+            "quality": "tip_matched", "membership": "not_applicable", "is_current": null,
+            "evidence": [], "issue": null,
+            "data": {
+                "bundle": {"m6id": "d4ceb030ae2c52506c3b058d5904682319ba620d48dcb69fe5c7dd72ec9f76aa", "proposal_height": 970438, "vote_count": 660},
+                "observation_window": {"reference_tip_height": 973749}
+            }
+        }))
+        .unwrap();
+        item.is_current = is_current;
+        item
+    }
+    fn betanet_constants() -> Value {
+        serde_json::json!({"withdrawal_bundle_inclusion_threshold": 13150, "withdrawal_bundle_max_age": 26300})
+    }
+    #[test]
+    fn current_bundle_is_measured_at_its_latest_confirmation() {
+        let stats = withdrawal_stats(
+            &[thunder_bundle(Some(true))],
+            &[],
+            &betanet_constants(),
+            Some(973_751),
+        );
+        let b = &stats.pending[0];
+        assert_eq!(b.read_at_tip_height, Some(973_749));
+        assert_eq!(b.confirmed_at_tip_height, Some(973_751));
+        assert_eq!(b.age, Some(3_313));
+        assert_eq!(b.blocks_left, Some(22_987));
+        assert_eq!(b.needed, Some(12_491));
+        assert_eq!(b.expires_after_height, Some(996_738));
+    }
+    #[test]
+    fn unconfirmed_bundle_stays_at_its_reading() {
+        for current in [None, Some(false)] {
+            let b = &withdrawal_stats(
+                &[thunder_bundle(current)],
+                &[],
+                &betanet_constants(),
+                Some(973_751),
+            )
+            .pending;
+            if current == Some(false) {
+                assert!(b.is_empty());
+                continue;
+            }
+            assert_eq!(b[0].age, Some(3_311));
+            assert_eq!(b[0].confirmed_at_tip_height, Some(973_749));
+        }
+    }
+    #[test]
+    fn hashless_reading_is_current_while_the_state_lists_it() {
+        let state: pulse_source::observations::State = serde_json::from_value(serde_json::json!({
+            "semantics_supported": false, "active_complete": true, "proposals_complete": true,
+            "active": {}, "proposals": {}, "treasury": {}, "bundle_complete": [9],
+            "observation_windows": {"withdrawal_bundle_proposals:9": {"reference_tip_height": 973751}},
+            "bundles": {"9:d4ceb030ae2c52506c3b058d5904682319ba620d48dcb69fe5c7dd72ec9f76aa": {
+                "attempt_id": "9:d4ceb030ae2c52506c3b058d5904682319ba620d48dcb69fe5c7dd72ec9f76aa:observed:970438",
+                "bundle": {"m6id": "d4ceb030ae2c52506c3b058d5904682319ba620d48dcb69fe5c7dd72ec9f76aa", "proposal_height": 970438, "vote_count": 660},
+                "evidence": []
+            }}
+        }))
+        .unwrap();
+        assert_eq!(
+            protocol::current_of(&state, &thunder_bundle(None)),
+            Some(true)
+        );
+        assert_eq!(
+            protocol::reading_tip(&state, "withdrawal_bundle_proposals:9"),
+            Some(973_751)
+        );
+        let mut gone = thunder_bundle(None);
+        gone.entity_id = Some("9:00:observed:1".into());
+        assert_eq!(protocol::current_of(&state, &gone), Some(false));
+        let mut unread = gone.clone();
+        unread.slot = Some(4);
+        assert_eq!(protocol::current_of(&state, &unread), None);
+    }
+    /// Blocks newest first, `spacing` seconds apart, with Betanet's work before and after the
+    /// ×4 retarget at 973,728.
+    fn blocks(top: i32, count: i32, spacing: &dyn Fn(i32) -> i64) -> Vec<NetworkBlock> {
+        let mut time = DateTime::<Utc>::from_timestamp(1_800_000_000, 0).unwrap();
+        (0..count)
+            .map(|k| {
+                let height = top - k;
+                let gap = spacing(height);
+                let b = NetworkBlock {
+                    height,
+                    hash: format!("{height:064x}"),
+                    block_time: Some(time),
+                    chain_work: None,
+                    block_work: Some(
+                        if height >= 973_728 {
+                            "45858218460663607040"
+                        } else {
+                            "11464554615165901760"
+                        }
+                        .into(),
+                    ),
+                    difficulty: None,
+                    interval_seconds: Some(gap),
+                    bids: None,
+                    bid_slots: None,
+                    bid_total_sats: None,
+                    top_bid_sats: None,
+                };
+                time -= chrono::Duration::seconds(gap);
+                b
+            })
+            .collect()
+    }
+    #[test]
+    fn a_window_across_a_retarget_reports_the_current_epoch_apart() {
+        // 24 blocks of the new epoch every 4,800 s after 120 blocks every 240 s.
+        let series = blocks(973_751, 144, &|h| if h >= 973_728 { 4_800 } else { 240 });
+        let (mean, _, hashrate) = pace(&series);
+        let epoch = epoch_pace(&series, 973_728).expect("the window crosses the retarget");
+        assert_eq!(epoch.blocks, 24);
+        assert_eq!(epoch.difficulty_change, Some(4.0));
+        assert_eq!(epoch.interval_mean_seconds, Some(4_800.0));
+        assert_eq!(epoch.interval_median_seconds, Some(4_800.0));
+        let expected = 45_858_218_460_663_607_040.0 / 4_800.0;
+        assert!((epoch.hashrate_hps.unwrap() / expected - 1.0).abs() < 1e-12);
+        // The whole window looks several times faster than the epoch it ends in.
+        assert!(mean.unwrap() < 1_200.0 && hashrate.unwrap() > expected);
+    }
+    #[test]
+    fn a_window_inside_one_difficulty_needs_no_epoch_figures() {
+        let series = blocks(973_751, 20, &|_| 600);
+        assert!(epoch_pace(&series, 973_728).is_none());
+        let mut same = blocks(973_751, 40, &|_| 600);
+        for b in &mut same {
+            b.block_work = Some("45858218460663607040".into());
+        }
+        assert!(epoch_pace(&same, 973_728).is_none());
     }
     #[test]
     fn difficulty_matches_header_targets() {
