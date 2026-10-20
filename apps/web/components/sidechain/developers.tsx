@@ -1,10 +1,11 @@
 "use client";
-import { apiBaseUrl } from "@/lib/api";
+import { useApiBase } from "@/components/providers";
 import { CopyText, LivePanel } from "@/components/learn/primitives";
 import { SidechainDownload } from "@/components/live/trust";
 
 /** The same data from the command line: the endpoints behind this page, ready to copy. */
 export function DevelopersSection({ slot, name, technical }: { slot: number; name: string; technical: boolean }) {
+  const apiBaseUrl = useApiBase();
   const lines: [string, string][] = [
     ["Everything, as a ZIP of CSV files", `curl -OJ ${apiBaseUrl}/api/v1/sidechains/${slot}/dataset`],
     ["The figures at the top of this page", `curl ${apiBaseUrl}/api/v1/sidechains/${slot}/stats`],

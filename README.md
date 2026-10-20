@@ -80,6 +80,13 @@ For interactive development, start the two databases using `compose.dev.yaml`,
 run migrations with the admin role, run `pulse-sync` with the reader/sync roles,
 then start `pulse-api` with the API role. Start the web app with
 `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 npm --prefix apps/web run dev`.
+
+Each network has its own Observatory backend (database, sync and API). To show
+several networks, set `NEXT_PUBLIC_NETWORKS` to a JSON list of
+`{"id", "label", "apiBaseUrl"}` and optionally `NEXT_PUBLIC_DEFAULT_NETWORK`
+(see `apps/web/.env.example`). The header then shows a selector; the choice is
+kept in a cookie, and `?network=<id>` in any URL selects a network and remembers
+it. Dataset pages find the network that holds their dataset by themselves.
 See [deploy/README.md](deploy/README.md) for exact environment and upgrade rules.
 
 ## Implemented HTTP surface

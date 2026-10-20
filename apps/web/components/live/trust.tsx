@@ -1,7 +1,8 @@
 "use client";
 import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { apiBaseUrl, getCoverage, getMeta } from "@/lib/api";
+import { getCoverage, getMeta } from "@/lib/api";
+import { useApiBase } from "@/components/providers";
 import { object } from "@/lib/protocol";
 import { short, timeAgo } from "@/lib/explain";
 import { activeSidechains, n, useObservatory, useProtocolPage, useStatus } from "@/lib/live";
@@ -84,11 +85,12 @@ const datasetFiles: [string, string][] = [
   ["manifest.json", "Row counts, the SHA-256 of each file, what every column means, and the limits of the data."],
 ];
 /** The address of one sidechain's complete dataset. */
-export function datasetHref(slot: number, format: "zip" | "json" = "zip"): string {
+function datasetHref(apiBaseUrl: string, slot: number, format: "zip" | "json" = "zip"): string {
   return `${apiBaseUrl}/api/v1/sidechains/${slot}/dataset${format === "json" ? "?format=json" : ""}`;
 }
 function DatasetLinks({ slot, label }: { slot: number; label: string }) {
-  return <li><span>{label}</span><a href={datasetHref(slot)}>ZIP of CSV</a><a href={datasetHref(slot, "json")}>JSON</a></li>;
+  const apiBaseUrl = useApiBase();
+  return <li><span>{label}</span><a href={datasetHref(apiBaseUrl, slot)}>ZIP of CSV</a><a href={datasetHref(apiBaseUrl, slot, "json")}>JSON</a></li>;
 }
 function DatasetContents() {
   return <GoDeeper summary="what is in the download">
@@ -105,14 +107,14 @@ export function SidechainDownload({ slot, name }: { slot: number; name: string }
   </LivePanel>;
 }
 export function Downloads() {
-  const sidechains = activeSidechains(useObservatory().data);
+  const sidechains = activeSidechains(useObservatory().data), apiBaseUrl = useApiBase();
   const [slot, setSlot] = useState<number>();
   const chosen = sidechains.find(s => s.slot === slot) ?? sidechains[0];
   return <LivePanel title="Take the data with you">
     <p className="live-lede">Download everything the Observatory has recorded for one sidechain, from one moment of the data. Block records (deposits, withdrawal outcomes, merged-mining commitments) start at activation; readings (treasury values, vote counts, bids) start when the monitor began reading them, and gaps are listed in the coverage report:</p>
     {chosen && <ul className="download-list">
       <li><span className="picker"><label htmlFor="dataset-slot">Sidechain </label><select id="dataset-slot" value={chosen.slot} onChange={e => setSlot(Number(e.target.value))}>{sidechains.map(s => <option key={s.slot} value={s.slot}>#{s.slot} {s.title ?? "Unnamed"}</option>)}</select></span>
-        <a href={datasetHref(chosen.slot)}>ZIP of CSV</a><a href={datasetHref(chosen.slot, "json")}>JSON</a></li>
+        <a href={datasetHref(apiBaseUrl, chosen.slot)}>ZIP of CSV</a><a href={datasetHref(apiBaseUrl, chosen.slot, "json")}>JSON</a></li>
     </ul>}
     <DatasetContents/>
     <p className="live-lede">Or download one list across all sidechains, up to 10,000 records per file. The file says if it was cut short; the longest lists already are, so use the sidechain downloads for everything recorded.</p>

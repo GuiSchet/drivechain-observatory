@@ -1,8 +1,9 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createContext, type ReactNode, useContext, useEffect, useState, useRef } from "react";
-import { apiBaseUrl } from "@/lib/api";
+import { createContext, type ReactNode, useContext, useEffect, useState, useRef, useSyncExternalStore } from "react";
+import { browserApiBase } from "@/lib/api";
+import { browserNetwork, defaultNetwork, type Network, rememberNetwork } from "@/lib/network";
 
 type StreamState = "connecting" | "connected" | "reconnecting";
 const StreamContext = createContext<StreamState>("connecting");
@@ -12,6 +13,13 @@ export type LiveActivity = { id:string; hash:string; height:number; animation_el
 const ActivityContext=createContext<LiveActivity|null>(null);
 export const useLiveActivity=()=>useContext(ActivityContext);
 
+const fixedForThePage = () => () => {};
+/** The network this page shows. The server renders the default; the browser's own choice applies after hydration. */
+export function useNetwork(): Network {
+  return useSyncExternalStore(fixedForThePage, () => browserNetwork ?? defaultNetwork, () => defaultNetwork);
+}
+export const useApiBase = () => useNetwork().apiBaseUrl;
+
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(() => new QueryClient({ defaultOptions: { queries: {
     staleTime: 5_000, retry: 2, refetchOnWindowFocus: true,
@@ -19,6 +27,10 @@ export function Providers({ children }: { children: ReactNode }) {
   const [activity,setActivity]=useState<LiveActivity|null>(null);
   const seen=useRef(new Set<string>());
   const [state, setState] = useState<StreamState>("connecting");
+  useEffect(() => {
+    // A shared ?network= link becomes the reader's choice for the next pages too.
+    if (browserNetwork && new URLSearchParams(window.location.search).get("network") === browserNetwork.id) rememberNetwork(browserNetwork.id);
+  }, []);
   useEffect(()=>{if(!activity)return;const timeout=setTimeout(()=>setActivity(null),2500);return()=>clearTimeout(timeout);},[activity]);
   useEffect(() => {
     let stopped = false;
@@ -26,7 +38,7 @@ export function Providers({ children }: { children: ReactNode }) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const connect = () => {
       if (stopped) return;
-      source = new EventSource(apiBaseUrl + "/api/v1/stream");
+      source = new EventSource(browserApiBase + "/api/v1/stream");
       source.onopen = () => {
         setState("connected");
         // Refetch after subscription to close the SSR/snapshot-to-stream race.

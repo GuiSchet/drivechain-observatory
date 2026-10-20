@@ -29,6 +29,9 @@
 .live-pill.health-delayed { border-color: #765524; color: #ffc77d; }
 .live-pill.health-delayed .status-dot { background: #ffb347; box-shadow: 0 0 10px #ffb347; }
 .live-pill.health-degraded, .live-pill.health-offline { border-color: #855849; color: #ffc0b0; }
+.network-picker { margin-left: auto; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--text); font-size: 12px; }
+.network-picker option { background: #141310; }
+.network-picker + .live-pill { margin-left: 0; }
 .live-pill.health-degraded .status-dot, .live-pill.health-offline .status-dot { background: var(--red); box-shadow: 0 0 10px var(--red); }
 .status-banner { box-sizing: border-box; width: min(1240px, calc(100% - 32px)); margin: 12px auto 0; padding: 10px 16px; border-radius: 10px; font-size: 14px; line-height: 1.5; }
 .status-banner.health-delayed { color: #ffc77d; border: 1px solid #765524; background: rgba(255, 179, 71, 0.06); }

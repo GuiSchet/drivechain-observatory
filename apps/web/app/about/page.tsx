@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 import { CodeXml, ExternalLink, FolderGit2, HeartHandshake, MessageSquareWarning, Star } from "lucide-react";
 import { project } from "@/content/project";
 import { ISSUES_URL } from "@/content/references";
-import { apiBaseUrl } from "@/lib/api";
+import { ApiLink } from "@/components/api-link";
 import { CopyText } from "@/components/donate";
 import { Logo } from "@/components/logo";
 
@@ -32,7 +32,7 @@ export default async function Page() {
         <a href={project.repos.observatory} target="_blank" rel="noopener noreferrer"><FolderGit2 size={20}/><strong>drivechain-observatory</strong><span>This website, its API and the verified copy of the data. The lessons and their fact check live here.</span><small>github.com/GuiSchet/drivechain-observatory <ExternalLink size={12}/></small></a>
         <a href={project.repos.monitor} target="_blank" rel="noopener noreferrer"><FolderGit2 size={20}/><strong>bip300-monitor</strong><span>The monitor that watches the Betanet node and the enforcer and records every reading they report.</span><small>github.com/GuiSchet/bip300-monitor <ExternalLink size={12}/></small></a>
       </div>
-      <p className="about-links"><a className="text-link" href={ISSUES_URL} target="_blank" rel="noopener noreferrer">Report an issue</a> · <a className="text-link" href={`${apiBaseUrl}/docs`} target="_blank" rel="noopener noreferrer">API reference</a> · <Link className="text-link" href="/learn/how-we-know">How the data is collected</Link></p>
+      <p className="about-links"><a className="text-link" href={ISSUES_URL} target="_blank" rel="noopener noreferrer">Report an issue</a> · <ApiLink className="text-link" path="/docs" target="_blank" rel="noopener noreferrer">API reference</ApiLink> · <Link className="text-link" href="/learn/how-we-know">How the data is collected</Link></p>
     </section>
 
     <section className="about-section donate" id="support">
