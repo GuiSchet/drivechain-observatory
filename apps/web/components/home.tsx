@@ -1,4 +1,5 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import { chapters } from "@/content/chapters";
@@ -10,15 +11,16 @@ import { DepositStory } from "@/components/live/money";
 import { DaySummary } from "@/components/live/summary";
 
 export function Home() {
+  const net = useNetworkFacts();
   const { isDone, completed } = useProgress();
   const doneCount = chapters.filter(c => completed.includes(c.slug)).length;
   const next = chapters.find(c => !isDone(c.slug)) ?? chapters[0];
   return <main className="home">
     <section className="home-hero split">
       <div>
-        <div className="eyebrow">eCash (ECX) · Betanet · BIP300 / BIP301</div>
+        <div className="eyebrow">eCash (ECX){net.rehearsal ? ` · ${net.name}` : ""} · BIP300 / BIP301</div>
         <h1>Learn drivechains by <span>watching one run.</span></h1>
-        <p>The Drivechain Observatory watches <strong>eCash Betanet</strong>, the network where eCash tests drivechains (BIP300 and BIP301) before its mainnet. It runs its own node and the official enforcer, records what they report for each block (sidechains, deposits, withdrawal payouts, merged-mining commitments) and regular readings of state such as vote counts, and explains what each one means. Values link to the record behind them, and say when a reading is incomplete.</p>
+        <p>The Drivechain Observatory watches <strong>{net.fullName}</strong>, {net.rehearsal ? "the network where eCash tests drivechains (BIP300 and BIP301) before its mainnet" : "a hard fork of Bitcoin that runs drivechains (BIP300 and BIP301)"}. It runs its own node and the official enforcer, records what they report for each block (sidechains, deposits, withdrawal payouts, merged-mining commitments) and regular readings of state such as vote counts, and explains what each one means. Values link to the record behind them, and say when a reading is incomplete.</p>
         <div className="cta-row">
           <Link className="cta primary" href={`/learn/${next.slug}`}>{doneCount ? "Continue" : "Start learning"} <ArrowRight size={16}/></Link>
           <Link className="cta" href="/sidechains">Meet the sidechains</Link>
@@ -28,7 +30,7 @@ export function Home() {
     </section>
 
     <h2>What happened recently</h2>
-    <p className="section-lede">Real events from Betanet, each linked to the record behind it. <Link className="text-link" href="/live">See all live activity →</Link></p>
+    <p className="section-lede">Real events from {net.name}, each linked to the record behind it. <Link className="text-link" href="/live">See all live activity →</Link></p>
     <div className="home-recent">
       <DepositStory/>
       <DaySummary/>

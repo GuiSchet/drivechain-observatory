@@ -15,7 +15,7 @@ import { ProofIntro } from "./proof-intro";
 
 // What each recorded kind is, in words; slot reports name their sidechain.
 const recordText: Record<string, string> = {
-  mainchain_block: "Header read from our Betanet node",
+  mainchain_block: "Header read from our eCash node",
   chain_tip: "Tip reading: this block was the newest block",
   mainchain_transition: "Live notice from the enforcer: this block was added",
   block_disconnected: "Live notice from the enforcer: this block was removed by a reorganization",

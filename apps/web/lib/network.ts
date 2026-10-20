@@ -48,6 +48,26 @@ export function rememberNetwork(id: string) {
   document.cookie = `${NETWORK_COOKIE}=${encodeURIComponent(id)}; path=/; max-age=31536000; samesite=lax`;
 }
 
+/** How the copy names a network and the few facts it quotes about it. */
+export type NetworkFacts = {
+  /** Short name, as in "Live on Betanet". */
+  name: string;
+  /** Full name, as in "watches eCash Betanet". */
+  fullName: string;
+  /** A network that rehearses eCash's mainnet rather than being it. */
+  rehearsal: boolean;
+};
+
+const facts: Record<string, NetworkFacts> = {
+  betanet: { name: "Betanet", fullName: "eCash Betanet", rehearsal: true },
+  mainnet: { name: "eCash", fullName: "eCash", rehearsal: false },
+};
+
+/** Facts for a configured network id. Deployments configured before the selector watch Betanet. */
+export function networkFacts(id: string | null | undefined): NetworkFacts {
+  return (id && facts[id]) || facts.betanet;
+}
+
 /** A readable name for the network the API reports, e.g. "eCash Betanet". */
 export function networkLabel(id: string | null | undefined): string {
   const known = networks.find(n => n.id === id);
