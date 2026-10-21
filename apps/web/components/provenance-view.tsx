@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { getJson } from "@/lib/api";
+import { getProvenance } from "@/lib/api";
 import { object, short } from "@/lib/protocol";
 import { timeAgo } from "@/lib/explain";
 import { n } from "@/lib/live";
@@ -19,8 +19,8 @@ const sourceText: Record<string, string> = {
   node: "our Betanet node: block headers and the chain tip",
 };
 
-function useRecord(resource: "runs" | "snapshot-groups", id: string) {
-  return useQuery({ queryKey: ["provenance", resource, id], queryFn: () => getJson<ProtocolPage>(`/api/v1/${resource}/${encodeURIComponent(id)}`) });
+function useRecord(resource: "runs" | "snapshot-groups", id: string, initial: ProtocolPage | null) {
+  return useQuery({ queryKey: ["provenance", resource, id], queryFn: () => getProvenance(resource, id), initialData: initial ?? undefined });
 }
 
 function Shell({ back, eyebrow, title, children, loading, failed }: { back?: React.ReactNode; eyebrow: string; title: string; children: React.ReactNode; loading: boolean; failed: boolean }) {
@@ -34,8 +34,8 @@ function Shell({ back, eyebrow, title, children, loading, failed }: { back?: Rea
 }
 
 /** One monitor session: which source it read, when, with which software. */
-export function RunView({ id }: { id: string }) {
-  const query = useRecord("runs", id), now = useNow(30_000);
+export function RunView({ id, initial }: { id: string; initial: ProtocolPage | null }) {
+  const query = useRecord("runs", id, initial), now = useNow(30_000);
   const item = query.data?.items[0], d = object(item?.data);
   const running = d.status === "running" || (d.finished_at == null && d.status == null);
   const reviewed = d.enforcer_commit === ENFORCER_COMMIT;
@@ -67,8 +67,8 @@ export function RunView({ id }: { id: string }) {
 }
 
 /** A group of readings taken together, and whether the chain stayed still while they were taken. */
-export function SnapshotView({ id }: { id: string }) {
-  const query = useRecord("snapshot-groups", id), now = useNow(30_000);
+export function SnapshotView({ id, initial }: { id: string; initial: ProtocolPage | null }) {
+  const query = useRecord("snapshot-groups", id, initial), now = useNow(30_000);
   const item = query.data?.items[0], d = object(item?.data);
   const before = typeof d.tip_before_height === "number" ? d.tip_before_height : undefined, after = typeof d.tip_after_height === "number" ? d.tip_after_height : undefined;
   const ms = typeof d.started_at === "string" && typeof d.finished_at === "string" ? Date.parse(d.finished_at) - Date.parse(d.started_at) : undefined;

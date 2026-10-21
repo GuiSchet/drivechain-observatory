@@ -86,7 +86,9 @@ several networks, set `NEXT_PUBLIC_NETWORKS` to a JSON list of
 `{"id", "label", "apiBaseUrl"}` and optionally `NEXT_PUBLIC_DEFAULT_NETWORK`
 (see `apps/web/.env.example`). The header then shows a selector; the choice is
 kept in a cookie, and `?network=<id>` in any URL selects a network and remembers
-it. Dataset pages find the network that holds their dataset by themselves.
+it. Pages of one record (an event, a block, a monitor session or a reading
+group) find the network that holds it by themselves, also when the selected
+network's API is down.
 See [deploy/README.md](deploy/README.md) for exact environment and upgrade rules.
 
 ## Implemented HTTP surface

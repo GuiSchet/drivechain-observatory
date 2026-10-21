@@ -1,4 +1,4 @@
-import type { Overview, Sidechains, Status, Meta, Coverage, Auctions, Evidence, Blocks, Block } from "@/lib/types";
+import type { Overview, Sidechains, Status, Meta, Coverage, Auctions, Evidence, Blocks, Block, ProtocolPage } from "@/lib/types";
 import { browserNetwork, defaultNetwork } from "@/lib/network";
 
 /**
@@ -39,3 +39,4 @@ export class ApiFailure extends Error {
 }
 export const getBlocks = (query = "") => getJson<Blocks>("/api/v1/blocks" + (query ? "?" + query : ""));
 export const getBlock = (dataset: string, hash: string, base?: string) => getJson<Block>(`/api/v1/blocks/${encodeURIComponent(hash)}?dataset=${encodeURIComponent(dataset)}`, base);
+export const getProvenance = (resource: "runs" | "snapshot-groups", id: string, base?: string) => getJson<ProtocolPage>(`/api/v1/${resource}/${encodeURIComponent(id)}`, base);
