@@ -26,9 +26,10 @@ export async function readRecord<T>(network: Network, href: string, read: (base:
   } catch {
     // Look on the other networks below.
   }
-  for (const other of networks) {
-    if (other.id === network.id) continue;
-    if (await read(other.apiBaseUrl).then(() => true, () => false)) redirect(onNetwork(href, other.id));
-  }
+  const others = networks.filter(n => n.id !== network.id);
+  // Asked together, so a slow API does not delay the others; the first in configuration order wins.
+  const found = await Promise.all(others.map(n => read(n.apiBaseUrl).then(() => true, () => false)));
+  const owner = others.find((_, i) => found[i]);
+  if (owner) redirect(onNetwork(href, owner.id));
   return null;
 }

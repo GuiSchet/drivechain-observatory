@@ -7,15 +7,15 @@ import { useNetwork, useStreamState } from "@/components/providers";
 import { useHealth } from "@/lib/health";
 import { timeAgo } from "@/lib/explain";
 import { useNow } from "@/components/live/basics";
-import { networkLabel, networks, rememberNetwork } from "@/lib/network";
+import { isNetworkRecordPath, networkLabel, networks, rememberNetwork } from "@/lib/network";
 
 const nav: [string, string][] = [["/", "Start"], ["/learn", "Learn"], ["/sidechains", "Sidechains"], ["/live", "Live"], ["/glossary", "Glossary"], ["/about", "About"]];
 
 /** Switching reloads the page, so every query, stream and link reads the new network's API from the start. */
 function switchNetwork(id: string) {
   rememberNetwork(id);
-  // A dataset belongs to one network: its pages have no counterpart on the other.
-  if (window.location.pathname.startsWith("/datasets/")) return window.location.assign("/");
+  // Reloading a record page would send the reader back to the record's network.
+  if (isNetworkRecordPath(window.location.pathname)) return window.location.assign("/");
   const url = new URL(window.location.href);
   url.searchParams.delete("network");
   window.location.assign(url.pathname + url.search + url.hash);

@@ -39,6 +39,11 @@ function readBrowserNetwork(): Network {
 
 export const browserNetwork: Network | null = typeof window === "undefined" ? null : readBrowserNetwork();
 
+/** Pages of a record that belongs to one network (datasets, monitor sessions, reading groups): none has a counterpart on another. */
+export function isNetworkRecordPath(pathname: string): boolean {
+  return pathname.startsWith("/datasets/") || pathname.startsWith("/about/data/");
+}
+
 export function rememberNetwork(id: string) {
   document.cookie = `${NETWORK_COOKIE}=${encodeURIComponent(id)}; path=/; max-age=31536000; samesite=lax`;
 }
