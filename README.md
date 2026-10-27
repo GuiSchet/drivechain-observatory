@@ -84,7 +84,9 @@ then start `pulse-api` with the API role. Start the web app with
 Each network has its own Observatory backend (database, sync and API). To show
 several networks, set `NEXT_PUBLIC_NETWORKS` to a JSON list of
 `{"id", "label", "apiBaseUrl"}` and optionally `NEXT_PUBLIC_DEFAULT_NETWORK`
-(see `apps/web/.env.example`). The header then shows a selector; the choice is
+(see `apps/web/.env.example`). The id is `mainnet` or `betanet`, since the copy
+states facts about each, and the build fails on any other; `label` defaults to
+the network's full name. The header then shows a selector; the choice is
 kept in a cookie, and `?network=<id>` in any URL selects a network and remembers
 it. Pages of one record (an event, a block, a monitor session or a reading
 group) find the network that holds it by themselves, also when the selected

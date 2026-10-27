@@ -4,14 +4,34 @@ export type Network = { id: string; label: string; apiBaseUrl: string };
 /** Remembers the reader's network across pages; `?network=` overrides and updates it. */
 export const NETWORK_COOKIE = "observatory-network";
 
+/** How the copy names a network and the few facts it quotes about it. */
+export type NetworkFacts = {
+  /** Short name, as in "Live on Betanet". */
+  name: string;
+  /** Full name, as in "watches eCash Betanet". */
+  fullName: string;
+  /** A network that rehearses eCash's mainnet rather than being it. */
+  rehearsal: boolean;
+};
+
+const facts: Record<string, NetworkFacts> = {
+  betanet: { name: "Betanet", fullName: "eCash Betanet", rehearsal: true },
+  mainnet: { name: "eCash", fullName: "eCash", rehearsal: false },
+};
+
 function configured(): Network[] {
   const raw = process.env.NEXT_PUBLIC_NETWORKS;
   if (raw) {
-    const list = JSON.parse(raw) as Network[];
-    if (!Array.isArray(list) || !list.length || list.some(n => !n?.id || !n.label || !n.apiBaseUrl)) {
-      throw new Error("NEXT_PUBLIC_NETWORKS must be a non-empty JSON list of {id, label, apiBaseUrl}");
+    const list = JSON.parse(raw) as (Omit<Network, "label"> & { label?: string })[];
+    if (!Array.isArray(list) || !list.length || list.some(n => !n?.id || !n.apiBaseUrl)) {
+      throw new Error("NEXT_PUBLIC_NETWORKS must be a non-empty JSON list of {id, label?, apiBaseUrl}");
     }
-    return list;
+    // The copy states facts about each network; an id it does not know would be described as another network.
+    const unknown = list.filter(n => !facts[n.id]).map(n => n.id);
+    if (unknown.length) {
+      throw new Error(`NEXT_PUBLIC_NETWORKS has unknown ids (${unknown.join(", ")}); known: ${Object.keys(facts).join(", ")}`);
+    }
+    return list.map(n => ({ ...n, label: n.label ?? facts[n.id].fullName }));
   }
   // A single-network deployment configured the way it was before the selector.
   return [{
@@ -48,12 +68,16 @@ export function rememberNetwork(id: string) {
   document.cookie = `${NETWORK_COOKIE}=${encodeURIComponent(id)}; path=/; max-age=31536000; samesite=lax`;
 }
 
+/** Facts for a configured network id; NEXT_PUBLIC_NETWORKS only takes known ids. Deployments configured before the selector watch Betanet. */
+export function networkFacts(id: string | null | undefined): NetworkFacts {
+  return (id && facts[id]) || facts.betanet;
+}
+
 /** A readable name for the network the API reports, e.g. "eCash Betanet". */
 export function networkLabel(id: string | null | undefined): string {
   const known = networks.find(n => n.id === id);
   if (known) return known.label;
   if (process.env.NEXT_PUBLIC_NETWORK_LABEL) return process.env.NEXT_PUBLIC_NETWORK_LABEL;
-  if (id === "betanet") return "eCash Betanet";
-  if (id === "mainnet") return "eCash";
+  if (id && facts[id]) return facts[id].fullName;
   return id ?? "Unknown network";
 }

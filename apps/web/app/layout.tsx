@@ -11,7 +11,7 @@ import "./learn.css";
 
 export const metadata: Metadata = {
   title: "Drivechain Observatory · Learn drivechains live",
-  description: "Learn BIP300 and BIP301 one concept at a time, with live data from eCash Betanet.",
+  description: "Learn BIP300 and BIP301 one concept at a time, with live data from eCash.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

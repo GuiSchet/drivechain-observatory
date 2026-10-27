@@ -1,4 +1,5 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import { Section } from "@/components/learn/chapter-layout";
 import { Analogy, CheckYourself, GoDeeper, SpecNote, Term } from "@/components/learn/primitives";
 import { BmmDiagram, TreasuryDiagram, VoteDiagram } from "@/components/learn/diagrams";
@@ -9,6 +10,7 @@ import { LivePanel } from "@/components/learn/primitives";
 import { n, useNetworkParams } from "@/lib/live";
 
 export function CreatingASidechain() {
+  const net = useNetworkFacts();
   const { params } = useNetworkParams();
   return <>
     <Section title="Step 1: someone proposes it">
@@ -26,25 +28,25 @@ export function CreatingASidechain() {
     <ParamsPanel show={["activation"]}/>
     <ProposalsNow/>
     <ActivationTimeline/>
-    <SpecNote variant="betanet" refs={["bip300M2", "spec300Constants", "enforcerBetanet", "enforcerThresholdRule"]}>
-      The documents disagree on how many votes an empty slot needs. The BIP300 text says a proposal fails after 1,008 blocks without a vote out of 2,016 (a 50% majority). The LayerTwo Labs specification and the enforcer&apos;s mainnet setting use a threshold of 1,815 of 2,016. Betanet uses the value in the panel above. The enforcer requires strictly <em>more</em> votes than the threshold, so a threshold of 1,815 means at least 1,816 votes{params.unusedThreshold != null ? <>, and Betanet&apos;s {n(params.unusedThreshold)} means at least {n(params.unusedThreshold + 1)}</> : null}.
+    <SpecNote variant="network" refs={["bip300M2", "spec300Constants", "enforcerBetanet", "enforcerThresholdRule"]}>
+      The documents disagree on how many votes an empty slot needs. The BIP300 text says a proposal fails after 1,008 blocks without a vote out of 2,016 (a 50% majority). The LayerTwo Labs specification and the enforcer&apos;s mainnet setting use a threshold of 1,815 of 2,016. {net.name} uses the value in the panel above. The enforcer requires strictly <em>more</em> votes than the threshold, so a threshold of 1,815 means at least 1,816 votes{params.unusedThreshold != null && params.unusedThreshold !== 1815 ? <>, and {net.name}&apos;s {n(params.unusedThreshold)} means at least {n(params.unusedThreshold + 1)}</> : null}.
     </SpecNote>
-    <SpecNote variant="betanet" refs={["bip300M1", "bip300M2", "spec300M1", "spec300M2", "enforcerM2", "enforcerCoinbaseRules"]}>
-      The vote message on Betanet is not byte-for-byte the one in BIP300. The enforcer follows the LayerTwo Labs specification (M2 names the slot, and several proposals can be voted on in one block), but uses the header <code>D6E1C5DF</code> where both documents write <code>D6E1C5BF</code>. Details below.
+    <SpecNote variant="network" refs={["bip300M1", "bip300M2", "spec300M1", "spec300M2", "enforcerM2", "enforcerCoinbaseRules"]}>
+      The vote message on {net.name} is not byte-for-byte the one in BIP300. The enforcer follows the LayerTwo Labs specification (M2 names the slot, and several proposals can be voted on in one block), but uses the header <code>D6E1C5DF</code> where both documents write <code>D6E1C5BF</code>. Details below.
     </SpecNote>
     <GoDeeper summary="what the messages look like, in each document">
       <p>Both are coinbase outputs that start with <code>OP_RETURN</code>. M1 has the header <code>D5E0C4AF</code> followed by the slot number and the declaration (a version, the title, the description and the two hashes) in all three documents. M2 is where they differ:</p>
-      <div className="table-scroll"><table className="friendly-table"><thead><tr><th></th><th>BIP300</th><th>LayerTwo Labs spec</th><th>Enforcer on Betanet</th></tr></thead>
+      <div className="table-scroll"><table className="friendly-table"><thead><tr><th></th><th>BIP300</th><th>LayerTwo Labs spec</th><th>Enforcer on {net.name}</th></tr></thead>
         <tbody>
           <tr><th scope="row">M2 header</th><td><code>D6E1C5BF</code></td><td><code>D6E1C5BF</code></td><td><code>D6E1C5DF</code></td></tr>
           <tr><th scope="row">M2 fields</th><td>declaration hash</td><td>slot, declaration hash</td><td>slot, declaration hash</td></tr>
           <tr><th scope="row">M1 per block</th><td>at most one</td><td>several, not the same slot and declaration twice</td><td>several, not the same slot and declaration twice</td></tr>
           <tr><th scope="row">M2 per block</th><td>at most one</td><td>at most one per slot</td><td>at most one per slot</td></tr>
         </tbody></table></div>
-      <p>Betanet runs the enforcer, so the last column is what its miners must write: an M2 with the BIP&apos;s header would be ignored there. The sidechains active on Betanet got their votes in that format.</p>
-      <p>A vote only counts from the block after the proposal. That is why a sidechain that got a vote in every block activates exactly {n(params.unusedThreshold != null ? params.unusedThreshold + 1 : undefined)} blocks after it was proposed on Betanet, as the timeline above shows.</p>
+      <p>{net.name} runs the enforcer, so the last column is what its miners must write: an M2 with the BIP&apos;s header would be ignored there. The sidechains active on {net.name} got their votes in that format.</p>
+      <p>A vote only counts from the block after the proposal. That is why a sidechain that got a vote in every block activates exactly {n(params.unusedThreshold != null ? params.unusedThreshold + 1 : undefined)} blocks after it was proposed on {net.name}, as the timeline above shows.</p>
     </GoDeeper>
-    <CheckYourself question={`On Betanet, a proposal for an empty slot has exactly ${n(params.unusedThreshold)} votes and is still young enough. Does it activate?`} choices={[
+    <CheckYourself question={`On ${net.name}, a proposal for an empty slot has exactly ${n(params.unusedThreshold)} votes and is still young enough. Does it activate?`} choices={[
       { text: "Yes, it reached the threshold", why: "Reaching it is not enough: the enforcer requires strictly more votes than the threshold." },
       { text: "No, it needs at least one more vote", correct: true, why: "The rule is votes > threshold, so it needs one more vote while it is still within the maximum age." },
       { text: "It depends on the sidechain's own nodes", why: "Activation is decided entirely on L1 by counting miner votes." },
@@ -53,13 +55,14 @@ export function CreatingASidechain() {
 }
 
 export function Deposits() {
+  const net = useNetworkFacts();
   return <>
     <Section title="One treasury per sidechain">
       <p>All coins locked for a sidechain sit in a single L1 output, its <Term id="ctip">treasury output</Term> (BIP300 calls it the CTIP). It is marked with a special opcode, <Term id="op-drivechain">OP_DRIVECHAIN</Term>, and the sidechain's slot number.</p>
       <Analogy>The treasury is one big jar per sidechain. Each deposit pours the old jar and your coins into a new, larger jar.</Analogy>
     </Section>
     <Section title="Depositing (M5)">
-      <p>A <Term id="m5">deposit</Term> is an ordinary L1 transaction. It spends the current treasury output together with your coins and creates a new treasury output holding more than before. A sidechain that has never received a deposit has no treasury output yet: its first deposit creates one from your coins alone. Right after it, an output records the sidechain address that should receive the coins. BIP300 itself does not require that output; the LayerTwo Labs specification and the enforcer Betanet runs do.</p>
+      <p>A <Term id="m5">deposit</Term> is an ordinary L1 transaction. It spends the current treasury output together with your coins and creates a new treasury output holding more than before. A sidechain that has never received a deposit has no treasury output yet: its first deposit creates one from your coins alone. Right after it, an output records the sidechain address that should receive the coins. BIP300 itself does not require that output; the LayerTwo Labs specification and the enforcer {net.name} runs do.</p>
       <p>No vote is needed: once the transaction is in a block, the deposit is done on L1. The amount deposited is exactly how much the treasury grew.</p>
     </Section>
     <TreasuryDiagram/>
@@ -68,7 +71,7 @@ export function Deposits() {
     <TreasuryBars/>
     <DepositFeed/>
     <TreasuryHistory/>
-    <SpecNote variant="betanet" refs={["bip300OpDrivechain", "enforcerOpDrivechain"]}>BIP300 turns <code>OP_NOP5</code> into OP_DRIVECHAIN. Betanet's node uses <code>OP_NOP8</code> for it instead. The rules are the same; only the opcode number differs.</SpecNote>
+    <SpecNote variant="network" refs={["bip300OpDrivechain", "enforcerOpDrivechain"]}>BIP300 turns <code>OP_NOP5</code> into OP_DRIVECHAIN. {net.name}&apos;s node uses <code>OP_NOP8</code> for it instead. The rules are the same; only the opcode number differs.</SpecNote>
     <GoDeeper summary="what L1 does not know">
       <p>L1 checks that the treasury grew and that the address output is present. Crediting the coins on the sidechain is the sidechain's job: its nodes read the deposit from L1. The Observatory does not watch sidechains, so a deposit here shows the L1 side only.</p>
       <p>The treasury script is <code>OP_DRIVECHAIN &lt;slot&gt; OP_TRUE</code>. Anyone may spend it, but only in a transaction that follows the deposit or withdrawal rules.</p>
@@ -82,6 +85,7 @@ export function Deposits() {
 }
 
 export function Withdrawals() {
+  const net = useNetworkFacts();
   const { params } = useNetworkParams();
   return <>
     <Section title="Withdrawals travel in bundles">
@@ -115,7 +119,7 @@ export function Withdrawals() {
     <ParamsPanel show={["withdrawal"]}/>
     <WithdrawalVotes/>
     <WithdrawalOutcomes/>
-    <SpecNote refs={["bip300D2", "bip300M3", "bip300M4", "bip300M6"]}>BIP300 describes this as a slow, transparent and auditable process: miners ACK the bundle's hash "over 3-6 months". The BIP's withdrawal list says a bundle succeeds at the threshold "or greater"; the enforcer Betanet runs requires strictly more.</SpecNote>
+    <SpecNote refs={["bip300D2", "bip300M3", "bip300M4", "bip300M6"]}>BIP300 describes this as a slow, transparent and auditable process: miners ACK the bundle's hash "over 3-6 months". The BIP's withdrawal list says a bundle succeeds at the threshold "or greater"; the enforcer {net.name} runs requires strictly more.</SpecNote>
     <GoDeeper summary="how the M6 id hides the treasury input">
       <p>When voting starts, the treasury output the payout will spend usually does not exist yet: more deposits may replace it. So the M6 id is computed from a "blinded" copy of the transaction with no inputs, and with the treasury output replaced by an output that records the total fee. The real payout must match it.</p>
       <p>Each M4 can be encoded in several compact versions, such as "repeat the previous block's votes". The enforcer decodes them all to the same upvote, abstain and alarm choices.</p>

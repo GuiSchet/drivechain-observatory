@@ -6,6 +6,7 @@ import { ISSUES_URL } from "@/content/references";
 import { ApiLink } from "@/components/api-link";
 import { CopyText } from "@/components/donate";
 import { Logo } from "@/components/logo";
+import { NetworkName } from "@/components/network-name";
 
 export const metadata = { title: "About · Drivechain Observatory", description: "Who builds the Drivechain Observatory, its open-source code, and how to support it." };
 
@@ -16,12 +17,12 @@ export default async function Page() {
     <section className="about-hero">
       <Logo size={72}/>
       <div><div className="eyebrow">ABOUT THE PROJECT</div><h1>Drivechain Observatory</h1>
-        <p className="lede">A place to learn drivechains by watching them run. Every lesson explains one idea in plain words and shows it live on eCash Betanet, with the record behind each value and a plain label for how certain it is.</p></div>
+        <p className="lede">A place to learn drivechains by watching them run. Every lesson explains one idea in plain words and shows it live on <NetworkName full/>, with the record behind each value and a plain label for how certain it is.</p></div>
     </section>
 
     <section className="about-section">
       <h2>About us</h2>
-      <p>The Observatory is built and maintained by <a className="text-link" href={project.maintainer.href} target="_blank" rel="noopener noreferrer">{project.maintainer.name}</a> as an independent, open-source project. It runs its own eCash Betanet node and the official BIP300/301 enforcer, records everything they report, and turns it into lessons anyone can follow. For questions or ideas, you can find me on Discord as <strong>{project.maintainer.discord}</strong>.</p>
+      <p>The Observatory is built and maintained by <a className="text-link" href={project.maintainer.href} target="_blank" rel="noopener noreferrer">{project.maintainer.name}</a> as an independent, open-source project. It runs its own <NetworkName full/> node and the official BIP300/301 enforcer, records everything they report, and turns it into lessons anyone can follow. For questions or ideas, you can find me on Discord as <strong>{project.maintainer.discord}</strong>.</p>
       <p>It is made possible by the support of <a className="text-link" href="https://libreriadesatoshi.com/" target="_blank" rel="noopener noreferrer">Librería de Satoshi</a> and <a className="text-link" href="https://b4os.dev/" target="_blank" rel="noopener noreferrer">B4OS</a>.</p>
     </section>
 
@@ -30,14 +31,14 @@ export default async function Page() {
       <p>All the code is public under the MIT license. You can read it, run your own copy, or help improve it.</p>
       <div className="repo-cards">
         <a href={project.repos.observatory} target="_blank" rel="noopener noreferrer"><FolderGit2 size={20}/><strong>drivechain-observatory</strong><span>This website, its API and the verified copy of the data. The lessons and their fact check live here.</span><small>github.com/GuiSchet/drivechain-observatory <ExternalLink size={12}/></small></a>
-        <a href={project.repos.monitor} target="_blank" rel="noopener noreferrer"><FolderGit2 size={20}/><strong>bip300-monitor</strong><span>The monitor that watches the Betanet node and the enforcer and records every reading they report.</span><small>github.com/GuiSchet/bip300-monitor <ExternalLink size={12}/></small></a>
+        <a href={project.repos.monitor} target="_blank" rel="noopener noreferrer"><FolderGit2 size={20}/><strong>bip300-monitor</strong><span>The monitor that watches an eCash node and the enforcer and records every reading they report.</span><small>github.com/GuiSchet/bip300-monitor <ExternalLink size={12}/></small></a>
       </div>
       <p className="about-links"><a className="text-link" href={ISSUES_URL} target="_blank" rel="noopener noreferrer">Report an issue</a> · <ApiLink className="text-link" path="/docs" target="_blank" rel="noopener noreferrer">API reference</ApiLink> · <Link className="text-link" href="/learn/how-we-know">How the data is collected</Link></p>
     </section>
 
     <section className="about-section donate" id="support">
       <h2><HeartHandshake size={24}/> Help the project</h2>
-      <p>Running the Observatory costs money: a server, a Betanet node kept in sync, and time to maintain the code and the lessons. Donations keep it online and free for everyone.</p>
+      <p>Running the Observatory costs money: a server, eCash nodes kept in sync, and time to maintain the code and the lessons. Donations keep it online and free for everyone.</p>
       <div className="donate-box">
         <div className="donate-qr" role="img" aria-label={`QR code for the donation address ${project.donationAddress}`} dangerouslySetInnerHTML={{ __html: qr }}/>
         <div className="donate-info">

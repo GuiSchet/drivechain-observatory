@@ -1,4 +1,5 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -59,12 +60,13 @@ function ComparisonTable() {
 }
 
 export function SidechainGallery() {
+  const net = useNetworkFacts();
   const observatory = useObservatory(), unit = useUnit(), { technical } = useViewMode();
   const rows = useRows(24);
   const snap = snapshotOf(observatory.data, "active_sidechains");
   const data = observatory.data, complete = known(data, "sidechains"), bundlesKnown = known(data, "bundles");
   return <main className="page-shell wide">
-    <PageHead eyebrow="THE SIDECHAINS OF BETANET"/><h1>Meet the sidechains</h1>
+    <PageHead eyebrow={`THE SIDECHAINS OF ${net.name.toUpperCase()}`}/><h1>Meet the sidechains</h1>
     <p className="lede">Each card is one active sidechain: what it declares to be, how many coins it holds on L1, and how often L1 miners committed to one of its blocks (blind merged mining). Open one to follow its whole story. New to the terms? Start with <Link className="text-link" href="/learn/slots">slots and sidechains</Link>.</p>
     {observatory.isPending && <p className="live-empty" role="status">Loading sidechains…</p>}
     {observatory.isError && !observatory.data && <p className="live-empty" role="status">The sidechain list is unavailable right now; retrying automatically.</p>}

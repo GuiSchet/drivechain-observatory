@@ -1,4 +1,5 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import Link from "next/link";
 import { Section } from "@/components/learn/chapter-layout";
 import { Analogy, CheckYourself, GoDeeper, SpecNote, Term } from "@/components/learn/primitives";
@@ -8,6 +9,7 @@ import { BlockHeartbeat, BranchCheck, NetworkSnapshot, SlotGrid } from "@/compon
 import { n, useNetworkParams } from "@/lib/live";
 
 export function WhatIsADrivechain() {
+  const net = useNetworkFacts();
   const { params } = useNetworkParams();
   return <>
     <Section title="The problem">
@@ -25,10 +27,10 @@ export function WhatIsADrivechain() {
     <HowItWorks/>
     <SpecNote refs={["bip300Abstract"]}>BIP300 lets L2 withdrawals be governed by proof-of-work, "instead of a federation or fixed set of pubkeys". It aims for slow, transparent and auditable withdrawals, and users who don't care about sidechains can ignore them entirely.</SpecNote>
     <Section title="What you are looking at">
-      <p>This site watches <strong>eCash Betanet</strong> as it runs. Everything inside a <em>Live on Betanet</em> panel comes from a monitor connected to a Betanet node and the official <Term id="enforcer">enforcer</Term>. <em>See the evidence</em> opens the exact record behind a value.</p>
+      <p>This site watches <strong>{net.fullName}</strong> as it runs. Everything inside a <em>Live on {net.name}</em> panel comes from a monitor connected to {net.rehearsal ? `a ${net.name}` : "an eCash"} node and the official <Term id="enforcer">enforcer</Term>. <em>See the evidence</em> opens the exact record behind a value.</p>
     </Section>
     <NetworkSnapshot/>
-    <SpecNote variant="betanet" refs={["ecash", "enforcerNetworkParams"]}><Term id="ecash">eCash (ECX)</Term> is a hard fork of Bitcoin built to activate drivechains; it is not eCash (XEC). <Term id="betanet">Betanet</Term> is its rehearsal network: it starts from Bitcoin's chain and enforces BIP300 and BIP301 from block {n(params.activationHeight)} onward, so every mechanism can be watched working before eCash's mainnet.</SpecNote>
+    <SpecNote variant="network" refs={["ecash", "enforcerNetworkParams"]}><Term id="ecash">eCash (ECX)</Term> is a hard fork of Bitcoin built to activate drivechains; it is not eCash (XEC). {net.rehearsal ? <><Term id="betanet">{net.name}</Term> is its rehearsal network: it starts from Bitcoin's chain and enforces BIP300 and BIP301 from block {n(params.activationHeight)} onward, so every mechanism can be watched working before eCash&apos;s mainnet.</> : <>It shares Bitcoin&apos;s chain up to block {n(params.activationHeight)} and enforces BIP300 and BIP301 from there on.</>}</SpecNote>
     <CheckYourself question="Who decides whether coins may leave a sidechain and return to L1?" choices={[
       { text: "A fixed group of signers chosen by the sidechain", why: "That would be a federation. BIP300 replaces it with a vote by L1 miners." },
       { text: "L1 miners, voting over many blocks", correct: true, why: "Withdrawals are approved by proof-of-work: miners vote in the blocks they find." },
@@ -38,9 +40,10 @@ export function WhatIsADrivechain() {
 }
 
 export function Blocks() {
+  const net = useNetworkFacts();
   return <>
     <Section title="A chain of blocks">
-      <p>Transactions on L1 are grouped into <Term id="block">blocks</Term>. Miners compete to find the next block using proof-of-work, and the network adjusts the difficulty aiming for one block every ten minutes on average. The real pace drifts with hashrate; on a young test network like Betanet it has varied widely, so the panel below shows the recent pace.</p>
+      <p>Transactions on L1 are grouped into <Term id="block">blocks</Term>. Miners compete to find the next block using proof-of-work, and the network adjusts the difficulty aiming for one block every ten minutes on average. The real pace drifts with hashrate; {net.rehearsal ? `on a young test network like ${net.name}` : "right after a fork"} it has varied widely, so the panel below shows the recent pace.</p>
       <p>Every block has a <Term id="height">height</Term> (how many blocks came before it) and a <Term id="block-hash">hash</Term>, a unique fingerprint. Each block also records its parent's hash, which is what chains them together.</p>
     </Section>
     <ChainDiagram/>

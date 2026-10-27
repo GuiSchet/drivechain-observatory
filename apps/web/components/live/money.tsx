@@ -1,4 +1,5 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -18,11 +19,12 @@ import { useNow } from "./basics";
 const atLeast = (threshold: number | undefined) => `at least ${n(threshold != null ? threshold + 1 : undefined)}`;
 
 export function ParamsPanel({ show }: { show: ("activation" | "withdrawal")[] }) {
+  const net = useNetworkFacts();
   const { params, isPending, isError } = useNetworkParams();
   // The enforcer reports its build's parameters when asked (GetChainInfo); no block states them,
   // so a reading made at a block is shown as a reading, not as a fact observed in that block.
   const quality = params.item?.quality === "observed" ? "tip_matched" : params.item?.quality ?? null;
-  return <LivePanel title="The rules Betanet is running" quality={quality} proof={proofHref(params.item, params.dataset)}
+  return <LivePanel title={`The rules ${net.name} is running`} quality={quality} proof={proofHref(params.item, params.dataset)}
     status={{ pending: isPending, error: isError && !params.item, empty: !params.item, emptyText: "The enforcer has not reported its parameters yet." }}>
     <p className="live-lede">These numbers are the parameters the enforcer software reports for this network{params.item?.height != null ? `, last read at block ${n(params.item.height)}` : ""}; they belong to its build, not to any block. The rule is always <strong>more than</strong> the threshold, before the proposal is older than the maximum age.</p>
     <div className="stat-grid">

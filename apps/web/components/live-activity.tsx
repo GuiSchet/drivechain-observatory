@@ -1,4 +1,5 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import Link from "next/link";
 import { useViewMode } from "@/lib/view-mode";
 import { GoDeeper } from "@/components/learn/primitives";
@@ -35,6 +36,7 @@ const notes: Record<string, string> = {
 };
 
 export function LiveActivity({ kind }: { kind?: string }) {
+  const net = useNetworkFacts();
   const { technical } = useViewMode();
   const key = kind && kind in filters ? kind : "blocks", f = filters[key];
   const chips = <nav className="filter-chips" aria-label="Filter activity">{Object.entries(filters).map(([k, { label }]) =>
@@ -48,8 +50,8 @@ export function LiveActivity({ kind }: { kind?: string }) {
         : <ActivityFeed key={key} kind={f.kind} withTreasury={f.withTreasury} changes={!f.readings} order={f.readings ? "observed" : "block"} limit={f.readings ? 25 : 60} paged/>}
     </>;
   if (!technical) return <main className="page-shell">
-    <PageHead eyebrow="LIVE ON BETANET"/><h1>What is happening now</h1>
-    <p className="lede">Betanet block by block, newest first. For each L1 block: what it contained, and what our readings found had changed while it was the newest block. Every line links to the record behind it. Looking for something specific? <Link className="text-link" href="/search">Search a block, transaction or sidechain</Link>.</p>
+    <PageHead eyebrow={`LIVE ON ${net.name.toUpperCase()}`}/><h1>What is happening now</h1>
+    <p className="lede">{net.name} block by block, newest first. For each L1 block: what it contained, and what our readings found had changed while it was the newest block. Every line links to the record behind it. Looking for something specific? <Link className="text-link" href="/search">Search a block, transaction or sidechain</Link>.</p>
     <NetworkPulse technical={false}/>
     {chips}
     {activity}
@@ -58,7 +60,7 @@ export function LiveActivity({ kind }: { kind?: string }) {
     </GoDeeper>
   </main>;
   return <main className="page-shell live-wide">
-    <PageHead eyebrow="LIVE ON BETANET"/><h1>What is happening now</h1>
+    <PageHead eyebrow={`LIVE ON ${net.name.toUpperCase()}`}/><h1>What is happening now</h1>
     <p className="lede">L1 and its drivechains as exact figures: every block, bid, vote and treasury change, each with its evidence. <Link className="text-link" href="/search">Search</Link> · <Link className="text-link" href="/learn/how-we-know">how the data is collected</Link></p>
     <NetworkPulse technical/>
     {chips}
