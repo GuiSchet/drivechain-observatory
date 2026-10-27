@@ -1,4 +1,5 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,11 +28,12 @@ function useDaySummary(hours: number) {
  * left out.
  */
 export function DaySummary({ hours = 24, controls }: { hours?: 24 | 168; controls?: ReactNode }) {
+  const net = useNetworkFacts();
   const unit = useUnit(), summary = useDaySummary(hours), w = summary.data?.window;
   const period = hours === 24 ? "24 hours" : "7 days";
   const at = (count: number) => w?.truncated ? `at least ${n(count)}` : n(count);
   const missing = w ? w.blocks - w.blocks_on_branch : 0, unobserved = w ? w.blocks - w.bmm_observed_blocks : 0;
-  return <LivePanel controls={controls} title={w && w.blocks ? `The last ${period} on Betanet (blocks ${n(w.from_height)}–${n(w.to_height)})` : `The last ${period} on Betanet`}
+  return <LivePanel controls={controls} title={w && w.blocks ? `The last ${period} on ${net.name} (blocks ${n(w.from_height)}–${n(w.to_height)})` : `The last ${period} on ${net.name}`}
     status={{ pending: summary.isPending, error: summary.isError && !summary.data, updating: summary.data?.updating,
       empty: !w || !w.blocks, emptyText: !w ? "Updating to the newest block; the counts appear once it is processed." : `No block on the selected chain has a timestamp in the last ${period}.` }}
     footer={w && w.blocks ? <>Every figure counts the same {n(w.blocks)} blocks, {n(w.from_height)}–{n(w.to_height)}: from the first block whose own timestamp falls in the last {period} to the newest. Timestamps are set by miners, so the period is approximate.{missing > 0 ? ` ${n(missing)} of these blocks are missing from our copy of the chain, so counts may be low.` : ""} Readings of state are not counted. <Link href="/live">See them in Live →</Link></> : undefined}>

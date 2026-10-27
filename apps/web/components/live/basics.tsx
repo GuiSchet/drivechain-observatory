@@ -1,4 +1,5 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -19,6 +20,7 @@ export function useNow(interval = 5_000) {
 
 /** Four separate facts, each with its own quality and proof: a block, and three readings of state. */
 export function NetworkSnapshot() {
+  const net = useNetworkFacts();
   const overview = useOverview(), observatory = useObservatory(), unit = useUnit(), now = useNow();
   const o = overview.data, data = observatory.data, state = object(data?.state);
   const treasury = object(state.treasury), dataset = data?.context.meta.dataset_id;
@@ -35,7 +37,7 @@ export function NetworkSnapshot() {
   // A zero is shown only when the reading behind it was complete; otherwise the value is unknown.
   const knownActive = known(data, "sidechains"), knownTreasury = known(data, "treasury"), knownBundles = known(data, "bundles");
   const missing = unknownText(data);
-  return <LivePanel title="eCash Betanet right now"
+  return <LivePanel title={`${net.fullName} right now`}
     status={{ pending: overview.isPending && observatory.isPending, error: overview.isError && observatory.isError && !o && !data, updating: data?.readiness === "updating" }}
     footer="The block is observed directly. The other three are separate readings of current state taken at the chain tip, so each has its own label and evidence.">
     <div className="stat-grid">

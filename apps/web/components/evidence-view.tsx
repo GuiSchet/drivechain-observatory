@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { apiBaseUrl, getEvidence } from "@/lib/api";
+import { getEvidence } from "@/lib/api";
+import { useApiBase } from "@/components/providers";
 import type { Evidence } from "@/lib/types";
 import { captureText, summarizeEvidence } from "@/lib/evidence";
 import { timeAgo } from "@/lib/explain";
@@ -19,7 +20,7 @@ function utc(iso: string | null | undefined): string {
 /** One recorded event: what it says in words first, then when it was seen, then the exact record. */
 export function EvidenceView({ dataset, id, initial }: { dataset: string; id: string; initial: Evidence | null }) {
   const query = useQuery({ queryKey: ["events", dataset, id], queryFn: () => getEvidence(dataset, id), initialData: initial ?? undefined });
-  const names = useSidechainNames(), unit = useUnit(), now = useNow(30_000);
+  const names = useSidechainNames(), unit = useUnit(), now = useNow(30_000), apiBaseUrl = useApiBase();
   const [copy, setCopy] = useState("Copy exact JSON");
   const e = query.data;
   const s = e ? summarizeEvidence(e.kind, e.payload_json, names, unit) : undefined;

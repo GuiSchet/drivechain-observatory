@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { apiBaseUrl, getJson } from "@/lib/api";
+import { getJson } from "@/lib/api";
+import { useApiBase } from "@/components/providers";
 import { apiQuery, label } from "@/lib/protocol";
 import { readingTip } from "@/lib/activity";
 import { describeActivity, sidechainLabel } from "@/lib/explain";
@@ -13,7 +14,7 @@ import { ConfidenceChip, CopyText } from "@/components/learn/primitives";
 
 /** One kind of activity as a table, with the same records as the plain-English feed and the API call behind it. */
 export function ActivityTable({ kind, changes = true, order = "block", limit = 60 }: { kind?: string; changes?: boolean; order?: "block" | "observed"; limit?: number }) {
-  const names = useSidechainNames(), unit = useUnit();
+  const names = useSidechainNames(), unit = useUnit(), apiBaseUrl = useApiBase();
   const key = apiQuery({ kind, limit, order, changes: changes ? "true" : undefined });
   const result = useInfiniteQuery({
     queryKey: ["protocol", "activity", "table", key], initialPageParam: "",

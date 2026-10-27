@@ -370,6 +370,8 @@ pub struct RetargetEpoch {
     pub epoch_start_time: Option<DateTime<Utc>>,
     /// Mean seconds per block in this epoch so far.
     pub mean_spacing_seconds: Option<f64>,
-    /// target spacing / mean spacing, limited to 0.25–4 like the retarget rule; noisy early in an epoch.
+    /// The difficulty factor the next retarget would apply at this epoch's pace so far: target spacing / mean
+    /// spacing, limited to 0.25–4 like the retarget rule, and on eCash mainnet from its fork dampened to
+    /// 7r / (6r + 1); noisy early in an epoch.
     pub estimated_adjustment: Option<f64>,
 }

@@ -71,7 +71,7 @@ export function BmmDiagram() {
 }
 
 export function PipelineDiagram() {
-  const steps = [["Betanet node", "blocks, headers"], ["Enforcer", "BIP300/301 API"], ["Monitor", "records readings"], ["Observatory", "verified copy"], ["This site", "explains it"]];
+  const steps = [["eCash node", "blocks, headers"], ["Enforcer", "BIP300/301 API"], ["Monitor", "records readings"], ["Observatory", "verified copy"], ["This site", "explains it"]];
   return <figure className="diagram">
     <svg viewBox="0 0 680 120" role="img" aria-labelledby="pd-title">
       <title id="pd-title">From the network to this page: node and enforcer, monitor, Observatory, this site</title>

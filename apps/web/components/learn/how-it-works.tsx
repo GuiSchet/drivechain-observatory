@@ -1,4 +1,5 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { useReducedMotion } from "motion/react";
@@ -26,6 +27,7 @@ function useExample() {
 }
 
 export function HowItWorks() {
+  const net = useNetworkFacts();
   const { sc, treasury, votes, hasBundle, bmm, params, loaded } = useExample();
   const reduced = useReducedMotion();
   const [step, setStep] = useState(0);
@@ -53,7 +55,7 @@ export function HowItWorks() {
   return <section className="how-it-works" aria-labelledby="hiw-title">
     <div className="hiw-head">
       <h2 id="hiw-title">How a drivechain works, in 4 steps</h2>
-      <p>Follow one coin through {sc?.title ? <strong>{sc.title}</strong> : "a sidechain"}, with real numbers from eCash Betanet.</p>
+      <p>Follow one coin through {sc?.title ? <strong>{sc.title}</strong> : "a sidechain"}, with real numbers from {net.fullName}.</p>
     </div>
     <div className="hiw-body">
       <svg className="hiw-scene" data-step={step + 1} viewBox="0 0 760 400" role="img" aria-labelledby="hiw-svg-title">
@@ -65,7 +67,7 @@ export function HowItWorks() {
         {[0, 1, 2, 3, 4].map(i => <rect key={i} className={`hiw-sblock ${i === 4 ? "hiw-new" : ""}`} x={196 + i * 78} y="58" width="58" height="48" rx="7"/>)}
         {/* L1 lane, with the treasury living in it */}
         <rect className="hiw-lane hiw-lane-l1" x="170" y="220" width="420" height="160" rx="14"/>
-        <text className="hiw-lane-label" x="186" y="242">L1 · ECASH BETANET</text>
+        <text className="hiw-lane-label" x="186" y="242">L1 · {net.fullName.toUpperCase()}</text>
         <g className="hiw-vault">
           <rect x="196" y="254" width="200" height="52" rx="10"/>
           <text x="296" y="276" textAnchor="middle" className="hiw-strong">{label(`${sc?.title ?? "Sidechain"} treasury`, 22)}</text>

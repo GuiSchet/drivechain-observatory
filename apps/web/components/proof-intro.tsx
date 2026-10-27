@@ -6,7 +6,7 @@ const kinds: Record<string, [string, string]> = {
   block_connected: ["The enforcer's report of one L1 block for one sidechain slot: its deposits, withdrawal events and merged-mining commitment.", "deposits"],
   block_disconnected: ["The enforcer's report that a block was removed from the chain by a reorganization.", "blocks"],
   mainchain_transition: ["A change of the chain tip, as the enforcer's live event stream reported it.", "blocks"],
-  mainchain_block: ["A block header read from the Betanet node.", "blocks"],
+  mainchain_block: ["A block header read from our eCash node.", "blocks"],
   chain_tip: ["A reading of the chain tip.", "blocks"],
   chain_info: ["The network parameters the enforcer reported, including the BIP300 thresholds.", "creating-a-sidechain"],
   active_sidechains: ["A reading of which sidechains are active.", "slots"],

@@ -29,6 +29,9 @@
 .live-pill.health-delayed { border-color: #765524; color: #ffc77d; }
 .live-pill.health-delayed .status-dot { background: #ffb347; box-shadow: 0 0 10px #ffb347; }
 .live-pill.health-degraded, .live-pill.health-offline { border-color: #855849; color: #ffc0b0; }
+.network-picker { margin-left: auto; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--text); font-size: 12px; }
+.network-picker option { background: #141310; }
+.network-picker + .live-pill { margin-left: 0; }
 .live-pill.health-degraded .status-dot, .live-pill.health-offline .status-dot { background: var(--red); box-shadow: 0 0 10px var(--red); }
 .status-banner { box-sizing: border-box; width: min(1240px, calc(100% - 32px)); margin: 12px auto 0; padding: 10px 16px; border-radius: 10px; font-size: 14px; line-height: 1.5; }
 .status-banner.health-delayed { color: #ffc77d; border: 1px solid #765524; background: rgba(255, 179, 71, 0.06); }
@@ -70,9 +73,9 @@
 .analogy { display: flex; gap: 12px; align-items: flex-start; margin: 20px 0; padding: 16px 18px; border-radius: 12px; border-left: 3px solid var(--orange); background: transparent; color: var(--reading); font-size: 16px; line-height: 1.65; }
 .analogy svg { flex-shrink: 0; margin-top: 4px; color: var(--orange); }
 .spec-note { margin: 28px 0; padding: 18px 20px; border-left: 3px solid var(--violet); border-radius: 0 12px 12px 0; background: rgba(199, 169, 222, 0.06); }
-.spec-note.spec-betanet { border-left-color: var(--green-soft); background: rgba(128, 229, 160, 0.06); }
+.spec-note.spec-network { border-left-color: var(--green-soft); background: rgba(128, 229, 160, 0.06); }
 .spec-label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; text-transform: uppercase; color: var(--violet); }
-.spec-betanet .spec-label { color: var(--green-soft); }
+.spec-network .spec-label { color: var(--green-soft); }
 .spec-body { font-size: 15px; line-height: 1.7; color: var(--reading); }
 .ref-links { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; }
 .ref-links a { display: inline-flex; align-items: center; gap: 5px; color: var(--orange-strong); text-decoration: underline; text-underline-offset: 3px; }

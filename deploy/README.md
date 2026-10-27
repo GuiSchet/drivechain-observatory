@@ -58,7 +58,7 @@ timeout, idle transaction timeout, and SCRAM authentication. Permit its network
 connection only from the Observatory VM private address.
 
 
-## Betanet source configuration and upgrade
+## Source configuration and upgrade
 
 The source must provide a current running enforcer with the required
 capabilities: official contract 9 with SQL schema 10 and a fresh dataset.
@@ -71,6 +71,23 @@ are `betanet`, activation height `967680`, hash
 A mismatching source, incompatible contract or loss of continuity stops import
 with `incompatible`; existing local evidence remains available. Dataset changes
 require an explicit local reconciliation; the API never selects the newest row.
+
+### Another network on another host
+
+Each network has its own Observatory backend: database, sync, API and Caddy, on
+the host of that network's monitor, so sync reads its monitor locally. Build it
+from the same release source as the existing backend and change only its
+environment. For eCash mainnet:
+
+- `PULSE_NETWORK_ID=mainnet`, `PULSE_ACTIVATION_HEIGHT=973728`;
+- `PULSE_ACTIVATION_HASH` (block 973728) and `PULSE_DATASET_ID` (the mainnet
+  monitor's manifest UUID), known only once the fork block is mined and the
+  monitor has created its dataset;
+- `PULSE_API_DOMAIN`, the API's own domain;
+- `PULSE_CORS_ORIGIN`, the web app's origin, the same as for Betanet.
+
+The web app then lists both APIs in `NEXT_PUBLIC_NETWORKS` (see
+`apps/web/.env.example`).
 
 Observatory rejects every dataset created by another event contract, including
 those without sidechain rows.

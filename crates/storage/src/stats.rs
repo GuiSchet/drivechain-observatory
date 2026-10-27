@@ -610,8 +610,49 @@ pub struct NetworkQuery {
     /// Blocks to measure pace and hashrate over: 144 (default), 1008 or 2016.
     pub window_blocks: Option<u32>,
 }
-const RETARGET_INTERVAL: i32 = 2016;
 const TARGET_SPACING: i64 = 600;
+
+/// How a network retargets at a height. Bitcoin, Betanet and eCash before its fork adjust every
+/// 2,016 blocks by the measured pace, at most ×4 either way. eCash mainnet from its fork adjusts
+/// every 288 blocks and moves the target a seventh of the way: new = old × (6T + A) / 7T
+/// (`ecash-com/bitcoin` 5bd8690, `src/pow.cpp`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RetargetRule {
+    interval: i32,
+    dampened: bool,
+}
+
+fn retarget_rule(network_id: &str, activation_height: i32, height: i32) -> RetargetRule {
+    if network_id == "mainnet" && height >= activation_height {
+        RetargetRule {
+            interval: 288,
+            dampened: true,
+        }
+    } else {
+        RetargetRule {
+            interval: 2016,
+            dampened: false,
+        }
+    }
+}
+
+impl RetargetRule {
+    /// The first block of the epoch `height` is in.
+    fn epoch_start(self, height: i32) -> i32 {
+        height - height % self.interval
+    }
+
+    /// The difficulty factor the retarget would apply at `mean` seconds per block. With
+    /// r = T/A limited to 0.25–4, that is r, or 7r / (6r + 1) when dampened (0.7–1.12).
+    fn adjustment(self, mean: f64) -> f64 {
+        let r = (TARGET_SPACING as f64 / mean).clamp(0.25, 4.0);
+        if self.dampened {
+            7.0 * r / (6.0 * r + 1.0)
+        } else {
+            r
+        }
+    }
+}
 
 /// The usual difficulty scale: work × 0xffff / 2^48, since difficulty 1 is 2^48/0xffff hashes.
 fn difficulty(work: &str) -> Option<f64> {
@@ -729,7 +770,8 @@ pub async fn network(pool: &PgPool, q: NetworkQuery) -> Result<NetworkResponse, 
     let tip = series.first().cloned();
     let retarget = match &tip {
         Some(t) => {
-            let start = t.height - t.height % RETARGET_INTERVAL;
+            let rule = retarget_rule(&data.network_id, data.activation_height, t.height);
+            let start = rule.epoch_start(t.height);
             let start_time: Option<DateTime<Utc>> = sqlx::query_scalar(&format!(
                 "SELECT block_time FROM ({header} AND m.height=$3) x"
             ))
@@ -745,17 +787,15 @@ pub async fn network(pool: &PgPool, q: NetworkQuery) -> Result<NetworkResponse, 
                 .filter(|_| into > 0)
                 .map(|(a, b)| (b - a).num_seconds() as f64 / f64::from(into));
             Some(RetargetEpoch {
-                interval_blocks: RETARGET_INTERVAL,
+                interval_blocks: rule.interval,
                 target_spacing_seconds: TARGET_SPACING,
                 epoch_start_height: start,
-                next_retarget_height: start + RETARGET_INTERVAL,
+                next_retarget_height: start + rule.interval,
                 blocks_into_epoch: into,
-                blocks_remaining: start + RETARGET_INTERVAL - t.height,
+                blocks_remaining: start + rule.interval - t.height,
                 epoch_start_time: start_time,
                 mean_spacing_seconds: mean,
-                estimated_adjustment: mean
-                    .filter(|m| *m > 0.0)
-                    .map(|m| (TARGET_SPACING as f64 / m).clamp(0.25, 4.0)),
+                estimated_adjustment: mean.filter(|m| *m > 0.0).map(|m| rule.adjustment(m)),
             })
         }
         None => None,
@@ -978,6 +1018,42 @@ mod tests {
             b.block_work = Some("45858218460663607040".into());
         }
         assert!(epoch_pace(&same, 973_728).is_none());
+    }
+    #[test]
+    fn each_network_retargets_on_its_own_interval() {
+        let epoch = |r: RetargetRule, h: i32| (r.epoch_start(h), r.epoch_start(h) + r.interval);
+        let betanet = retarget_rule("betanet", 967_680, 974_022);
+        assert_eq!(
+            betanet,
+            RetargetRule {
+                interval: 2016,
+                dampened: false
+            }
+        );
+        assert_eq!(epoch(betanet, 974_022), (973_728, 975_744));
+        let mainnet = retarget_rule("mainnet", 973_728, 973_800);
+        assert_eq!(
+            mainnet,
+            RetargetRule {
+                interval: 288,
+                dampened: true
+            }
+        );
+        assert_eq!(epoch(mainnet, 973_800), (973_728, 974_016));
+        // Before its fork, eCash mainnet still follows Bitcoin.
+        assert_eq!(retarget_rule("mainnet", 973_728, 973_727).interval, 2016);
+    }
+    #[test]
+    fn mainnet_moves_difficulty_a_seventh_of_the_way() {
+        let full = retarget_rule("betanet", 967_680, 974_022);
+        let dampened = retarget_rule("mainnet", 973_728, 973_800);
+        // Blocks twice as fast: ×2, or 7·2 / (6·2 + 1) dampened.
+        assert_eq!(full.adjustment(300.0), 2.0);
+        assert!((dampened.adjustment(300.0) - 14.0 / 13.0).abs() < 1e-12);
+        // The ×4 limits bound the dampened step to 28/25 and 7/10.
+        assert!((dampened.adjustment(1.0) - 28.0 / 25.0).abs() < 1e-12);
+        assert!((dampened.adjustment(1e9) - 0.7).abs() < 1e-12);
+        assert_eq!(dampened.adjustment(600.0), 1.0);
     }
     #[test]
     fn difficulty_matches_header_targets() {

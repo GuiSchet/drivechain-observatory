@@ -1,7 +1,8 @@
 "use client";
+import { useNetworkFacts } from "@/components/providers";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { getJson } from "@/lib/api";
+import { getProvenance } from "@/lib/api";
 import { object, short } from "@/lib/protocol";
 import { timeAgo } from "@/lib/explain";
 import { n } from "@/lib/live";
@@ -16,11 +17,11 @@ function utc(iso: unknown): string {
 
 const sourceText: Record<string, string> = {
   enforcer: "the official BIP300/301 enforcer: sidechains, treasuries, withdrawals, merged-mining bids and the blocks it connects",
-  node: "our Betanet node: block headers and the chain tip",
+  node: "our eCash node: block headers and the chain tip",
 };
 
-function useRecord(resource: "runs" | "snapshot-groups", id: string) {
-  return useQuery({ queryKey: ["provenance", resource, id], queryFn: () => getJson<ProtocolPage>(`/api/v1/${resource}/${encodeURIComponent(id)}`) });
+function useRecord(resource: "runs" | "snapshot-groups", id: string, initial: ProtocolPage | null) {
+  return useQuery({ queryKey: ["provenance", resource, id], queryFn: () => getProvenance(resource, id), initialData: initial ?? undefined });
 }
 
 function Shell({ back, eyebrow, title, children, loading, failed }: { back?: React.ReactNode; eyebrow: string; title: string; children: React.ReactNode; loading: boolean; failed: boolean }) {
@@ -34,8 +35,9 @@ function Shell({ back, eyebrow, title, children, loading, failed }: { back?: Rea
 }
 
 /** One monitor session: which source it read, when, with which software. */
-export function RunView({ id }: { id: string }) {
-  const query = useRecord("runs", id), now = useNow(30_000);
+export function RunView({ id, initial }: { id: string; initial: ProtocolPage | null }) {
+  const net = useNetworkFacts();
+  const query = useRecord("runs", id, initial), now = useNow(30_000);
   const item = query.data?.items[0], d = object(item?.data);
   const running = d.status === "running" || (d.finished_at == null && d.status == null);
   const reviewed = d.enforcer_commit === ENFORCER_COMMIT;
@@ -52,7 +54,7 @@ export function RunView({ id }: { id: string }) {
         <h2>Software it ran</h2>
         <dl className="facts">
           <dt>Enforcer</dt><dd className="hash">{typeof d.enforcer_commit === "string" ? <a className="text-link" href={reviewed ? references.enforcer.href : `https://github.com/LayerTwo-Labs/bip300301_enforcer/commit/${d.enforcer_commit}`} target="_blank" rel="noopener noreferrer">{commit(d.enforcer_commit)}</a> : "unknown"}{reviewed && " · the build these lessons were checked against"}</dd>
-          <dt>Betanet node</dt><dd className="hash">{commit(d.node_commit)}</dd>
+          <dt>{net.name} node</dt><dd className="hash">{commit(d.node_commit)}</dd>
           <dt>Monitor</dt><dd className="hash">{commit(d.monitor_commit)}</dd>
           <dt>Record format</dt><dd>contract v{String(d.event_contract_version ?? "?")}</dd>
         </dl>
@@ -67,8 +69,8 @@ export function RunView({ id }: { id: string }) {
 }
 
 /** A group of readings taken together, and whether the chain stayed still while they were taken. */
-export function SnapshotView({ id }: { id: string }) {
-  const query = useRecord("snapshot-groups", id), now = useNow(30_000);
+export function SnapshotView({ id, initial }: { id: string; initial: ProtocolPage | null }) {
+  const query = useRecord("snapshot-groups", id, initial), now = useNow(30_000);
   const item = query.data?.items[0], d = object(item?.data);
   const before = typeof d.tip_before_height === "number" ? d.tip_before_height : undefined, after = typeof d.tip_after_height === "number" ? d.tip_after_height : undefined;
   const ms = typeof d.started_at === "string" && typeof d.finished_at === "string" ? Date.parse(d.finished_at) - Date.parse(d.started_at) : undefined;

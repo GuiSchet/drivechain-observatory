@@ -61,9 +61,9 @@ export function summarizeEvidence(kind: string, payloadJson: string, names: Side
       return { title: `Live notice: ${blockNumber(height)} ${added ? "added" : "changed"}`, lines, block, lesson: "blocks", reading: false };
     }
     case "ChainTip":
-      return { title: `Tip reading: ${blockNumber(height)}`, lines: [`Our Betanet node reported ${blockNumber(height)} as the newest block of its chain at the moment of this reading.`], block, lesson: "blocks", reading: false };
+      return { title: `Tip reading: ${blockNumber(height)}`, lines: [`Our eCash node reported ${blockNumber(height)} as the newest block of its chain at the moment of this reading.`], block, lesson: "blocks", reading: false };
     case "MainchainBlock":
-      return { title: `Block header: ${blockNumber(height)}`, lines: [`The header of ${blockNumber(height)} as our Betanet node reported it: its hash, its parent and its proof of work. Only the header is kept; the record's fingerprint covers the whole block.`], block, lesson: "blocks", reading: false };
+      return { title: `Block header: ${blockNumber(height)}`, lines: [`The header of ${blockNumber(height)} as our eCash node reported it: its hash, its parent and its proof of work. Only the header is kept; the record's fingerprint covers the whole block.`], block, lesson: "blocks", reading: false };
     case "ChainInfo": {
       const c = object(body.bip300_constants), n = (k: string) => num(c[k])?.toLocaleString("en-US") ?? "unknown";
       return { title: "The network's BIP300 rules", lines: [
