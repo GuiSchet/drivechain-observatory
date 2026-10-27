@@ -1417,7 +1417,9 @@ export interface components {
             epoch_start_time?: string | null;
             /**
              * Format: double
-             * @description target spacing / mean spacing, limited to 0.25–4 like the retarget rule; noisy early in an epoch.
+             * @description The difficulty factor the next retarget would apply at this epoch's pace so far: target spacing / mean
+             *     spacing, limited to 0.25–4 like the retarget rule, and on eCash mainnet from its fork dampened to
+             *     7r / (6r + 1); noisy early in an epoch.
              */
             estimated_adjustment?: number | null;
             /** Format: int32 */
