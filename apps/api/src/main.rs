@@ -427,14 +427,29 @@ fn update_event(update: &PublicUpdate) -> Option<Event> {
 
 async fn poll_outbox(pool: PgPool, updates: broadcast::Sender<StreamMessage>) {
     let mut cursor: Option<StreamCursor> = None;
+    // The last probe whose window was read and fully drained; the same probe means nothing new to send.
+    let mut settled: Option<pulse_storage::StreamProbe> = None;
     let mut interval = tokio::time::interval(Duration::from_millis(500));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         interval.tick().await;
+        let probe = match pulse_storage::stream_probe(&pool).await {
+            Ok(probe) => probe,
+            Err(error) => {
+                warn!(%error,"SSE outbox unavailable");
+                settled = None;
+                let _ = updates.send(StreamMessage::Unavailable);
+                continue;
+            }
+        };
+        if probe.is_some() && probe == settled {
+            continue;
+        }
         let window = match pulse_storage::stream_window(&pool).await {
             Ok(window) => window,
             Err(error) => {
                 warn!(%error,"SSE outbox unavailable");
+                settled = None;
                 let _ = updates.send(StreamMessage::Unavailable);
                 continue;
             }
@@ -456,9 +471,12 @@ async fn poll_outbox(pool: PgPool, updates: broadcast::Sender<StreamMessage>) {
                     let _ = updates.send(StreamMessage::Update(update));
                 }
                 cursor = Some(current);
+                // Settled once every update up to the window's revision was sent; a longer backlog drains next tick.
+                settled = probe.filter(|_| current.revision >= window.cursor.revision);
             }
             Err(error) => {
                 warn!(%error,"failed to poll SSE outbox");
+                settled = None;
                 let _ = updates.send(StreamMessage::Unavailable);
             }
         }

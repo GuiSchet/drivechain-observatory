@@ -370,6 +370,18 @@ pub async fn state(conn: &mut PgConnection, d: Uuid, g: i64) -> Result<BranchSta
         .map(|v| v.unwrap_or_else(BranchState::awaiting))
         .map_err(Into::into)
 }
+/// What a reader of /status, /blocks or /overview can see of the branch. The counters of processed rows, the capture
+/// sequence and the time of the latest re-read move every cycle; announcing them would refetch every page for nothing.
+fn public(s: &BranchState) -> Value {
+    json!([
+        semantic(s),
+        s.processing,
+        s.node_tip_hash,
+        s.node_tip_height,
+        s.joint_source_status
+    ])
+}
+
 fn semantic(s: &BranchState) -> Value {
     json!([
         s.status,
@@ -567,7 +579,7 @@ pub async fn apply(
         .execute(&mut *tx)
         .await?;
     }
-    if publish && next != old {
+    if publish && public(&next) != public(&old) {
         append_update(
             &mut tx,
             d,
