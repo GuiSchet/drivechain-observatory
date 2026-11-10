@@ -69,7 +69,7 @@ export function ActivityFeed({ slot, kind, limit = 20, paged = false, compact = 
   const key = apiQuery({ slot, kind: withTreasury && kind ? `${kind},ctip` : kind, limit, order, changes: changes ? "true" : undefined });
   const result = useInfiniteQuery({
     queryKey: ["protocol", "activity", "feed", key], initialPageParam: "",
-    queryFn: ({ pageParam }) => getJson<ProtocolPage>(`/api/v1/activity?${key}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
+    queryFn: ({ pageParam, signal }) => getJson<ProtocolPage>(`/api/v1/activity?${key}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`, undefined, signal),
     getNextPageParam: page => page.next_cursor ?? undefined,
   });
   const items = result.data?.pages.flatMap(p => p.items) ?? [];

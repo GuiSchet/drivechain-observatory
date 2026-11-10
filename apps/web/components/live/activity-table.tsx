@@ -18,7 +18,7 @@ export function ActivityTable({ kind, changes = true, order = "block", limit = 6
   const key = apiQuery({ kind, limit, order, changes: changes ? "true" : undefined });
   const result = useInfiniteQuery({
     queryKey: ["protocol", "activity", "table", key], initialPageParam: "",
-    queryFn: ({ pageParam }) => getJson<ProtocolPage>(`/api/v1/activity?${key}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
+    queryFn: ({ pageParam, signal }) => getJson<ProtocolPage>(`/api/v1/activity?${key}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`, undefined, signal),
     getNextPageParam: page => page.next_cursor ?? undefined,
   });
   const items = result.data?.pages.flatMap(p => p.items) ?? [], dataset = result.data?.pages[0]?.context.meta.dataset_id;

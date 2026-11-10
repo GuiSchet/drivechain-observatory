@@ -33,8 +33,10 @@ export function Analogy({ children }: { children: ReactNode }) {
   return <p className="analogy"><Lightbulb size={16} aria-hidden="true"/><span>{children}</span></p>;
 }
 
-export function GoDeeper({ summary, children }: { summary: string; children: ReactNode }) {
-  return <details className="go-deeper"><summary>Go deeper: {summary}</summary><div>{children}</div></details>;
+/** `lazy`: mount the children (and fetch their live data) only once the reader opens the section. */
+export function GoDeeper({ summary, children, lazy = false }: { summary: string; children: ReactNode; lazy?: boolean }) {
+  const [opened, setOpened] = useState(!lazy);
+  return <details className="go-deeper" onToggle={e => { if (e.currentTarget.open) setOpened(true); }}><summary>Go deeper: {summary}</summary><div>{opened ? children : null}</div></details>;
 }
 
 export function ConfidenceChip({ quality }: { quality: string | null | undefined }) {

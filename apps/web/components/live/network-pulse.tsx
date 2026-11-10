@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getAuctions } from "@/lib/api";
 import { object } from "@/lib/protocol";
 import { formatCoins, formatSats, sats, timeAgo } from "@/lib/explain";
-import { activeSidechains, bidsKnown, known, n, snapshotOf, unknownText, useObservatory, weakestQuality } from "@/lib/live";
+import { FALLBACK_POLL_MS, activeSidechains, bidsKnown, known, n, snapshotOf, unknownText, useObservatory, weakestQuality } from "@/lib/live";
 import { formatDifficulty, formatDuration, formatHashrate, useNetworkStats } from "@/lib/stats";
 import { useUnit } from "@/lib/unit";
 import { CopyHash, Method, Stat } from "@/components/learn/primitives";
@@ -16,7 +16,7 @@ const MIN_EPOCH_BLOCKS = 6;
 /** The state of L1 and of the drivechains right now, each figure with how it is measured. */
 export function NetworkPulse({ technical }: { technical: boolean }) {
   const net = useNetworkStats(144), observatory = useObservatory(), unit = useUnit(), now = useNow(1_000);
-  const auctions = useQuery({ queryKey: ["bmm"], queryFn: getAuctions, refetchInterval: 5_000 });
+  const auctions = useQuery({ queryKey: ["bmm"], queryFn: getAuctions, refetchInterval: FALLBACK_POLL_MS });
   const d = net.data, tip = d?.tip, r = d?.retarget, data = observatory.data, state = object(data?.state);
   const active = activeSidechains(data);
   const values = Object.values(object(state.treasury)).map(v => sats(object(v).value_sats)).filter((v): v is bigint => v !== undefined);

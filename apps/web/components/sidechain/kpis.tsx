@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getAuctions } from "@/lib/api";
 import { object } from "@/lib/protocol";
 import { formatCoins, formatSats, timeAgo } from "@/lib/explain";
-import { bidsKnown, n, snapshotOf, useObservatory, type ActiveSidechain } from "@/lib/live";
+import { FALLBACK_POLL_MS, bidsKnown, n, snapshotOf, useObservatory, type ActiveSidechain } from "@/lib/live";
 import { percent } from "@/lib/stats";
 import type { SidechainStats } from "@/lib/types";
 import { useUnit } from "@/lib/unit";
@@ -13,7 +13,7 @@ import { useNow } from "@/components/live/basics";
 /** The sidechain's main figures at a glance, each with how it is measured. */
 export function SidechainKpis({ sc, stats, failed = false, technical }: { sc: ActiveSidechain; stats?: SidechainStats; failed?: boolean; technical: boolean }) {
   const observatory = useObservatory(), unit = useUnit(), now = useNow(30_000);
-  const auctions = useQuery({ queryKey: ["bmm"], queryFn: getAuctions, refetchInterval: 5_000 });
+  const auctions = useQuery({ queryKey: ["bmm"], queryFn: getAuctions, refetchInterval: FALLBACK_POLL_MS });
   const treasury = object(object(observatory.data?.state).treasury)[String(sc.slot)];
   const value = treasury ? object(treasury).value_sats : undefined;
   const ctipRead = snapshotOf(observatory.data, "ctip", sc.slot);

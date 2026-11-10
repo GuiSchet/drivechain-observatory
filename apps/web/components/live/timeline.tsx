@@ -29,13 +29,13 @@ function heightOf(item: ProtocolItem): number | undefined {
 export function useTimeline() {
   const blocks = useInfiniteQuery({
     queryKey: ["protocol", "blocks", "timeline"], initialPageParam: "",
-    queryFn: ({ pageParam }) => getBlocks(`limit=15${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
+    queryFn: ({ pageParam, signal }) => getBlocks(`limit=15${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`, signal),
     getNextPageParam: page => page.next_cursor ?? undefined,
   });
   const feedKey = apiQuery({ kind: FEED, changes: "true", order: "block", limit: 200 });
   const feed = useInfiniteQuery({
     queryKey: ["protocol", "activity", "timeline", feedKey], initialPageParam: "",
-    queryFn: ({ pageParam }) => getJson<ProtocolPage>(`/api/v1/activity?${feedKey}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
+    queryFn: ({ pageParam, signal }) => getJson<ProtocolPage>(`/api/v1/activity?${feedKey}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`, undefined, signal),
     getNextPageParam: page => page.next_cursor ?? undefined,
   });
   // Every slot, following the API's pages of 16 slots.
@@ -78,8 +78,10 @@ export function useTimeline() {
   };
   return {
     shown, buckets, cells, previous, proof, dataset, loadMore,
-    pending: blocks.isPending || feed.isPending,
-    error: (blocks.isError && !list.length) || (feed.isError && !items.length),
+    // The blocks show as soon as they arrive; what each one contained fills in when the feed does.
+    pending: blocks.isPending,
+    error: blocks.isError && !list.length,
+    activity: feed.data ? "ready" as const : feed.isError ? "error" as const : "loading" as const,
     more: blocks.hasNextPage || feed.hasNextPage,
     loading: blocks.isFetchingNextPage || feed.isFetchingNextPage,
   };
@@ -91,13 +93,14 @@ export function useTimeline() {
  */
 export function BlockTimeline() {
   const names = useSidechainNames(), unit = useUnit(), now = useNow(15_000), live = useLiveActivity();
-  const { shown, buckets, cells, previous, proof, dataset, loadMore, pending, error, more, loading } = useTimeline();
+  const { shown, buckets, cells, previous, proof, dataset, loadMore, pending, error, activity, more, loading } = useTimeline();
   const P = ({ item }: { item: ProtocolItem }) => proof(item) ? <> <Link className="tl-proof" href={proof(item)!}>evidence</Link></> : null;
 
   if (pending) return <p className="live-empty" role="status">Loading the latest blocks…</p>;
   if (error) return <p className="live-empty" role="status">Live activity is unavailable right now; retrying automatically.</p>;
 
   return <>
+    {activity !== "ready" && <p className="live-note" role="status">{activity === "loading" ? "Loading what each block contained…" : "What each block contained is unavailable right now; retrying automatically."}</p>}
     <ol className="timeline-blocks">{shown.map((b, index) => {
       const at_ = buckets.get(b.height), slots = cells.get(b.height) ?? [];
       const committed = slots.filter(c => c.state === "present"), observed = slots.filter(c => c.state !== "unknown_eligibility");
@@ -130,7 +133,7 @@ export function BlockTimeline() {
             return <li key={item.id}>{describeActivity(item, names, unit)}<P item={item}/></li>;
           })}</ul>
         </div>}
-        {!observed.length && !at_ && <p className="tl-quiet">Nothing recorded for this block yet.</p>}
+        {!observed.length && !at_ && activity === "ready" && <p className="tl-quiet">Nothing recorded for this block yet.</p>}
       </li>;
     })}</ol>
     {more && <div className="pagination"><button disabled={loading} onClick={loadMore}>{loading ? "Loading…" : "Show older blocks"}</button></div>}

@@ -14,8 +14,8 @@ type SummaryView = Summary & { updating: boolean };
 /** While the API catches up with a new block it counts nothing; that is not zero, so the last count stays. */
 function useDaySummary(hours: number) {
   const client = useQueryClient(), summaryKey = ["protocol", "summary", `hours=${hours}`];
-  return useQuery({ queryKey: summaryKey, refetchInterval: 60_000, queryFn: async (): Promise<SummaryView> => {
-    const fresh = await getJson<Summary>(`/api/v1/summary?hours=${hours}`);
+  return useQuery({ queryKey: summaryKey, refetchInterval: 60_000, queryFn: async ({ signal }): Promise<SummaryView> => {
+    const fresh = await getJson<Summary>(`/api/v1/summary?hours=${hours}`, undefined, signal);
     if (fresh.window) return { ...fresh, updating: false };
     const previous = client.getQueryData<SummaryView>(summaryKey);
     return previous?.window ? { ...previous, updating: true } : { ...fresh, updating: false };

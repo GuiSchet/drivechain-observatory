@@ -7,11 +7,11 @@ import type { NetworkStats, SidechainStats } from "./types";
 export function useSidechainStats(slot: number | undefined, window: 144 | 1008 = 144) {
   return useQuery({
     queryKey: ["protocol", "stats", slot, window], enabled: slot != null,
-    queryFn: () => getJson<SidechainStats>(`/api/v1/sidechains/${slot}/stats?window_blocks=${window}`),
+    queryFn: ({ signal }) => getJson<SidechainStats>(`/api/v1/sidechains/${slot}/stats?window_blocks=${window}`, undefined, signal),
   });
 }
 export function useNetworkStats(window: 144 | 1008 | 2016 = 144) {
-  return useQuery({ queryKey: ["protocol", "network", window], queryFn: () => getJson<NetworkStats>(`/api/v1/network?window_blocks=${window}`) });
+  return useQuery({ queryKey: ["protocol", "network", window], queryFn: ({ signal }) => getJson<NetworkStats>(`/api/v1/network?window_blocks=${window}`, undefined, signal) });
 }
 
 /** "1 h 25 min", "3 days 4 h", "42 s". */

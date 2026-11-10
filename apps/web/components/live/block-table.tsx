@@ -15,15 +15,17 @@ import { useTimeline } from "./timeline";
 /** The block timeline as a dense table: one row per L1 block, every figure exact; expand a row for its records. */
 export function BlockTable() {
   const names = useSidechainNames(), unit = useUnit(), live = useLiveActivity();
-  const { shown, buckets, cells, previous, proof, dataset, loadMore, pending, error, more, loading } = useTimeline();
+  const { shown, buckets, cells, previous, proof, dataset, loadMore, pending, error, activity, more, loading } = useTimeline();
   const network = useNetworkStats(144);
   const byHeight = new Map((network.data?.series ?? []).map(b => [b.height, b]));
   const [open, setOpen] = useState<Set<number>>(new Set());
   const toggle = (h: number) => setOpen(prev => { const next = new Set(prev); if (next.has(h)) next.delete(h); else next.add(h); return next; });
   if (pending) return <p className="live-empty" role="status">Loading the latest blocks…</p>;
   if (error) return <p className="live-empty" role="status">Live activity is unavailable right now; retrying automatically.</p>;
+  const activityNote = activity === "ready" ? null : <p className="live-note" role="status">{activity === "loading" ? "Loading what each block contained…" : "What each block contained is unavailable right now; retrying automatically."}</p>;
   const votes = (item: ProtocolItem) => { const v = at(item.data, "bundle", "vote_count"); return typeof v === "number" ? v : undefined; };
   return <>
+    {activityNote}
     <div className="table-scroll"><table className="data-table block-table">
       <thead><tr><th/><th className="num">Block</th><th>Hash</th><th>Block time (UTC)</th><th className="num">Δt</th><th>BMM</th><th className="num">Deposits</th><th>Withdrawals</th><th>Vote changes</th><th className="num">Top bid</th></tr></thead>
       <tbody>{shown.map((b, i) => {

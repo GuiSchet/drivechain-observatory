@@ -240,7 +240,7 @@ export function WithdrawalOutcomes({ slot, paged = false }: { slot?: number; pag
 export function DepositStory({ slot, compact = false }: { slot?: number; compact?: boolean }) {
   const names = useSidechainNames(), unit = useUnit(), now = useNow(30_000);
   const query = apiQuery({ kind: "deposit,ctip", slot, changes: "true", order: "block", limit: 60 });
-  const page = useQuery({ queryKey: ["protocol", "activity", "deposit-story", query], queryFn: () => getJson<ProtocolPage>(`/api/v1/activity?${query}`) });
+  const page = useQuery({ queryKey: ["protocol", "activity", "deposit-story", query], queryFn: ({ signal }) => getJson<ProtocolPage>(`/api/v1/activity?${query}`, undefined, signal) });
   const items = page.data?.items ?? [], dataset = page.data?.context.meta.dataset_id;
   const story = groupActivity(items).find(e => e.type === "item" && e.treasury);
   const deposit = story?.type === "item" ? story.item : undefined, change = story?.type === "item" ? story.treasury : undefined;

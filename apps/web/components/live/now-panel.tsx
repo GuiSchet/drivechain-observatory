@@ -16,7 +16,7 @@ import { DaySummary } from "./summary";
 function PendingWithdrawals() {
   const observatory = useObservatory(), names = useSidechainNames();
   const slots = [...new Set(Object.keys(object(object(observatory.data?.state).bundles)).map(k => Number(k.split(":")[0])))].filter(Number.isInteger).sort((a, b) => a - b);
-  const stats = useQueries({ queries: slots.map(slot => ({ queryKey: ["protocol", "stats", slot, 144], queryFn: () => getJson<SidechainStats>(`/api/v1/sidechains/${slot}/stats?window_blocks=144`) })) });
+  const stats = useQueries({ queries: slots.map(slot => ({ queryKey: ["protocol", "stats", slot, 144], queryFn: ({ signal }: { signal: AbortSignal }) => getJson<SidechainStats>(`/api/v1/sidechains/${slot}/stats?window_blocks=144`, undefined, signal) })) });
   const rows = stats.flatMap((q, i) => (q.data?.withdrawals.pending ?? []).map(p => ({ slot: slots[i], p })));
   return <LivePanel title="Withdrawals in vote" status={{ pending: observatory.isPending || stats.some(q => q.isPending), error: stats.some(q => q.isError) && !rows.length, empty: !rows.length, emptyText: "No withdrawal bundle is being voted on right now." }}>
     <ul className="pending-list">{rows.map(({ slot, p }) => {

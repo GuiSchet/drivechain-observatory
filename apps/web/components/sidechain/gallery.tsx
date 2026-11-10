@@ -7,7 +7,7 @@ import { ArrowRight } from "lucide-react";
 import { getAuctions } from "@/lib/api";
 import { object } from "@/lib/protocol";
 import { formatCoins, formatSats } from "@/lib/explain";
-import { activeSidechains, known, n, useBmmMetrics, proofHref, snapshotOf, unknownText, useObservatory, type ActiveSidechain } from "@/lib/live";
+import { FALLBACK_POLL_MS, activeSidechains, known, n, useBmmMetrics, proofHref, snapshotOf, unknownText, useObservatory, type ActiveSidechain } from "@/lib/live";
 import { percent } from "@/lib/stats";
 import { useUnit } from "@/lib/unit";
 import { useViewMode } from "@/lib/view-mode";
@@ -20,7 +20,7 @@ type Key = "slot" | "treasury" | "bmm" | "bid" | "pending" | "active";
 function useRows(window: 24 | 144) {
   const observatory = useObservatory();
   const metrics = useBmmMetrics(window);
-  const auctions = useQuery({ queryKey: ["bmm"], queryFn: getAuctions, refetchInterval: 5_000 });
+  const auctions = useQuery({ queryKey: ["bmm"], queryFn: getAuctions, refetchInterval: FALLBACK_POLL_MS });
   const state = object(observatory.data?.state), treasury = object(state.treasury), bundles = Object.keys(object(state.bundles));
   const bmm = new Map((metrics.data?.slots ?? []).map(r => [r.slot, r]));
   return activeSidechains(observatory.data).map((s): Row => {

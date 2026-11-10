@@ -1,11 +1,14 @@
 "use client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getJson, getOverview, getStatus } from "./api";
+import { getCoverage, getJson, getOverview, getStatus } from "./api";
 import { object, at } from "./protocol";
 import { declarationOf, type SidechainNames } from "./explain";
 import type { Auctions, BmmMetrics, Observatory, ProtocolItem, ProtocolPage } from "./types";
 
-// Query keys starting with "protocol" are refreshed by the live stream.
+// Query keys starting with "protocol" are refreshed by the live stream (see `affected` in components/providers.tsx).
+
+/** Polling is only a fallback: the stream announces changes as they happen. */
+export const FALLBACK_POLL_MS = 30_000;
 
 /** Whether a bid sample's list can be counted: an empty list means "none seen" only when the
  * sample was read; when it is unavailable, awaited or unreadable, the count is unknown. */
@@ -18,13 +21,15 @@ export function useOverview() {
 }
 
 export function useStatus() {
-  return useQuery({ queryKey: ["status"], queryFn: getStatus, refetchInterval: 5_000 });
+  return useQuery({ queryKey: ["status"], queryFn: getStatus, refetchInterval: FALLBACK_POLL_MS });
 }
 
 /** Height ranges whose global transitions the monitor did not observe (subscription gaps), from /coverage. */
 export function useCoverageGaps(): [number, number][] {
-  const coverage = useQuery({ queryKey: ["protocol", "coverage"], queryFn: () => getJson<{ transition_gaps?: { gap_start_height?: number | null; gap_end_height?: number | null }[] }>("/api/v1/coverage") });
-  return (coverage.data?.transition_gaps ?? []).flatMap(g => typeof g.gap_start_height === "number" && typeof g.gap_end_height === "number" ? [[g.gap_start_height, g.gap_end_height] as [number, number]] : []);
+  // Same key and fetch as the coverage panel, so one request serves both.
+  const coverage = useQuery({ queryKey: ["coverage"], queryFn: getCoverage });
+  const gaps = (coverage.data as { transition_gaps?: { gap_start_height?: number | null; gap_end_height?: number | null }[] } | undefined)?.transition_gaps;
+  return (gaps ?? []).flatMap(g => typeof g.gap_start_height === "number" && typeof g.gap_end_height === "number" ? [[g.gap_start_height, g.gap_end_height] as [number, number]] : []);
 }
 
 /**
@@ -40,8 +45,8 @@ const observatoryKey = ["protocol", "observatory", ""];
 
 export function useObservatory() {
   const client = useQueryClient();
-  return useQuery({ queryKey: observatoryKey, queryFn: async (): Promise<ObservatoryView> => {
-    const fresh = await getJson<Observatory>("/api/v1/observatory");
+  return useQuery({ queryKey: observatoryKey, queryFn: async ({ signal }): Promise<ObservatoryView> => {
+    const fresh = await getJson<Observatory>("/api/v1/observatory", undefined, signal);
     const s = fresh.context.state;
     if (s === "available" || s === "partial") return { ...fresh, readiness: s === "available" ? "ready" : "partial" };
     // The API sends empty state while it catches up with a block; an empty state is not zero sidechains.
@@ -81,11 +86,11 @@ export function observatoryStatus(q: { isPending: boolean; isError: boolean; dat
 /** BMM metrics for every slot: the API returns up to 16 slots per page, so follow `next_slot` to the end. */
 export function useBmmMetrics(window: 24 | 144 | 1008, slot?: number) {
   const base = slot == null ? `window_blocks=${window}` : `window_blocks=${window}&slot=${slot}`;
-  return useQuery({ queryKey: ["protocol", "bmm", "metrics", base], queryFn: async (): Promise<BmmMetrics> => {
-    let page = await getJson<BmmMetrics>(`/api/v1/bmm?${base}`);
+  return useQuery({ queryKey: ["protocol", "bmm", "metrics", base], queryFn: async ({ signal }): Promise<BmmMetrics> => {
+    let page = await getJson<BmmMetrics>(`/api/v1/bmm?${base}`, undefined, signal);
     const slots = [...page.slots];
     for (let i = 0; i < 16 && page.next_slot != null; i++) {
-      page = await getJson<BmmMetrics>(`/api/v1/bmm?${base}&start_slot=${page.next_slot}`);
+      page = await getJson<BmmMetrics>(`/api/v1/bmm?${base}&start_slot=${page.next_slot}`, undefined, signal);
       slots.push(...page.slots);
     }
     return { ...page, slots, next_slot: page.next_slot };
@@ -93,7 +98,7 @@ export function useBmmMetrics(window: 24 | 144 | 1008, slot?: number) {
 }
 
 export function useProtocolPage(resource: string, query = "", enabled = true) {
-  return useQuery({ queryKey: ["protocol", resource, query], queryFn: () => getJson<ProtocolPage>(`/api/v1/${resource}${query ? "?" + query : ""}`), enabled });
+  return useQuery({ queryKey: ["protocol", resource, query], queryFn: ({ signal }) => getJson<ProtocolPage>(`/api/v1/${resource}${query ? "?" + query : ""}`, undefined, signal), enabled });
 }
 
 export type ActiveSidechain = { slot: number; title?: string; description?: string; proposalHeight?: number; activationHeight?: number; voteCount?: number; descriptionHash?: string };
@@ -122,7 +127,7 @@ export type NetworkParams = {
 
 /** BIP300 parameters exactly as the enforcer reported them; nothing is hard-coded. */
 export function useNetworkParams() {
-  const result = useQuery({ queryKey: ["protocol", "chain-info", "params"], queryFn: () => getJson<ProtocolPage>("/api/v1/chain-info?limit=1") });
+  const result = useQuery({ queryKey: ["protocol", "chain-info", "params"], queryFn: ({ signal }) => getJson<ProtocolPage>("/api/v1/chain-info?limit=1", undefined, signal) });
   const item = result.data?.items.find(i => i.kind === "parameters");
   const c = object(at(item?.data, "bip300_constants")), num = (x: unknown) => typeof x === "number" ? x : undefined;
   const params: NetworkParams = {

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getAuctions, getMeta } from "@/lib/api";
 import { formatSats, short, sidechainLabel, timeAgo } from "@/lib/explain";
-import { bidsKnown, n, useBmmMetrics, useProtocolPage, useSidechainNames } from "@/lib/live";
+import { FALLBACK_POLL_MS, bidsKnown, n, useBmmMetrics, useProtocolPage, useSidechainNames } from "@/lib/live";
 import { useUnit } from "@/lib/unit";
 import { LivePanel } from "@/components/learn/primitives";
 import { useNow } from "./basics";
@@ -24,7 +24,7 @@ const auctionState: Record<string, string> = {
 };
 
 export function BmmBids({ slot }: { slot?: number }) {
-  const auctions = useQuery({ queryKey: ["bmm"], queryFn: getAuctions, refetchInterval: 5_000 });
+  const auctions = useQuery({ queryKey: ["bmm"], queryFn: getAuctions, refetchInterval: FALLBACK_POLL_MS });
   const names = useSidechainNames(), unit = useUnit(), now = useNow(2_000);
   const a = auctions.data;
   const bids = [...(a?.requests ?? [])].filter(b => slot == null || b.slot === slot).sort((x, y) => BigInt(y.bid_sats) > BigInt(x.bid_sats) ? 1 : -1);

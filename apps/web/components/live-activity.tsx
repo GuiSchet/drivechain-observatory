@@ -55,7 +55,7 @@ export function LiveActivity({ kind }: { kind?: string }) {
     <NetworkPulse technical={false}/>
     {chips}
     {activity}
-    <GoDeeper summary="bids, votes and merged mining right now">
+    <GoDeeper lazy summary="bids, votes and merged mining right now">
       <NowPanel/>
     </GoDeeper>
   </main>;
