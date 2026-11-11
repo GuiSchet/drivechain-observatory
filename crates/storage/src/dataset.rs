@@ -544,11 +544,15 @@ async fn bids(
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(0);
     // One row per bid and parent block, however many times it was sampled.
-    let rows = sqlx::query("WITH bids AS (SELECT f.height,f.hash,r->>'txid' AS txid,r->>'bid_sats' AS bid_sats,r->>'critical_hash' AS critical_hash,min(o.observed_at) AS first_seen,max(o.observed_at) AS last_seen,count(*) AS samples
-          FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id
+    // Each auction's samples are aggregated once, before its requests are expanded, rather than repeating every
+    // request for every sample.
+    let rows = sqlx::query("WITH bids AS (SELECT f.height,f.hash,r->>'txid' AS txid,r->>'bid_sats' AS bid_sats,r->>'critical_hash' AS critical_hash,min(o.first_seen) AS first_seen,max(o.last_seen) AS last_seen,sum(o.samples)::bigint AS samples
+          FROM projection.protocol_facts f
+          CROSS JOIN LATERAL (SELECT min(o.observed_at) AS first_seen,max(o.observed_at) AS last_seen,count(*) AS samples FROM ingest.event_observations o
+                               WHERE o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id
+                                 AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=$4),0)) o
           CROSS JOIN LATERAL jsonb_array_elements(f.data->'requests') r
-         WHERE f.dataset_id=$1 AND f.generation=$2 AND f.kind='auction' AND f.error IS NULL AND f.event_id<=$3
-           AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=$4),0)
+         WHERE f.dataset_id=$1 AND f.generation=$2 AND f.kind='auction' AND f.error IS NULL AND f.event_id<=$3 AND o.samples>0
            AND (r->>'sidechain_number')::int=$5 AND ($6::int IS NULL OR f.height>=$6) AND ($7::int IS NULL OR f.height<=$7)
            AND EXISTS(SELECT 1 FROM projection.chain_members m WHERE m.dataset_id=f.dataset_id AND m.generation=f.generation AND m.hash=f.hash)
          GROUP BY f.height,f.hash,r->>'txid',r->>'bid_sats',r->>'critical_hash')
