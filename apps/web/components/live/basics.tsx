@@ -57,7 +57,7 @@ export function NetworkSnapshot() {
 
 export function BlockHeartbeat() {
   const live = useLiveActivity(), now = useNow(1_000);
-  const blocks = useQuery({ queryKey: ["blocks", "heartbeat"], queryFn: () => getBlocks("limit=25") });
+  const blocks = useQuery({ queryKey: ["blocks", "heartbeat"], queryFn: ({ signal }) => getBlocks("limit=25", signal) });
   const recent = blocks.data?.blocks ?? [], list = recent.slice(0, 8), tip = list[0], dataset = blocks.data?.meta.dataset_id;
   // The recent pace by the blocks' own timestamps, over consecutive heights only.
   const oldest = recent[recent.length - 1], span = tip && oldest ? tip.height - oldest.height : 0;
@@ -75,7 +75,7 @@ export function BlockHeartbeat() {
 }
 
 export function BranchCheck() {
-  const blocks = useQuery({ queryKey: ["blocks", "branches"], queryFn: () => getBlocks("limit=100&scope=all") });
+  const blocks = useQuery({ queryKey: ["blocks", "branches"], queryFn: ({ signal }) => getBlocks("limit=100&scope=all", signal) });
   const list = blocks.data?.blocks ?? [];
   const alternative = list.filter(b => b.membership !== "selected");
   return <LivePanel title="Competing branches" quality={list.length ? "observed" : null}

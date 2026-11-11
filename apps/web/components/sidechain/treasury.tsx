@@ -39,7 +39,7 @@ function DepositTable({ slot, stats }: { slot: number; stats?: SidechainStats })
   const key = apiQuery({ slot, order: "block", limit: 200 });
   const result = useInfiniteQuery({
     queryKey: ["protocol", "deposits", "table", key], initialPageParam: "",
-    queryFn: ({ pageParam }) => getJson<ProtocolPage>(`/api/v1/deposits?${key}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
+    queryFn: ({ pageParam, signal }) => getJson<ProtocolPage>(`/api/v1/deposits?${key}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`, undefined, signal),
     getNextPageParam: page => page.next_cursor ?? undefined,
   });
   const items = useMemo(() => result.data?.pages.flatMap(p => p.items) ?? [], [result.data]);
@@ -91,7 +91,7 @@ export function TreasurySection({ slot, name, stats, failed = false, technical }
     <LivePanel title={`Deposits into ${name}`}>
       {technical ? <DepositTable slot={slot} stats={stats}/> : <ActivityFeed kind="deposit" slot={slot} limit={12} paged withTreasury/>}
     </LivePanel>
-    <GoDeeper summary="every treasury reading the monitor took">
+    <GoDeeper lazy summary="every treasury reading the monitor took">
       <TreasuryHistory fixedSlot={slot}/>
     </GoDeeper>
   </>;

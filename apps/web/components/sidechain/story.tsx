@@ -95,7 +95,7 @@ export function SidechainStory({ slot }: { slot: number }) {
       <h2 className="story-h2">Take the data with you</h2>
       <DevelopersSection slot={slot} name={sc?.title ?? `slot #${slot}`} technical={technical}/>
     </section>
-    <GoDeeper summary={`everything recorded for ${name}`}>
+    <GoDeeper lazy summary={`everything recorded for ${name}`}>
       <p>Every event and change in this slot, newest block first, including the ones shown above.</p>
       <ActivityFeed slot={slot} limit={30} paged/>
     </GoDeeper>

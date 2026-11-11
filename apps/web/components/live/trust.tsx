@@ -5,7 +5,7 @@ import { getCoverage, getMeta } from "@/lib/api";
 import { useApiBase } from "@/components/providers";
 import { object } from "@/lib/protocol";
 import { short, timeAgo } from "@/lib/explain";
-import { activeSidechains, n, useObservatory, useProtocolPage, useStatus } from "@/lib/live";
+import { FALLBACK_POLL_MS, activeSidechains, n, useObservatory, useProtocolPage, useStatus } from "@/lib/live";
 import { references, ENFORCER_COMMIT } from "@/content/references";
 import { GoDeeper, LivePanel, Stat } from "@/components/learn/primitives";
 import { useNow } from "./basics";
@@ -40,7 +40,7 @@ export function TrustStatus() {
 }
 
 export function QualitySummary() {
-  const coverage = useQuery({ queryKey: ["coverage"], queryFn: getCoverage, refetchInterval: 30_000 });
+  const coverage = useQuery({ queryKey: ["coverage"], queryFn: getCoverage, refetchInterval: FALLBACK_POLL_MS });
   const errors = useProtocolPage("protocol-messages", "limit=50");
   const q = object(coverage.data?.observation_quality), c = object(q.consistency);
   const matched = Number(c.tip_matched ?? 0), unknown = Number(c.unknown ?? 0), total = matched + unknown;

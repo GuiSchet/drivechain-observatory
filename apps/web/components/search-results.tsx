@@ -19,8 +19,8 @@ export function SearchResults({ q }: { q: string }) {
   const sidechains = activeSidechains(useObservatory().data);
   const height = /^\d{1,9}$/.test(q) ? q : undefined;
   const matches = sidechains.filter(s => q && s.title?.toLowerCase().includes(q.toLowerCase()));
-  const block = useQuery({ queryKey: ["blocks", "search", height], queryFn: () => getBlocks(`height=${height}&limit=1`), enabled: !!height });
-  const results = useQuery({ queryKey: ["protocol", "search", q], queryFn: () => getJson<ProtocolPage>(`/api/v1/search?q=${encodeURIComponent(q)}&limit=200`), enabled: !!q });
+  const block = useQuery({ queryKey: ["blocks", "search", height], queryFn: ({ signal }) => getBlocks(`height=${height}&limit=1`, signal), enabled: !!height });
+  const results = useQuery({ queryKey: ["protocol", "search", q], queryFn: ({ signal }) => getJson<ProtocolPage>(`/api/v1/search?q=${encodeURIComponent(q)}&limit=200`, undefined, signal), enabled: !!q });
   const dataset = results.data?.context.meta.dataset_id ?? block.data?.meta.dataset_id;
   const found = block.data?.blocks.find(b => String(b.height) === height);
   const items = results.data?.items ?? [];
