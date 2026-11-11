@@ -204,6 +204,7 @@ pub async fn advance(
         (build, base, state)
     };
     let start = at;
+    let mut announce = true;
     for _ in 0..pages {
         let headers=sqlx::query("SELECT h.hash,h.parent,h.height FROM projection.chain_members m JOIN projection.chain_headers h USING(dataset_id,generation,hash) WHERE m.dataset_id=$1 AND m.generation=$2 AND m.height>$3 ORDER BY m.height LIMIT $4")
             .bind(d).bind(g).bind(at).bind(limit.min(200)).fetch_all(&mut *conn).await?;
@@ -236,37 +237,24 @@ pub async fn advance(
                 .map(|(family, id)| (family, id.to_string()))
                 .collect();
             // Only re-reads of responses already imported arrived: no new event, no block, same branch, same meaning.
-            // Nothing a reader pinned to the head can list changes (a re-read extends its row, it adds none), so move
-            // the head's cut forward in place instead of storing another copy of the whole state, and announce nothing.
-            let unchanged = current.as_ref().filter(|head| {
+            // The build still completes and becomes the head, because builds are immutable: a cursor pinned to the
+            // previous head must keep listing exactly what it listed, and a re-read adds rows (auction samples,
+            // readings) bounded by the observation cut. What it no longer does is announce: a re-read is not news,
+            // and every announcement made each open page refetch everything it showed.
+            let unchanged = current.as_ref().is_some_and(|head| {
                 fresh
                     && at == start
                     && head.get::<Value, _>("cut")["events"] == json!(cut.events)
                     && head.get::<String, _>("branch_revision") == branch.revision
                     && same_meaning(&head.get::<Value, _>("state"), &json!(state))
             });
-            if let Some(head) = unchanged {
-                sqlx::query("UPDATE ops.protocol_builds SET cut=$2,state=$3 WHERE build_id=$1")
-                    .bind(head.get::<i64, _>("build_id"))
-                    .bind(json!(cut))
-                    .bind(json!(state))
-                    .execute(&mut *tx)
-                    .await?;
-                // Nothing references the build this call opened: no block was processed into it.
-                sqlx::query("DELETE FROM ops.protocol_builds WHERE build_id=$1")
-                    .bind(build)
-                    .execute(&mut *tx)
-                    .await?;
-                sqlx::query("UPDATE ops.protocol_jobs SET dirty_height=NULL WHERE dataset_id=$1 AND generation=$2").bind(d).bind(g).execute(&mut *tx).await?;
-                tx.commit().await?;
-                return Ok(true);
-            }
+            announce = !unchanged;
         }
         sqlx::query("UPDATE ops.protocol_builds SET cursor_height=$2,state=$3,complete=$4 WHERE build_id=$1").bind(build).bind(at).bind(json!(state)).bind(complete).execute(&mut *tx).await?;
         if complete {
             sqlx::query("INSERT INTO projection.protocol_head VALUES($1,$2,$3) ON CONFLICT(dataset_id,generation) DO UPDATE SET build_id=excluded.build_id").bind(d).bind(g).bind(build).execute(&mut *tx).await?;
             sqlx::query("UPDATE ops.protocol_jobs SET dirty_height=NULL WHERE dataset_id=$1 AND generation=$2").bind(d).bind(g).execute(&mut *tx).await?;
-            if publish {
+            if publish && announce {
                 append_update(
                     &mut tx,
                     d,

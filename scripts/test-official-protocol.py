@@ -222,18 +222,15 @@ assert after[0]["observed_at"]>=before[0]["observed_at"] and after[0]["first_obs
 assert get("/api/v1/withdrawal-bundles?q="+fixture.BUNDLE_B)["items"],"bundle search"
 assert get("/api/v1/withdrawal-bundles?q="+bytes.fromhex(fixture.BUNDLE_B)[::-1].hex())["items"],"bundle search in M3 byte order"
 check("unchanged snapshots extend their history row; m6id searchable")
-# A re-read of unchanged values keeps the head build: no copy of the state per re-read.
+# A cursor keeps the build it started on: a re-read completes a new build without a new block, and announces
+# nothing because nothing changed in meaning.
 listing="/api/v1/activity?order=block&scope=all&limit=1"
 first=get(listing)
 whole=[x["id"] for x in get("/api/v1/activity?order=block&scope=all&limit=200")["items"]]
-builds=sql("postgres","SELECT count(*) FROM ops.protocol_builds")
+announced=sql("postgres","SELECT max(revision) FROM ops.pulse_updates")
 f=writer();f.observe(event,9);commit(f)
-assert get(listing)["context"]["build_id"]==first["context"]["build_id"],"a re-read keeps the head build"
-assert sql("postgres","SELECT count(*) FROM ops.protocol_builds")==builds,"a re-read stores no build"
-check("a re-read of unchanged values moves the head without a new build")
-# A cursor keeps the build it started on: a new response publishes a new build without a new block.
-f=writer();f.event("chain_info","ChainInfo",dict(network=2,raw_network=2,bip300_constants=fixture.CONSTANTS),9,method="poll");commit(f)
-assert get(listing)["context"]["build_id"]!=first["context"]["build_id"],"a new response publishes a new build"
+assert get(listing)["context"]["build_id"]!=first["context"]["build_id"],"a re-read publishes a new build"
+assert sql("postgres","SELECT max(revision) FROM ops.pulse_updates")==announced,"a re-read announces nothing"
 assert first["next_cursor"]
 items,cursor=first["items"],first["next_cursor"]
 while cursor:
@@ -245,19 +242,22 @@ forged=json.loads(bytes.fromhex(first["next_cursor"]))
 forged["build"]=str(int(get(listing)["context"]["build_id"])+1000)
 error(listing+"&cursor="+json.dumps(forged,separators=(",",":")).encode().hex(),409)
 check("cursors continue on their own build; a build newer than the head is refused")
-# Retention: a superseded build nothing cites goes after its grace hour; stream updates leave the replay window
-# with a raised floor, and the newest update always stays.
+# Retention: a build nothing cites goes once it has been superseded for its grace hour, however old it is; stream
+# updates leave the replay window with a raised floor, and the newest update always stays.
 generation=sql("postgres","SELECT projection_generation FROM ops.active_dataset")
-stale=sql("postgres",f"INSERT INTO ops.protocol_builds(dataset_id,generation,cut,branch_revision,cursor_height,state,complete,created_at) VALUES('{DATASET}',{generation},'{{}}','stale',0,'{{}}',true,now()-interval '2 hours') RETURNING build_id").splitlines()[0]
-recent=sql("postgres",f"INSERT INTO ops.protocol_builds(dataset_id,generation,cut,branch_revision,cursor_height,state,complete) VALUES('{DATASET}',{generation},'{{}}','recent',0,'{{}}',true) RETURNING build_id").splitlines()[0]
+def build(label,age):
+    return sql("postgres",f"INSERT INTO ops.protocol_builds(dataset_id,generation,cut,branch_revision,cursor_height,state,complete,created_at) VALUES('{DATASET}',{generation},'{{}}','{label}',0,'{{}}',true,now()-interval '{age}') RETURNING build_id").splitlines()[0]
+gone=build("superseded 2 hours ago","3 hours")
+kept=build("created 2 hours ago, superseded 10 minutes ago","2 hours")
+newest=build("successor","10 minutes")
 oldest=sql("postgres","SELECT min(revision) FROM ops.pulse_updates")
 sql("postgres",f"UPDATE ops.pulse_updates SET created_at=now()-interval '8 days' WHERE revision={oldest}")
 sync()
-assert sql("postgres",f"SELECT count(*) FROM ops.protocol_builds WHERE build_id IN ({stale},{recent})")=="1","only the stale build goes"
+assert sql("postgres",f"SELECT string_agg(build_id::text,',' ORDER BY build_id) FROM ops.protocol_builds WHERE build_id IN ({gone},{kept},{newest})")==f"{kept},{newest}","only the build superseded for an hour goes"
 assert int(sql("postgres","SELECT replay_floor FROM ops.active_dataset"))>int(oldest)
 assert int(sql("postgres","SELECT min(revision) FROM ops.pulse_updates"))>int(oldest)
 assert sql("postgres","SELECT count(*) FROM ops.pulse_updates")!="0"
-sql("postgres",f"DELETE FROM ops.protocol_builds WHERE build_id={recent}")
+sql("postgres",f"DELETE FROM ops.protocol_builds WHERE build_id IN ({kept},{newest})")
 check("retention prunes uncited builds and updates past the replay window")
 # One sidechain's records as typed tables from one build, in JSON and as a ZIP of CSVs.
 import csv,hashlib,io,zipfile

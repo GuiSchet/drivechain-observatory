@@ -4,7 +4,7 @@ use anyhow::Result;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// How long a superseded build stays readable: an API cursor pins the build it started on.
+/// How long a build stays readable after it stops being the head: an API cursor pins the build it started on.
 const BUILD_GRACE: &str = "1 hour";
 /// How far back a reconnecting stream client can resume; older cursors get `cursor_expired` and refetch.
 const REPLAY_WINDOW: &str = "7 days";
@@ -22,11 +22,16 @@ pub struct Pruned {
 pub async fn prune(pool: &PgPool, d: Uuid) -> Result<Pruned> {
     let mut pruned = Pruned::default();
     for _ in 0..MAX_BATCHES {
-        // Complete, old, and referenced by no head, block version, checkpoint or history row.
+        // Complete, old, superseded for longer than the grace, and referenced by no head, block version, checkpoint
+        // or history row. A build becomes the head when it completes, so it was superseded when the next complete
+        // build was created: a head that lived for days still gets its grace hour after a successor replaces it.
         let n = sqlx::query(
             "DELETE FROM ops.protocol_builds WHERE build_id IN (
-                SELECT b.build_id FROM ops.protocol_builds b
+                SELECT b.build_id FROM ops.protocol_builds b,
+                       (SELECT n.generation,max(n.build_id) AS build_id FROM ops.protocol_builds n
+                         WHERE n.dataset_id=$1 AND n.complete AND n.created_at < now() - $2::interval GROUP BY n.generation) superseded
                  WHERE b.dataset_id=$1 AND b.complete AND b.created_at < now() - $2::interval
+                   AND b.generation=superseded.generation AND b.build_id < superseded.build_id
                    AND NOT EXISTS(SELECT 1 FROM projection.protocol_head h WHERE h.build_id=b.build_id)
                    AND NOT EXISTS(SELECT 1 FROM projection.protocol_block_versions v WHERE v.build_id=b.build_id)
                    AND NOT EXISTS(SELECT 1 FROM projection.protocol_checkpoints c
