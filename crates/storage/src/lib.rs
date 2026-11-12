@@ -730,6 +730,33 @@ impl StreamWindow {
             && cursor.revision <= self.cursor.revision
     }
 }
+/// What the stream window depends on, in one indexed read: when it is unchanged, so is the window, and the poller
+/// can skip the full read (which also computes the projection watermark).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamProbe {
+    pub dataset_id: Uuid,
+    pub generation: i64,
+    pub floor: i64,
+    pub revision: i64,
+}
+pub async fn stream_probe(pool: &PgPool) -> Result<Option<StreamProbe>, StorageError> {
+    let row: Option<(Uuid, i64, i64, i64)> = sqlx::query_as(
+        "SELECT a.dataset_id, a.projection_generation, a.replay_floor,
+                COALESCE((SELECT max(u.revision) FROM ops.pulse_updates u
+                           WHERE u.dataset_id=a.dataset_id AND u.projection_generation=a.projection_generation),0)
+           FROM ops.active_dataset a",
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(
+        row.map(|(dataset_id, generation, floor, revision)| StreamProbe {
+            dataset_id,
+            generation,
+            floor,
+            revision,
+        }),
+    )
+}
 pub async fn stream_window(pool: &PgPool) -> Result<StreamWindow, StorageError> {
     let mut tx = snapshot(pool).await?;
     let data = dataset(&mut tx, None).await?;

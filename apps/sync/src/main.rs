@@ -11,6 +11,7 @@ use pulse_domain::{
 mod chain;
 mod projector;
 mod protocol;
+mod retention;
 use serde_json::{Value, json};
 use sqlx::postgres::{PgConnection, PgPool};
 use sqlx::{Connection as _, FromRow};
@@ -279,8 +280,27 @@ async fn main() -> Result<()> {
         })
         .connect_lazy(source_url)?;
     let mut failures = 0_u32;
+    // Retention runs between cycles, at most this often; a failed pass is logged and retried next time.
+    const PRUNE_EVERY: Duration = Duration::from_secs(600);
+    let mut last_prune: Option<std::time::Instant> = None;
     loop {
         let result = sync_cycle(&source, &destination, &args).await;
+        if result.is_ok() && last_prune.is_none_or(|at| at.elapsed() >= PRUNE_EVERY) {
+            last_prune = Some(std::time::Instant::now());
+            if let Some(dataset_id) = args.dataset_id {
+                match retention::prune(&destination, dataset_id).await {
+                    Ok(pruned) if pruned != retention::Pruned::default() => {
+                        tracing::info!(
+                            builds = pruned.builds,
+                            updates = pruned.updates,
+                            "pruned sync bookkeeping"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(error) => error!(%error, "retention pass failed"),
+                }
+            }
+        }
         if let Err(error) = &result {
             error!(%error, "Observatory synchronization cycle failed");
             let mode = if error.downcast_ref::<Incompatible>().is_some() {
@@ -1010,6 +1030,17 @@ async fn sync_event_observation_page(
         .last()
         .map_or(observation_cursor, |observation| observation.observation_id);
     let mut transaction = destination.begin().await?;
+    // A re-read of an unchanged value cites an event already observed. Only a response seen for the first time
+    // (a new bid sample, a new state value) is worth announcing; changes of meaning are announced by the projection.
+    let cited = observations.iter().map(|o| o.event_id).collect::<Vec<_>>();
+    let first_seen: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM unnest($2::bigint[]) AS cited(id) WHERE NOT EXISTS( \
+            SELECT 1 FROM ingest.event_observations o WHERE o.dataset_id=$1 AND o.source_event_id=cited.id))",
+    )
+    .bind(dataset_id)
+    .bind(&cited)
+    .fetch_one(&mut *transaction)
+    .await?;
     for group in snapshot_groups {
         sqlx::query(
             "INSERT INTO ingest.snapshot_groups \
@@ -1063,13 +1094,15 @@ async fn sync_event_observation_page(
         next_cursor,
     )
     .await?;
-    append_update(
-        &mut transaction,
-        dataset_id,
-        None,
-        json!(["overview", "bmm", "events"]),
-    )
-    .await?;
+    if first_seen {
+        append_update(
+            &mut transaction,
+            dataset_id,
+            None,
+            json!(["overview", "bmm", "events"]),
+        )
+        .await?;
+    }
     transaction.commit().await?;
     Ok(count)
 }
@@ -1104,6 +1137,10 @@ async fn sync_tip_page(
     let next_cursor = observations
         .last()
         .map_or(cursor, |observation| observation.tip_observation_id);
+    // The monitor re-reads the tip all the time; only a tip different from the one it saw before is news.
+    let moved = observations
+        .iter()
+        .any(|o| o.previous_observed_hash.as_ref() != Some(&o.tip_hash));
     let mut transaction = destination.begin().await?;
     for observation in &observations {
         sqlx::query(
@@ -1135,13 +1172,15 @@ async fn sync_tip_page(
         next_cursor,
     )
     .await?;
-    append_update(
-        &mut transaction,
-        dataset_id,
-        None,
-        json!(["overview", "status", "blocks"]),
-    )
-    .await?;
+    if moved {
+        append_update(
+            &mut transaction,
+            dataset_id,
+            None,
+            json!(["overview", "status", "blocks"]),
+        )
+        .await?;
+    }
     transaction.commit().await?;
     Ok(count)
 }

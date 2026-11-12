@@ -153,6 +153,7 @@ pub async fn advance(
         return Ok(true);
     }
     let pending=sqlx::query("SELECT * FROM ops.protocol_builds WHERE dataset_id=$1 AND generation=$2 AND NOT complete ORDER BY build_id DESC LIMIT 1").bind(d).bind(g).fetch_optional(&mut *conn).await?;
+    let fresh = pending.is_none();
     let (build, mut at, mut state) = if let Some(row) = pending {
         anyhow::ensure!(
             row.get::<Value, _>("cut") == json!(cut),
@@ -202,6 +203,8 @@ pub async fn advance(
         let build:i64=sqlx::query_scalar("INSERT INTO ops.protocol_builds(dataset_id,generation,cut,branch_revision,cursor_height,state) VALUES($1,$2,$3,$4,$5,$6) RETURNING build_id").bind(d).bind(g).bind(json!(cut)).bind(&branch.revision).bind(base).bind(json!(state)).fetch_one(&mut *conn).await?;
         (build, base, state)
     };
+    let start = at;
+    let mut announce = true;
     for _ in 0..pages {
         let headers=sqlx::query("SELECT h.hash,h.parent,h.height FROM projection.chain_members m JOIN projection.chain_headers h USING(dataset_id,generation,hash) WHERE m.dataset_id=$1 AND m.generation=$2 AND m.height>$3 ORDER BY m.height LIMIT $4")
             .bind(d).bind(g).bind(at).bind(limit.min(200)).fetch_all(&mut *conn).await?;
@@ -233,12 +236,25 @@ pub async fn advance(
                 .into_iter()
                 .map(|(family, id)| (family, id.to_string()))
                 .collect();
+            // Only re-reads of responses already imported arrived: no new event, no block, same branch, same meaning.
+            // The build still completes and becomes the head, because builds are immutable: a cursor pinned to the
+            // previous head must keep listing exactly what it listed, and a re-read adds rows (auction samples,
+            // readings) bounded by the observation cut. What it no longer does is announce: a re-read is not news,
+            // and every announcement made each open page refetch everything it showed.
+            let unchanged = current.as_ref().is_some_and(|head| {
+                fresh
+                    && at == start
+                    && head.get::<Value, _>("cut")["events"] == json!(cut.events)
+                    && head.get::<String, _>("branch_revision") == branch.revision
+                    && same_meaning(&head.get::<Value, _>("state"), &json!(state))
+            });
+            announce = !unchanged;
         }
         sqlx::query("UPDATE ops.protocol_builds SET cursor_height=$2,state=$3,complete=$4 WHERE build_id=$1").bind(build).bind(at).bind(json!(state)).bind(complete).execute(&mut *tx).await?;
         if complete {
             sqlx::query("INSERT INTO projection.protocol_head VALUES($1,$2,$3) ON CONFLICT(dataset_id,generation) DO UPDATE SET build_id=excluded.build_id").bind(d).bind(g).bind(build).execute(&mut *tx).await?;
             sqlx::query("UPDATE ops.protocol_jobs SET dirty_height=NULL WHERE dataset_id=$1 AND generation=$2").bind(d).bind(g).execute(&mut *tx).await?;
-            if publish {
+            if publish && announce {
                 append_update(
                     &mut tx,
                     d,
@@ -305,6 +321,26 @@ pub async fn advance(
 
 fn window(row: &sqlx::postgres::PgRow) -> Result<Value> {
     Ok(row.try_get("window")?)
+}
+
+/// Fields that name which re-read of a response a state cites, not what the response said.
+const REREAD_FIELDS: [&str; 3] = ["observation_id", "started_at", "finished_at"];
+
+/// Whether two states differ only in which re-read of the same responses they cite.
+fn same_meaning(a: &Value, b: &Value) -> bool {
+    fn strip(v: &Value) -> Value {
+        match v {
+            Value::Object(m) => Value::Object(
+                m.iter()
+                    .filter(|(k, _)| !REREAD_FIELDS.contains(&k.as_str()))
+                    .map(|(k, v)| (k.clone(), strip(v)))
+                    .collect(),
+            ),
+            Value::Array(a) => Value::Array(a.iter().map(strip).collect()),
+            other => other.clone(),
+        }
+    }
+    strip(a) == strip(b)
 }
 const SNAPSHOT_ROWS: &str = "SELECT f.*,e.kind AS snapshot_kind,o.observation_id,o.run_id AS occurrence_run_id,s.consistency,
     jsonb_build_object('observation_id',o.observation_id::text,'run_id',o.run_id,'started_at',s.started_at,'finished_at',s.finished_at,
@@ -442,4 +478,40 @@ async fn refresh_observations(
         state.snapshot(&r)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod reread_tests {
+    use super::same_meaning;
+    use serde_json::json;
+
+    fn state(observation: &str, started: &str, consistency: &str, value: u64) -> serde_json::Value {
+        json!({
+            "height": 974075,
+            "observation_windows": {"ctip:9": {"observation_id": observation, "run_id": "r1", "started_at": started,
+                "finished_at": started, "consistency": consistency, "reference_tip_height": 974075}},
+            "treasury": {"9": {"value": value}},
+            "active": {"9": {"evidence": [{"event_id": "77", "ordinal": 0, "observation_id": observation}]}}
+        })
+    }
+
+    #[test]
+    fn a_reread_of_the_same_values_means_the_same() {
+        assert!(same_meaning(
+            &state("10", "t1", "tip_matched", 5),
+            &state("11", "t2", "tip_matched", 5)
+        ));
+    }
+
+    #[test]
+    fn a_new_value_or_an_unusable_reading_is_a_change() {
+        assert!(!same_meaning(
+            &state("10", "t1", "tip_matched", 5),
+            &state("11", "t2", "tip_matched", 6)
+        ));
+        assert!(!same_meaning(
+            &state("10", "t1", "tip_matched", 5),
+            &state("11", "t2", "changed", 5)
+        ));
+    }
 }
