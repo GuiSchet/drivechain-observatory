@@ -314,17 +314,24 @@ pub async fn observatory(
     let d = dataset(&mut tx, q.dataset).await?;
     let c = context(&mut tx, &d).await?;
     let state:Option<Value>=sqlx::query_scalar("SELECT state FROM ops.protocol_builds WHERE build_id=$1 AND dataset_id=$2 AND generation=$3").bind(c.build_id.as_ref().and_then(|s|s.parse::<i64>().ok())).bind(d.dataset_id).bind(c.meta.projection_generation).fetch_optional(&mut *tx).await?;
-    let rows=sqlx::query("SELECT DISTINCT ON(e.kind,e.sidechain) o.observation_id::text AS id,NULL::text AS entity_id,e.kind,e.sidechain AS slot,encode(e.block_hash,'hex') AS hash,e.height,o.observed_at,h.block_time,
+    // The latest reading of each state kind and slot in the current run. The candidate events are few (hundreds)
+    // while the run has every re-read (100k+), so they are hashed first and the run is walked on its index alone;
+    // only the winning rows are then joined to everything else.
+    let rows=sqlx::query("WITH ev AS MATERIALIZED (SELECT e.source_event_id,e.kind,e.sidechain FROM ingest.source_events e
+          WHERE e.dataset_id=$1 AND e.kind IN ('active_sidechains','sidechain_proposals','ctip','withdrawal_bundle_proposals') AND ($3::smallint IS NULL OR e.sidechain=$3 OR e.sidechain IS NULL) AND e.source_event_id<=$4),
+        latest AS (SELECT DISTINCT ON(ev.kind,ev.sidechain) o.observation_id FROM ingest.extractor_status status JOIN ingest.event_observations o ON o.dataset_id=status.dataset_id AND o.run_id=status.run_id JOIN ev ON ev.source_event_id=o.source_event_id
+          WHERE status.dataset_id=$1 AND status.source='enforcer' AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=$5),0)
+          ORDER BY ev.kind,ev.sidechain,o.capture_seq DESC)
+        SELECT o.observation_id::text AS id,NULL::text AS entity_id,e.kind,e.sidechain AS slot,encode(e.block_hash,'hex') AS hash,e.height,o.observed_at,h.block_time,
         CASE WHEN f.error IS NOT NULL THEN 'unknown' WHEN s.consistency='tip_matched' AND s.revision_before IS NULL AND s.revision_after IS NULL AND s.tip_before_hash=s.tip_after_hash AND s.tip_before_height=s.tip_after_height AND s.run_id=o.run_id AND s.dataset_id=o.dataset_id THEN 'tip_matched' ELSE 'unknown' END AS quality,
         jsonb_build_array(jsonb_build_object('event_id',e.source_event_id::text,'ordinal',coalesce(f.ordinal,0),'observation_id',o.observation_id::text)) AS evidence,
         jsonb_build_object('value',f.data,'atomicity_proven',false,'snapshot_group_id',s.snapshot_group_id,'consistency',s.consistency,'run_id',o.run_id,'capture_seq',o.capture_seq::text,'capture_method',o.capture_method,'tip_before_hash',encode(s.tip_before_hash,'hex'),'tip_before_height',s.tip_before_height,'tip_after_hash',encode(s.tip_after_hash,'hex'),'tip_after_height',s.tip_after_height,'started_at',s.started_at,'finished_at',s.finished_at,'attempts',s.attempts) AS data,f.error AS issue
-        FROM ingest.extractor_status status JOIN ingest.event_observations o ON o.dataset_id=status.dataset_id AND o.run_id=status.run_id JOIN ingest.source_events e ON e.dataset_id=o.dataset_id AND e.source_event_id=o.source_event_id
+        FROM latest l JOIN ingest.event_observations o ON o.dataset_id=$1 AND o.observation_id=l.observation_id JOIN ingest.source_events e ON e.dataset_id=o.dataset_id AND e.source_event_id=o.source_event_id
         LEFT JOIN projection.protocol_facts f ON f.dataset_id=e.dataset_id AND f.generation=$2 AND f.event_id=e.source_event_id AND f.ordinal=0
         LEFT JOIN ingest.snapshot_groups s USING(snapshot_group_id)
         LEFT JOIN projection.chain_headers h ON h.dataset_id=e.dataset_id AND h.generation=$2 AND h.hash=encode(e.block_hash,'hex')
         LEFT JOIN projection.chain_members m ON m.dataset_id=h.dataset_id AND m.generation=h.generation AND m.hash=h.hash
-        WHERE status.dataset_id=$1 AND status.source='enforcer' AND e.kind IN ('active_sidechains','sidechain_proposals','ctip','withdrawal_bundle_proposals') AND ($3::smallint IS NULL OR e.sidechain=$3 OR e.sidechain IS NULL) AND e.source_event_id<=$4 AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=$5),0)
-        ORDER BY e.kind,e.sidechain,o.capture_seq DESC")
+        ORDER BY e.kind,e.sidechain")
         .bind(d.dataset_id).bind(c.meta.projection_generation).bind(q.slot).bind(c.source_event_cut.as_ref().and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)).bind(c.build_id.as_ref().and_then(|s|s.parse::<i64>().ok())).fetch_all(&mut *tx).await?;
     let mut observations = rows.into_iter().map(item).collect::<Result<Vec<_>, _>>()?;
     membership(&mut tx, &c, &mut observations).await?;
