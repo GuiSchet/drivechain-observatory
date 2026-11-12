@@ -474,16 +474,19 @@ pub async fn sidechains(pool: &PgPool) -> Result<SidechainsResponse, StorageErro
 pub async fn coverage(pool: &PgPool, stale: i64) -> Result<CoverageResponse, StorageError> {
     let mut tx = snapshot(pool).await?;
     let status = status_snapshot(&mut tx, stale).await?;
-    let rows=sqlx::query("SELECT * FROM (SELECT DISTINCT ON (event_contract_version,source,stream,sidechain,sidechain_instance_id)
-        * FROM ingest.coverage_revisions WHERE dataset_id=$1 ORDER BY event_contract_version,source,stream,sidechain,sidechain_instance_id,revision_id DESC) latest
-        WHERE lower(operation) <> 'delete' ORDER BY stream,sidechain,event_contract_version")
-        .bind(status.meta.dataset_id).fetch_all(&mut *tx).await?;
+    // The latest revision of each scope comes from the index alone (every revision is kept, so a full-row scan
+    // read tens of thousands of payloads to keep a dozen); its row and verification are then joined.
+    let rows=sqlx::query("SELECT r.*,v.result AS verification FROM (SELECT DISTINCT ON (event_contract_version,source,stream,sidechain,sidechain_instance_id)
+        revision_id FROM ingest.coverage_revisions WHERE dataset_id=$1 ORDER BY event_contract_version,source,stream,sidechain,sidechain_instance_id,revision_id DESC) latest
+        JOIN ingest.coverage_revisions r ON r.dataset_id=$1 AND r.revision_id=latest.revision_id
+        LEFT JOIN projection.chain_coverage v ON v.dataset_id=$1 AND v.generation=$2 AND v.source_revision=r.revision_id
+        WHERE lower(r.operation) <> 'delete' ORDER BY r.stream,r.sidechain,r.event_contract_version")
+        .bind(status.meta.dataset_id).bind(status.meta.projection_generation).fetch_all(&mut *tx).await?;
     let mut streams = Vec::new();
     for r in rows {
         let payload: Value = r.try_get("row_data")?;
         let height = |key: &str| payload[key].as_i64().and_then(|v| i32::try_from(v).ok());
-        let verification:Option<Value>=sqlx::query_scalar("SELECT result FROM projection.chain_coverage WHERE dataset_id=$1 AND generation=$2 AND source_revision=$3")
-            .bind(status.meta.dataset_id).bind(status.meta.projection_generation).bind(r.try_get::<i64,_>("revision_id")?).fetch_optional(&mut *tx).await?;
+        let verification: Option<Value> = r.try_get("verification")?;
         streams.push(CoverageScope {
             verification: verification
                 .map(serde_json::from_value)

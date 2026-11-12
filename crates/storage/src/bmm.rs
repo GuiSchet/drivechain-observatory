@@ -1,6 +1,6 @@
 use super::*;
 use protocol::BmmQuery;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 pub async fn metrics(pool: &PgPool, q: BmmQuery) -> Result<BmmMetricsResponse, StorageError> {
     let window = q.window_blocks.unwrap_or(144);
@@ -94,8 +94,9 @@ pub async fn metrics(pool: &PgPool, q: BmmQuery) -> Result<BmmMetricsResponse, S
             });
         }
         if let Some(anchor) = c.anchor_height {
+            let seen: HashSet<i32> = cells.iter().map(|c| c.height).collect();
             for height in start..=anchor {
-                if !cells.iter().any(|c| c.height == height) {
+                if !seen.contains(&height) {
                     cells.push(BmmCell {
                         hash: None,
                         height,

@@ -808,12 +808,15 @@ pub async fn network(pool: &PgPool, q: NetworkQuery) -> Result<NetworkResponse, 
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(0);
         let build = c.build_id.as_ref().and_then(|v| v.parse::<i64>().ok());
-        // Distinct bids per parent block, however many samples contained them, from the same cut as the lists.
+        // Distinct bids per parent block, however many samples contained them, from the same cut as the lists. An
+        // auction counts once it was sampled within the cut: EXISTS, because joining every sample multiplied each
+        // auction by its re-reads before the DISTINCT.
         let rows = sqlx::query("WITH b AS (SELECT DISTINCT f.height,r->>'txid' AS txid,(r->>'sidechain_number')::int AS slot,(r->>'bid_sats')::numeric AS sats
-              FROM projection.protocol_facts f JOIN ingest.event_observations o ON o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id
+              FROM projection.protocol_facts f
               CROSS JOIN LATERAL jsonb_array_elements(f.data->'requests') r
              WHERE f.dataset_id=$1 AND f.generation=$2 AND f.kind='auction' AND f.error IS NULL AND f.event_id<=$3
-               AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=$4),0)
+               AND EXISTS(SELECT 1 FROM ingest.event_observations o WHERE o.dataset_id=f.dataset_id AND o.source_event_id=f.event_id
+                           AND o.observation_id<=coalesce((SELECT (cut->>'observations')::bigint FROM ops.protocol_builds WHERE build_id=$4),0))
                AND f.height BETWEEN $5 AND $6
                AND EXISTS(SELECT 1 FROM projection.chain_members m WHERE m.dataset_id=f.dataset_id AND m.generation=f.generation AND m.hash=f.hash))
             SELECT height+1 AS for_height,count(*) AS bids,count(DISTINCT slot) AS slots,sum(sats)::text AS total,max(sats)::text AS top FROM b GROUP BY height")
