@@ -16,6 +16,7 @@ import { WithdrawalsSection } from "./withdrawals";
 import { MiningSection } from "./mining";
 import { IdentitySection, type Instance } from "./identity";
 import { DevelopersSection } from "./developers";
+import { NearViewport } from "@/components/near-viewport";
 
 export function SidechainStory({ slot }: { slot: number }) {
   const observatory = useObservatory(), unit = useUnit(), { params } = useNetworkParams(), { technical } = useViewMode();
@@ -73,23 +74,23 @@ export function SidechainStory({ slot }: { slot: number }) {
       </section>
       <section id="treasury" className="sc-section">
         <h2 className="story-h2">Coins in and out</h2>
-        <TreasurySection slot={slot} name={name} stats={s} failed={failed} technical={technical}/>
+        <NearViewport><TreasurySection slot={slot} name={name} stats={s} failed={failed} technical={technical}/></NearViewport>
       </section>
       <section id="withdrawals" className="sc-section">
         <h2 className="story-h2">Withdrawals</h2>
         {!technical && <p className="section-lede">Coins leave a treasury in bundles that L1 miners vote on for months. <Link className="text-link" href="/learn/withdrawals">How withdrawals work</Link></p>}
-        <WithdrawalsSection slot={slot} stats={s} technical={technical}/>
+        <NearViewport><WithdrawalsSection slot={slot} stats={s} technical={technical}/></NearViewport>
       </section>
       <section id="mining" className="sc-section">
         <h2 className="story-h2">Merged mining</h2>
         <p className="section-lede">L1 records a commitment to a sidechain block hash. It does not see or check what is inside that block; sidechain nodes do. <Link className="text-link" href="/learn/merged-mining">How BMM works</Link></p>
-        <MiningSection slot={slot} name={name} stats={s} failed={failed} technical={technical}/>
+        <NearViewport><MiningSection slot={slot} name={name} stats={s} failed={failed} technical={technical}/></NearViewport>
       </section>
     </>}
 
     <section id="identity" className="sc-section">
       <h2 className="story-h2">{sc ? "Identity and slot history" : "Sidechains that have used this slot"}</h2>
-      <IdentitySection slot={slot} sc={sc} instances={[...history.values()]} replaced={replaced} technical={technical}/>
+      <NearViewport><IdentitySection slot={slot} sc={sc} instances={[...history.values()]} replaced={replaced} technical={technical}/></NearViewport>
     </section>
     <section id="data" className="sc-section">
       <h2 className="story-h2">Take the data with you</h2>
