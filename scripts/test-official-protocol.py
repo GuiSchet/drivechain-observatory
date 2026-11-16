@@ -242,23 +242,68 @@ forged=json.loads(bytes.fromhex(first["next_cursor"]))
 forged["build"]=str(int(get(listing)["context"]["build_id"])+1000)
 error(listing+"&cursor="+json.dumps(forged,separators=(",",":")).encode().hex(),409)
 check("cursors continue on their own build; a build newer than the head is refused")
-# Retention: a build nothing cites goes once it has been superseded for its grace hour, however old it is; stream
-# updates leave the replay window with a raised floor, and the newest update always stays.
+# A replay re-derives every block from its checkpoint. Blocks that come out the same add no version and no history
+# row (they used to add a copy each), and every block-derived list reads the same after it. A late fact for an old
+# block marks it dirty; the next cycle with new data (here a re-read) replays from there.
 generation=sql("postgres","SELECT projection_generation FROM ops.active_dataset")
-def build(label,age):
-    return sql("postgres",f"INSERT INTO ops.protocol_builds(dataset_id,generation,cut,branch_revision,cursor_height,state,complete,created_at) VALUES('{DATASET}',{generation},'{{}}','{label}',0,'{{}}',true,now()-interval '{age}') RETURNING build_id").splitlines()[0]
-gone=build("superseded 2 hours ago","3 hours")
-kept=build("created 2 hours ago, superseded 10 minutes ago","2 hours")
-newest=build("successor","10 minutes")
+def stripped(x):
+    return {k:v for k,v in x.items() if k not in ("context","next_cursor","generated_at")}
+def visible(build):
+    """Block history a build reads: per block, the rows of its newest version at or below the build."""
+    return sql("postgres",f"SELECT md5(coalesce(string_agg(to_jsonb(p)::text,'' ORDER BY p.hash,p.ordinal),'')) FROM (SELECT hash,height,ordinal,kind,entity_key,slot,data,quality,evidence,issue FROM projection.protocol_history p WHERE p.dataset_id='{DATASET}' AND p.generation={generation} AND p.build_id<={build} AND NOT EXISTS(SELECT 1 FROM projection.protocol_block_versions v WHERE v.dataset_id=p.dataset_id AND v.generation=p.generation AND v.hash=p.hash AND v.build_id>p.build_id AND v.build_id<={build})) p")
+def head():
+    return int(sql("postgres",f"SELECT build_id FROM projection.protocol_head WHERE dataset_id='{DATASET}' AND generation={generation}"))
+views=["/api/v1/deposits?limit=200","/api/v1/bmm/commitments?slot=9&limit=200",
+       "/api/v1/activity?order=block&kind=deposit,bundle_outcome,bmm_commitment,bmm_confirmation,instance,proposal&limit=200",
+       "/api/v1/activity?order=block&kind=deposit,bundle_outcome,bmm_commitment&changes=true&limit=200"]
+before=[stripped(get(v)) for v in views]
+assert any(b["items"] for b in before),"the fixture has block history to compare"
+seen_before=visible(head())
+versions=sql("postgres","SELECT count(*)||':'||(SELECT count(*) FROM projection.protocol_history) FROM projection.protocol_block_versions")
+replayed=head()
+sql("postgres",f"UPDATE ops.protocol_jobs SET dirty_height={fixture.ACTIVATION}")
+f=writer();f.observe(event,9);commit(f)
+assert head()>replayed,"the replay published a new build"
+assert sql("postgres",f"SELECT coalesce(dirty_height::text,'none') FROM ops.protocol_jobs WHERE dataset_id='{DATASET}' AND generation={generation}")=="none","the dirty mark was replayed"
+assert sql("postgres","SELECT count(*)||':'||(SELECT count(*) FROM projection.protocol_history) FROM projection.protocol_block_versions")==versions,"a replay of unchanged blocks writes no copies"
+assert visible(head())==seen_before,"the new head reads the same block history"
+assert [stripped(get(v)) for v in views]==before,"every block-derived list reads the same after the replay"
+check("a replay of unchanged blocks writes no versions and reads the same")
+# Retention: a cursor's build stays readable for an hour after it stops being the head, counted from when its
+# successor was published (not created). Then the cursor floor refuses it (409), even while the build is still kept
+# (here a checkpoint keeps it), and block versions no admitted build can read go with their history rows.
+old=get(listing)
+assert old["next_cursor"]
+f=writer();f.observe(event,9);commit(f)
+mid=get(listing)
+old_build,mid_build=int(old["context"]["build_id"]),int(mid["context"]["build_id"])
+assert mid_build>old_build and mid["next_cursor"]
+anchor=sql("postgres",f"SELECT hash||'|'||height FROM projection.chain_members WHERE dataset_id='{DATASET}' AND generation={generation} ORDER BY height LIMIT 1").split("|")
+sql("postgres",f"INSERT INTO projection.protocol_checkpoints VALUES('{DATASET}',{generation},{old_build},'{anchor[0]}',{anchor[1]},'{{}}')")
+# The old head was replaced two hours ago; the build that replaced it, created long before, was replaced just now.
+sql("postgres",f"UPDATE ops.protocol_builds SET published_at=now()-interval '3 hours' WHERE dataset_id='{DATASET}' AND build_id<{mid_build}; UPDATE ops.protocol_builds SET published_at=now()-interval '2 hours',created_at=now()-interval '5 hours' WHERE build_id={mid_build}")
+seen=visible(mid_build)
+f=writer();f.observe(event,9);commit(f)
+assert sql("postgres",f"SELECT min_build FROM ops.protocol_cursor_floor WHERE dataset_id='{DATASET}' AND generation={generation}")==str(mid_build),"the floor is the head of an hour ago"
+assert sql("postgres",f"SELECT count(*) FROM ops.protocol_builds WHERE build_id={old_build}")=="1","a checkpoint keeps the build"
+error(listing+"&cursor="+old["next_cursor"],409)
+items,cursor=mid["items"],mid["next_cursor"]
+while cursor:
+    page=get(listing+"&cursor="+cursor)
+    assert page["context"]["build_id"]==str(mid_build),page["context"]
+    items+=page["items"];cursor=page.get("next_cursor")
+assert [x["id"] for x in items]==[x["id"] for x in get("/api/v1/activity?order=block&scope=all&limit=200")["items"]]
+assert visible(mid_build)==seen and visible(int(get(listing)["context"]["build_id"]))==seen,"pruning removes nothing an admitted build reads"
+sql("postgres",f"DELETE FROM projection.protocol_checkpoints WHERE build_id={old_build}")
+check("cursors stay readable an hour after their build is replaced, then get 409 even if the build is kept")
+# Stream updates leave the replay window with a raised floor, and the newest update always stays.
 oldest=sql("postgres","SELECT min(revision) FROM ops.pulse_updates")
 sql("postgres",f"UPDATE ops.pulse_updates SET created_at=now()-interval '8 days' WHERE revision={oldest}")
 sync()
-assert sql("postgres",f"SELECT string_agg(build_id::text,',' ORDER BY build_id) FROM ops.protocol_builds WHERE build_id IN ({gone},{kept},{newest})")==f"{kept},{newest}","only the build superseded for an hour goes"
 assert int(sql("postgres","SELECT replay_floor FROM ops.active_dataset"))>int(oldest)
 assert int(sql("postgres","SELECT min(revision) FROM ops.pulse_updates"))>int(oldest)
 assert sql("postgres","SELECT count(*) FROM ops.pulse_updates")!="0"
-sql("postgres",f"DELETE FROM ops.protocol_builds WHERE build_id IN ({kept},{newest})")
-check("retention prunes uncited builds and updates past the replay window")
+check("retention prunes updates past the replay window")
 # One sidechain's records as typed tables from one build, in JSON and as a ZIP of CSVs.
 import csv,hashlib,io,zipfile
 data=get("/api/v1/sidechains/9/dataset?format=json")
