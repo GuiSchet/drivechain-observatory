@@ -50,6 +50,14 @@
 .term-tip strong { display: block; margin-bottom: 4px; color: var(--orange-strong); font-weight: 600; }
 .term:hover .term-tip, .term:focus-within .term-tip, .confidence:hover .term-tip, .confidence:focus .term-tip, .live-pill:hover .term-tip, .live-pill:focus .term-tip { display: block; }
 .live-pill .term-tip { bottom: auto; top: calc(100% + 10px); left: auto; right: 0; transform: none; }
+/* The pill itself never wraps; its tooltip must, or long lines run past the box. */
+.live-pill .term-tip { white-space: normal; overflow-wrap: anywhere; width: min(320px, calc(100vw - 32px)); box-sizing: border-box; }
+.pill-tip-reasons { margin: 0 0 10px; padding: 0 0 10px; border-bottom: 1px solid var(--line); list-style: none; color: var(--text); }
+.pill-tip-reasons li + li { margin-top: 4px; }
+.pill-tip-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.pill-tip-facts dt { color: var(--muted); }
+.pill-tip-facts dd { margin: 0; color: var(--text); }
+.pill-tip-facts .muted { display: block; color: var(--muted); font-size: 12px; }
 
 /* ---------- Lesson shell ---------- */
 .lesson-shell { width: min(1180px, calc(100% - 32px)); margin: 32px auto 80px; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 48px; align-items: start; }
