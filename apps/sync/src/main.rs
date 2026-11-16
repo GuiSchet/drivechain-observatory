@@ -291,6 +291,8 @@ async fn main() -> Result<()> {
                 match retention::prune(&destination, dataset_id).await {
                     Ok(pruned) if pruned != retention::Pruned::default() => {
                         tracing::info!(
+                            versions = pruned.versions,
+                            history = pruned.history,
                             builds = pruned.builds,
                             updates = pruned.updates,
                             "pruned sync bookkeeping"

@@ -10,6 +10,26 @@ use serde_json::{Value, json};
 use sqlx::{Connection, PgConnection, Row};
 use uuid::Uuid;
 
+/// Whether a re-derived block equals the version a reader of build $4 would see without it: the newest earlier
+/// version of that block ($1 dataset, $2 generation, $3 hash). Rows are compared field by field in SQL (jsonb
+/// equality, not a serialized form), matched by ordinal, so count and order count too. Absent and empty differ: with
+/// no earlier version nothing is "the same", so an empty first version is still written; and an empty result after a
+/// version with rows is written, because that empty version is what hides the earlier rows.
+pub(crate) const SAME_AS_VISIBLE_VERSION: &str = "WITH prev AS (
+        SELECT max(v.build_id) AS build_id FROM projection.protocol_block_versions v
+         WHERE v.dataset_id=$1 AND v.generation=$2 AND v.hash=$3 AND v.build_id<$4),
+    old AS (
+        SELECT p.ordinal,p.kind,p.entity_key,p.slot,p.data,p.quality,p.evidence,p.issue
+          FROM projection.protocol_history p, prev
+         WHERE p.dataset_id=$1 AND p.generation=$2 AND p.build_id=prev.build_id AND p.hash=$3),
+    new AS (
+        SELECT * FROM jsonb_to_recordset($5) AS r(ordinal integer,kind text,entity_key text,slot smallint,data jsonb,quality text,evidence jsonb,issue text))
+    SELECT (SELECT build_id FROM prev) IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM old FULL JOIN new ON new.ordinal=old.ordinal
+         WHERE old.ordinal IS NULL OR new.ordinal IS NULL
+            OR (old.kind,old.entity_key,old.slot,old.data,old.quality,old.evidence,old.issue)
+               IS DISTINCT FROM (new.kind,new.entity_key,new.slot,new.data,new.quality,new.evidence,new.issue))";
+
 async fn normalize_page(
     conn: &mut PgConnection,
     d: Uuid,
@@ -218,10 +238,22 @@ pub async fn advance(
                 .bind(d).bind(g).bind(&hash).bind(cut.events).fetch_all(&mut *tx).await?;
             let records = rows.iter().map(record).collect::<Result<Vec<_>>>()?;
             let changes = state.block(&hash, &parent, u32::try_from(height)?, &records, false)?;
-            sqlx::query("INSERT INTO projection.protocol_block_versions VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING").bind(d).bind(g).bind(&hash).bind(height).bind(build).execute(&mut *tx).await?;
             let changes:Vec<_>=changes.iter().enumerate().map(|(ordinal,c)|json!({"ordinal":ordinal,"kind":c.kind,"entity_key":c.key,"slot":c.slot,"data":c.data,"quality":c.quality,"evidence":c.evidence,"issue":c.issue})).collect();
-            sqlx::query("INSERT INTO projection.protocol_history SELECT $1,$2,$3,$4,$5,r.* FROM jsonb_to_recordset($6) AS r(ordinal integer,kind text,entity_key text,slot smallint,data jsonb,quality text,evidence jsonb,issue text) ON CONFLICT DO NOTHING")
-                .bind(d).bind(g).bind(build).bind(&hash).bind(height).bind(json!(changes)).execute(&mut *tx).await?;
+            // A replay re-derives blocks whose inputs did not change; a version identical to the one this build
+            // would otherwise read adds nothing but a copy. The state and the cursor still advance either way.
+            let same: bool = sqlx::query_scalar(SAME_AS_VISIBLE_VERSION)
+                .bind(d)
+                .bind(g)
+                .bind(&hash)
+                .bind(build)
+                .bind(json!(changes))
+                .fetch_one(&mut *tx)
+                .await?;
+            if !same {
+                sqlx::query("INSERT INTO projection.protocol_block_versions VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING").bind(d).bind(g).bind(&hash).bind(height).bind(build).execute(&mut *tx).await?;
+                sqlx::query("INSERT INTO projection.protocol_history SELECT $1,$2,$3,$4,$5,r.* FROM jsonb_to_recordset($6) AS r(ordinal integer,kind text,entity_key text,slot smallint,data jsonb,quality text,evidence jsonb,issue text) ON CONFLICT DO NOTHING")
+                    .bind(d).bind(g).bind(build).bind(&hash).bind(height).bind(json!(changes)).execute(&mut *tx).await?;
+            }
             if height % 1000 == 0 {
                 sqlx::query("INSERT INTO projection.protocol_checkpoints VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING").bind(d).bind(g).bind(build).bind(&hash).bind(height).bind(json!(state)).execute(&mut *tx).await?;
             }
@@ -250,7 +282,8 @@ pub async fn advance(
             });
             announce = !unchanged;
         }
-        sqlx::query("UPDATE ops.protocol_builds SET cursor_height=$2,state=$3,complete=$4 WHERE build_id=$1").bind(build).bind(at).bind(json!(state)).bind(complete).execute(&mut *tx).await?;
+        // published_at: when the build became the head, which is when the previous head's grace starts.
+        sqlx::query("UPDATE ops.protocol_builds SET cursor_height=$2,state=$3,complete=$4,published_at=CASE WHEN $4 THEN clock_timestamp() ELSE published_at END WHERE build_id=$1").bind(build).bind(at).bind(json!(state)).bind(complete).execute(&mut *tx).await?;
         if complete {
             sqlx::query("INSERT INTO projection.protocol_head VALUES($1,$2,$3) ON CONFLICT(dataset_id,generation) DO UPDATE SET build_id=excluded.build_id").bind(d).bind(g).bind(build).execute(&mut *tx).await?;
             sqlx::query("UPDATE ops.protocol_jobs SET dirty_height=NULL WHERE dataset_id=$1 AND generation=$2").bind(d).bind(g).execute(&mut *tx).await?;
@@ -295,7 +328,7 @@ pub async fn advance(
                     let mut activity = vec![
                         json!({"kind":"block_observed","hash":state.hash,"height":state.height,"animation_eligible":true}),
                     ];
-                    let changes=sqlx::query("SELECT kind,slot,data,evidence FROM projection.protocol_history WHERE dataset_id=$1 AND generation=$2 AND build_id=$3 AND hash=$4 AND kind IN ('deposit','bundle_outcome','bmm_commitment','bmm_confirmation') ORDER BY ordinal LIMIT 100").bind(d).bind(g).bind(build).bind(&state.hash).fetch_all(&mut *tx).await?;
+                    let changes=sqlx::query("SELECT kind,slot,data,evidence FROM projection.protocol_history WHERE dataset_id=$1 AND generation=$2 AND hash=$4 AND build_id=(SELECT max(v.build_id) FROM projection.protocol_block_versions v WHERE v.dataset_id=$1 AND v.generation=$2 AND v.hash=$4 AND v.build_id<=$3) AND kind IN ('deposit','bundle_outcome','bmm_commitment','bmm_confirmation') ORDER BY ordinal LIMIT 100").bind(d).bind(g).bind(build).bind(&state.hash).fetch_all(&mut *tx).await?;
                     for r in changes {
                         let data: Value = r.get("data");
                         // Block outcomes carry their state as {"Succeeded": ...}.

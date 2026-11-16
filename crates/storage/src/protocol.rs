@@ -62,8 +62,13 @@ pub(super) async fn context(
     context_at(tx, d, None).await
 }
 /// The context of the published head, or of an earlier build of the same
-/// generation that a cursor pinned. Builds are never deleted and projection
-/// rows are versioned by build, so a pinned reader keeps its old results.
+/// generation that a cursor pinned. Projection rows are versioned by build, so
+/// a pinned reader keeps its old results while its build is admitted: at or
+/// above the generation's cursor floor. The sync raises the floor to the build
+/// that was the head an hour ago and, in the same transaction, prunes block
+/// versions only builds below it could read, so a build below the floor is
+/// refused (409) even if it still exists; this whole read is one REPEATABLE
+/// READ snapshot, so it sees the floor and the rows it guards together.
 async fn context_at(
     tx: &mut Transaction<'_, Postgres>,
     d: &Dataset,
@@ -73,7 +78,7 @@ async fn context_at(
     let branch = blocks::branch(tx, d.dataset_id).await?;
     let head = match pinned {
         None => sqlx::query("SELECT b.* FROM projection.protocol_head h JOIN ops.protocol_builds b USING(build_id) WHERE h.dataset_id=$1 AND h.generation=$2").bind(d.dataset_id).bind(meta.projection_generation).fetch_optional(&mut **tx).await?,
-        Some(build) => Some(sqlx::query("SELECT b.* FROM ops.protocol_builds b WHERE b.dataset_id=$1 AND b.generation=$2 AND b.build_id=$3 AND b.build_id<=(SELECT h.build_id FROM projection.protocol_head h WHERE h.dataset_id=$1 AND h.generation=$2)").bind(d.dataset_id).bind(meta.projection_generation).bind(build).fetch_optional(&mut **tx).await?.ok_or(StorageError::StaleCursor)?),
+        Some(build) => Some(sqlx::query("SELECT b.* FROM ops.protocol_builds b WHERE b.dataset_id=$1 AND b.generation=$2 AND b.build_id=$3 AND b.build_id<=(SELECT h.build_id FROM projection.protocol_head h WHERE h.dataset_id=$1 AND h.generation=$2) AND b.build_id>=coalesce((SELECT f.min_build FROM ops.protocol_cursor_floor f WHERE f.dataset_id=$1 AND f.generation=$2),0)").bind(d.dataset_id).bind(meta.projection_generation).bind(build).fetch_optional(&mut **tx).await?.ok_or(StorageError::StaleCursor)?),
     };
     let mut state = "awaiting_data".to_owned();
     let mut build_id = None;

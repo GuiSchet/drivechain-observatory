@@ -26,6 +26,7 @@ use tracing_subscriber::EnvFilter;
 use utoipa::OpenApi;
 use uuid::Uuid;
 mod protocol;
+mod single_flight;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -357,6 +358,9 @@ async fn stream(
     let mut updates = state.updates.subscribe();
     let pool = state.pool;
     let output = async_stream::stream! {
+        // Send a byte right away: a proxy that compresses or buffers holds the response headers until the first body
+        // byte, and EventSource only reports the connection open once they arrive (otherwise ~10 s, the keep-alive).
+        yield Ok(Event::default().comment("connected"));
         let window=match pulse_storage::stream_window(&pool).await {
             Ok(window)=>window,
             Err(_)=>{yield Ok(reset_event("local_unavailable"));return;}

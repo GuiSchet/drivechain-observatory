@@ -506,21 +506,14 @@ pub async fn sidechain_dataset(
     Ok(response)
 }
 
-/// Stats read as many rows as a dataset; pages ask for them often, so a result is reused for a few seconds.
+/// Stats read as many rows as a dataset; pages ask for them often, so a result is reused for a few seconds. Only a
+/// few seconds: the deposit windows (24 h, 7 and 30 days) move with the clock even when the chain does not.
 const STATS_TTL: std::time::Duration = std::time::Duration::from_secs(15);
 type StatsKey = (Option<Uuid>, i16, Option<u32>);
-type StatsEntry = (std::time::Instant, std::sync::Arc<SidechainStats>);
-static STATS_CACHE: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<StatsKey, StatsEntry>>,
-> = std::sync::LazyLock::new(Default::default);
+static STATS: std::sync::LazyLock<crate::single_flight::TtlSingleFlight<StatsKey, SidechainStats>> =
+    std::sync::LazyLock::new(|| crate::single_flight::TtlSingleFlight::new(STATS_TTL));
+/// At most two different stats computations at once (each reads a dataset's worth of rows).
 static STATS_BUILDS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
-fn cached_stats(key: &StatsKey) -> Option<std::sync::Arc<SidechainStats>> {
-    let cache = STATS_CACHE.lock().ok()?;
-    cache
-        .get(key)
-        .filter(|(at, _)| at.elapsed() < STATS_TTL)
-        .map(|(_, v)| v.clone())
-}
 #[utoipa::path(get,path="/api/v1/sidechains/{slot}/stats",params(("slot"=i16,Path,description="BIP300 slot, 0 to 255"),pulse_storage::stats::StatsQuery),responses((status=200,body=SidechainStats),(status=400,body=ApiError)),tag="pulse")]
 pub async fn sidechain_stats(
     State(s): State<AppState>,
@@ -528,22 +521,15 @@ pub async fn sidechain_stats(
     PublicQuery(q): PublicQuery<pulse_storage::stats::StatsQuery>,
 ) -> Result<Json<std::sync::Arc<SidechainStats>>, AppError> {
     let key = (q.dataset, slot, q.window_blocks);
-    if let Some(hit) = cached_stats(&key) {
-        return Ok(Json(hit));
-    }
-    let _permit = STATS_BUILDS
-        .acquire()
-        .await
-        .map_err(|_| StorageError::InvalidProjection)?;
-    // Another request may have computed it while this one waited.
-    if let Some(hit) = cached_stats(&key) {
-        return Ok(Json(hit));
-    }
-    let stats = std::sync::Arc::new(pulse_storage::stats::sidechain(&s.pool, slot, q).await?);
-    if let Ok(mut cache) = STATS_CACHE.lock() {
-        cache.retain(|_, (at, _)| at.elapsed() < STATS_TTL);
-        cache.insert(key, (std::time::Instant::now(), stats.clone()));
-    }
+    let stats = STATS
+        .get_or_compute(key, || async {
+            let _permit = STATS_BUILDS
+                .acquire()
+                .await
+                .map_err(|_| StorageError::InvalidProjection)?;
+            pulse_storage::stats::sidechain(&s.pool, slot, q).await
+        })
+        .await?;
     Ok(Json(stats))
 }
 #[utoipa::path(get,path="/api/v1/network",params(pulse_storage::stats::NetworkQuery),responses((status=200,body=NetworkResponse),(status=400,body=ApiError)),tag="pulse")]
