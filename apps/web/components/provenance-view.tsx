@@ -53,7 +53,10 @@ export function RunView({ id, initial }: { id: string; initial: ProtocolPage | n
       <section className="panel compact-panel">
         <h2>Software it ran</h2>
         <dl className="facts">
-          <dt>Enforcer</dt><dd className="hash">{typeof d.enforcer_commit === "string" ? <a className="text-link" href={reviewed ? references.enforcer.href : `https://github.com/LayerTwo-Labs/bip300301_enforcer/commit/${d.enforcer_commit}`} target="_blank" rel="noopener noreferrer">{commit(d.enforcer_commit)}</a> : "unknown"}{reviewed && " · the build these lessons were checked against"}</dd>
+          <dt>Enforcer</dt><dd className="hash">{typeof d.enforcer_commit === "string" ? (reviewed || /^[0-9a-f]{7,40}$/i.test(d.enforcer_commit)
+            // Only a commit id goes into the GitHub path; anything else from the API is shown as text, not linked.
+            ? <a className="text-link" href={reviewed ? references.enforcer.href : `https://github.com/LayerTwo-Labs/bip300301_enforcer/commit/${d.enforcer_commit}`} target="_blank" rel="noopener noreferrer">{commit(d.enforcer_commit)}</a>
+            : <span>{commit(d.enforcer_commit)}</span>) : "unknown"}{reviewed && " · the build these lessons were checked against"}</dd>
           <dt>{net.name} node</dt><dd className="hash">{commit(d.node_commit)}</dd>
           <dt>Monitor</dt><dd className="hash">{commit(d.monitor_commit)}</dd>
           <dt>Record format</dt><dd>contract v{String(d.event_contract_version ?? "?")}</dd>
