@@ -32,6 +32,8 @@ probe=$(compose exec -T postgres psql -XAt -U pulse_admin -d drivechain_pulse -c
 [ "$probe" = persisted ] || { echo 'PostgreSQL data did not survive container replacement' >&2; exit 1; }
 compose exec -T postgres psql -U pulse_admin -d drivechain_pulse -c 'DROP TABLE public.volume_probe' >/dev/null
 echo 'PASS PostgreSQL18 named-volume persistence across container replacement'
+# As on a database initialised before 0017: the migration below must turn JIT off for the API role.
+compose exec -T postgres psql -U pulse_admin -d drivechain_pulse -v ON_ERROR_STOP=1 -c 'ALTER ROLE pulse_api RESET jit' >/dev/null
 PULSE_DATABASE_URL='postgres://pulse_admin:change-me-admin@127.0.0.1:55433/drivechain_pulse' "$build_dir/debug/pulse-api" migrate-only
 # Block-version dedup and cursor-floor pruning, against this migrated database (each test uses its own dataset).
 PULSE_TEST_DATABASE_URL='postgres://pulse_admin:change-me-admin@127.0.0.1:55433/drivechain_pulse' cargo test -p pulse-sync --offline --locked -- retention::db:: --test-threads=1

@@ -58,6 +58,10 @@ def commit(f,n=9):
 sync("--event-page-bytes","1","--max-pages-per-cycle","1000")
 assert sql("postgres","SELECT cursor_value FROM ops.sync_cursors WHERE stream='source_events'")==sql("monitor_fixture","SELECT max(id) FROM event")
 check("byte-bounded event pages import oversized events one at a time")
+# verify-local.sh resets the setting before migrating, as on a database created before 0017: the migration sets it.
+assert sql("postgres","SHOW jit",user="pulse_api")=="off"
+assert sql("postgres","SHOW jit")=="on","only the API role turns JIT off"
+check("the API role runs without JIT (migration 0017)")
 sync("--batch-size","2","--max-pages-per-cycle","1")
 settle()
 # Node raw blocks are imported without their body; both source hashes stay verbatim.
