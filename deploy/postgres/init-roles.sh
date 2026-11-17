@@ -19,6 +19,8 @@ ALTER ROLE pulse_sync SET idle_in_transaction_session_timeout = '60s';
 ALTER ROLE pulse_api SET default_transaction_read_only = on;
 ALTER ROLE pulse_api SET statement_timeout = '15s';
 ALTER ROLE pulse_api SET idle_in_transaction_session_timeout = '15s';
+-- The API's queries are short; compiling them costs more than it saves (migrations/0017_api_no_jit.sql).
+ALTER ROLE pulse_api SET jit = off;
 
 CREATE SCHEMA IF NOT EXISTS ingest;
 CREATE SCHEMA IF NOT EXISTS projection;
