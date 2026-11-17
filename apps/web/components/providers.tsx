@@ -98,12 +98,22 @@ export function Providers({ children }: { children: ReactNode }) {
     let stopped = false;
     let source: EventSource | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
     const connect = () => {
       if (stopped) return;
       source = new EventSource(browserApiBase + "/api/v1/stream");
       // A reconnection resumes from Last-Event-ID, so the server replays what this tab missed.
-      source.onopen = () => setState("connected");
-      source.onerror = () => setState("reconnecting");
+      source.onopen = () => { failures = 0; setState("connected"); };
+      source.onerror = () => {
+        setState("reconnecting");
+        // EventSource retries a dropped connection by itself, but an error response (a 502 while the API restarts,
+        // a 429 when too many streams are open) closes it for good. Start over, backing off up to a minute.
+        if (source?.readyState !== EventSource.CLOSED || stopped) return;
+        failures += 1;
+        const delay = Math.min(60_000, 2_000 * 2 ** (failures - 1)) * (0.75 + Math.random() / 2);
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(connect, delay);
+      };
       source.addEventListener("update", (message) => {
         try {
           const data = JSON.parse((message as MessageEvent<string>).data) as { changed?: unknown; activity?: unknown; dataset_id?:string; projection_generation?:string; revision?:string };

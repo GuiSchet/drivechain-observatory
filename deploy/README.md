@@ -102,6 +102,13 @@ destination before starting sync/API. Allow catch-up to
 finish before treating freshness as established. Use an Observatory database backup
 before upgrades; restore it to a separate database for rollback.
 
+The API limits each client (one IPv4 address or IPv6 /64, taken from the
+rightmost `X-Forwarded-For` entry when the peer is the proxy): a token bucket of
+`PULSE_RATE_BURST` requests (120) refilled at `PULSE_RATE_PER_SECOND` (10), and
+`PULSE_STREAMS_PER_CLIENT` open live streams (8) out of `PULSE_STREAMS_MAX` (500).
+Both answer 429 with `Retry-After`; the site reconnects a refused stream with
+backoff.
+
 `PULSE_STALE_AFTER_SECONDS` defaults to 30. Worker freshness is based on the last
 successful poll, not block cadence. BMM shows the latest occurrence from the
 current run. A new run does not inherit the previous run’s current auction.

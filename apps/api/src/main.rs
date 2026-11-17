@@ -25,6 +25,7 @@ use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use utoipa::OpenApi;
 use uuid::Uuid;
+mod limits;
 mod protocol;
 mod single_flight;
 
@@ -59,6 +60,22 @@ struct Args {
 
     #[arg(long, env = "PULSE_STALE_AFTER_SECONDS", default_value_t = 30)]
     stale_after_seconds: i64,
+
+    /// Requests per second each client may sustain (one IPv4 address or IPv6 /64), streams included.
+    #[arg(long, env = "PULSE_RATE_PER_SECOND", default_value_t = 10)]
+    rate_per_second: u32,
+
+    /// Requests a client may make at once before the rate applies.
+    #[arg(long, env = "PULSE_RATE_BURST", default_value_t = 120)]
+    rate_burst: u32,
+
+    /// Live streams open at once, in total.
+    #[arg(long, env = "PULSE_STREAMS_MAX", default_value_t = 500)]
+    streams_max: usize,
+
+    /// Live streams open at once from one client (one per tab).
+    #[arg(long, env = "PULSE_STREAMS_PER_CLIENT", default_value_t = 8)]
+    streams_per_client: u32,
 }
 
 #[derive(Debug, Subcommand)]
@@ -74,6 +91,7 @@ struct AppState {
     native_symbol: String,
     native_decimals: u8,
     stale_after_seconds: i64,
+    streams: std::sync::Arc<limits::StreamSlots>,
 }
 
 #[derive(Clone)]
@@ -136,7 +154,12 @@ async fn main() -> Result<()> {
         native_symbol: args.native_symbol,
         native_decimals: args.native_decimals,
         stale_after_seconds: args.stale_after_seconds,
+        streams: limits::StreamSlots::new(args.streams_max, args.streams_per_client),
     };
+    let rate = std::sync::Arc::new(limits::RateLimiter::new(
+        args.rate_per_second,
+        args.rate_burst,
+    ));
     let cors = CorsLayer::new()
         .allow_origin(args.cors_origin)
         .allow_methods([Method::GET, Method::HEAD, Method::OPTIONS])
@@ -172,6 +195,10 @@ async fn main() -> Result<()> {
         ));
     let app = timed_routes
         .route("/api/v1/stream", get(stream))
+        .layer(axum::middleware::from_fn_with_state(
+            rate,
+            limits::rate_limit,
+        ))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -180,10 +207,13 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("binding API listener to {}", args.bind))?;
     info!(address = %args.bind, "Drivechain - Observatory API listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("serving Drivechain - Observatory API")
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("serving Drivechain - Observatory API")
 }
 
 #[utoipa::path(get, path = "/health/live", responses((status = 200)))]
@@ -345,8 +375,14 @@ struct StreamQuery {
 async fn stream(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::Extension(client): axum::Extension<limits::Client>,
     Query(query): Query<StreamQuery>,
-) -> Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>> {
+) -> Response {
+    // Held for the stream's whole life and freed when it ends or the client leaves.
+    let Some(slot) = state.streams.acquire(client) else {
+        warn!(?client, "live stream refused: too many open");
+        return limits::too_many("Too many live streams open", Duration::from_secs(30));
+    };
     let requested = headers
         .get("last-event-id")
         .and_then(|v| v.to_str().ok())
@@ -358,9 +394,10 @@ async fn stream(
     let mut updates = state.updates.subscribe();
     let pool = state.pool;
     let output = async_stream::stream! {
+        let _slot = slot;
         // Send a byte right away: a proxy that compresses or buffers holds the response headers until the first body
         // byte, and EventSource only reports the connection open once they arrive (otherwise ~10 s, the keep-alive).
-        yield Ok(Event::default().comment("connected"));
+        yield Ok::<_, Infallible>(Event::default().comment("connected"));
         let window=match pulse_storage::stream_window(&pool).await {
             Ok(window)=>window,
             Err(_)=>{yield Ok(reset_event("local_unavailable"));return;}
@@ -409,7 +446,9 @@ async fn stream(
             }
         }
     };
-    Sse::new(output).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
+    Sse::new(output)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
+        .into_response()
 }
 fn reset_event(reason: &str) -> Event {
     Event::default().event("reset_required").id("").data(reason)
