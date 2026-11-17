@@ -2,7 +2,9 @@
 //! request, and a cap on open live streams (each one costs a replay and holds a connection for hours).
 //!
 //! The limits are generous for a person browsing: a sidechain page opens ~15 requests at once and a few more per
-//! block. They exist to bound one client, not to shape normal traffic.
+//! block, and the browser suite, one client clicking through pages faster than anyone would, peaks at 45 requests in
+//! a second and 276 in ten. Several people can also share one address (carrier NAT). They exist to bound one
+//! client, not to shape normal traffic.
 
 use std::{
     collections::HashMap,

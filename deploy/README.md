@@ -104,7 +104,7 @@ before upgrades; restore it to a separate database for rollback.
 
 The API limits each client (one IPv4 address or IPv6 /64, taken from the
 rightmost `X-Forwarded-For` entry when the peer is the proxy): a token bucket of
-`PULSE_RATE_BURST` requests (120) refilled at `PULSE_RATE_PER_SECOND` (10), and
+`PULSE_RATE_BURST` requests (300) refilled at `PULSE_RATE_PER_SECOND` (30), and
 `PULSE_STREAMS_PER_CLIENT` open live streams (8) out of `PULSE_STREAMS_MAX` (500).
 Both answer 429 with `Retry-After`; the site reconnects a refused stream with
 backoff.
