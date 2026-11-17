@@ -62,11 +62,11 @@ struct Args {
     stale_after_seconds: i64,
 
     /// Requests per second each client may sustain (one IPv4 address or IPv6 /64), streams included.
-    #[arg(long, env = "PULSE_RATE_PER_SECOND", default_value_t = 10)]
+    #[arg(long, env = "PULSE_RATE_PER_SECOND", default_value_t = 30)]
     rate_per_second: u32,
 
     /// Requests a client may make at once before the rate applies.
-    #[arg(long, env = "PULSE_RATE_BURST", default_value_t = 120)]
+    #[arg(long, env = "PULSE_RATE_BURST", default_value_t = 300)]
     rate_burst: u32,
 
     /// Live streams open at once, in total.
