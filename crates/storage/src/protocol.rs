@@ -1088,23 +1088,41 @@ async fn membership(
 ) -> Result<(), StorageError> {
     let hashes: Vec<_> = items.iter().filter_map(|i| i.hash.as_deref()).collect();
     let rows=sqlx::query("SELECT h.hash,m.hash IS NOT NULL AS selected FROM projection.chain_headers h LEFT JOIN projection.chain_members m USING(dataset_id,generation,hash) WHERE h.dataset_id=$1 AND h.generation=$2 AND h.hash=ANY($3)").bind(c.meta.dataset_id).bind(c.meta.projection_generation).bind(hashes).fetch_all(&mut **tx).await?;
+    // At most one row per hash (chain_headers' key, chain_members' unique hash). A map keeps this linear: a scan
+    // per item cost seconds for a slot with thousands of commitment readings.
+    let selected: std::collections::HashMap<String, bool> = rows
+        .iter()
+        .map(|r| (r.get("hash"), r.get("selected")))
+        .collect();
     for i in items {
-        i.membership = match i.hash.as_ref() {
-            None => "not_applicable",
-            Some(hash) => match rows.iter().find(|r| r.get::<String, _>("hash") == *hash) {
-                Some(r) if r.get::<bool, _>("selected") => "selected",
-                Some(_) => "alternative",
-                None => "unknown",
-            },
-        }
-        .into();
+        i.membership = membership_of(i.hash.as_deref(), &selected).into();
     }
     Ok(())
+}
+fn membership_of(
+    hash: Option<&str>,
+    selected: &std::collections::HashMap<String, bool>,
+) -> &'static str {
+    match hash.map(|h| selected.get(h)) {
+        None => "not_applicable",
+        Some(Some(true)) => "selected",
+        Some(Some(false)) => "alternative",
+        Some(None) => "unknown",
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::reversed_id;
+    use super::{membership_of, reversed_id};
+    #[test]
+    fn membership_reads_the_selected_flag_of_each_hash() {
+        let selected =
+            std::collections::HashMap::from([("aa".to_owned(), true), ("bb".to_owned(), false)]);
+        assert_eq!(membership_of(None, &selected), "not_applicable");
+        assert_eq!(membership_of(Some("aa"), &selected), "selected");
+        assert_eq!(membership_of(Some("bb"), &selected), "alternative");
+        assert_eq!(membership_of(Some("cc"), &selected), "unknown");
+    }
     #[test]
     fn m6_ids_reverse_only_when_complete() {
         // Thunder's pending bundle: M3 (shown) order and transaction-id (stored) order.
